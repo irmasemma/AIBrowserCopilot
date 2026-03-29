@@ -1,0 +1,11 @@
+node_modules/
+dist/
+build/
+*.log
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+.env
+.env.local
+test-results/
+packages/extension/.wxt/

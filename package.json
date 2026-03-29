@@ -1,0 +1,20 @@
+{
+  "name": "ai-browser-copilot",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "build:extension": "npm run build -w packages/extension",
+    "build:native-host": "npm run build -w packages/native-host",
+    "dev": "npm run dev -w packages/extension",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "playwright": "^1.58.2"
+  }
+}

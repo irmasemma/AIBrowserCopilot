@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="description" content="Test page for AI Browser CoPilot E2E tests" />
+  <meta property="og:title" content="OG Test Title" />
+  <meta property="og:image" content="https://example.com/og-image.png" />
+  <meta property="og:description" content="OG test description" />
+  <link rel="icon" href="https://example.com/favicon.ico" />
+  <title>CoPilot Test Page</title>
+</head>
+<body>
+  <h1 id="main-heading">Test Page Content</h1>
+  <p id="test-paragraph">This is a test paragraph for content extraction.</p>
+
+  <form id="test-form">
+    <input type="text" id="name-input" name="name" placeholder="Enter name" />
+    <input type="email" id="email-input" name="email" placeholder="Enter email" />
+    <textarea id="notes-input" name="notes" placeholder="Enter notes"></textarea>
+    <button type="submit" id="submit-btn">Submit Form</button>
+  </form>
+
+  <table id="test-table">
+    <thead>
+      <tr><th>Name</th><th>Age</th><th>City</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Alice</td><td>30</td><td>New York</td></tr>
+      <tr><td>Bob</td><td>25</td><td>London</td></tr>
+      <tr><td>Charlie</td><td>35</td><td>Tokyo</td></tr>
+    </tbody>
+  </table>
+
+  <a href="https://example.com" id="test-link">Example Link</a>
+  <button id="click-target" onclick="document.getElementById('click-result').textContent='CLICKED'">Click Me</button>
+  <span id="click-result"></span>
+</body>
+</html>
