@@ -31,7 +31,7 @@ export const UpgradePrompt: FunctionalComponent<UpgradePromptProps> = ({ toolNam
             class="text-xs font-medium text-white bg-brand-primary px-3 py-1 rounded hover:bg-brand-primary-dark"
             onClick={() => {
               // Open external payment page — will be wired in Epic 6
-              chrome.tabs.create({ url: 'https://example.com/upgrade' });
+              chrome.tabs.create({ url: 'https://github.com/irmasemma/AIBrowserCopilot/wiki/Pro' });
             }}
           >
             Upgrade

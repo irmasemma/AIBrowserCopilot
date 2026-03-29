@@ -87,7 +87,7 @@ const App = () => {
         <div class="border-t border-neutral-200 px-3 py-2 bg-white">
           <button
             class="w-full text-sm font-medium text-white bg-brand-primary py-2 rounded hover:bg-brand-primary-dark"
-            onClick={() => chrome.tabs.create({ url: 'https://example.com/upgrade' })}
+            onClick={() => chrome.tabs.create({ url: 'https://github.com/irmasemma/AIBrowserCopilot/wiki/Pro' })}
           >
             Upgrade to Pro — $7/mo
           </button>
