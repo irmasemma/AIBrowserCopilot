@@ -21,20 +21,35 @@ const app = document.getElementById('app')!;
 app.appendChild(statusRow);
 app.appendChild(btn);
 
-chrome.storage.local.get('connectionState', (data: Record<string, unknown>) => {
-  const state = (data.connectionState as { state?: string } | undefined)?.state ?? 'setup-needed';
+const updateStatus = (state: string) => {
   switch (state) {
     case 'connected':
       dot.style.background = '#16A34A';
       label.textContent = 'Connected';
       break;
     case 'disconnected':
+      dot.style.background = '#EF4444';
       label.textContent = 'Disconnected';
       break;
     case 'reconnecting':
+      dot.style.background = '#F59E0B';
       label.textContent = 'Reconnecting...';
       break;
     default:
+      dot.style.background = '#9CA3AF';
       label.textContent = 'Setup Required';
+  }
+};
+
+// Initial read
+chrome.storage.local.get('connectionState', (data: Record<string, unknown>) => {
+  const state = (data.connectionState as { state?: string } | undefined)?.state ?? 'setup-needed';
+  updateStatus(state);
+});
+
+// Listen for changes so popup stays in sync
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.connectionState?.newValue) {
+    updateStatus(changes.connectionState.newValue.state ?? 'setup-needed');
   }
 });
