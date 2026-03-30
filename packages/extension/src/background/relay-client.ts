@@ -110,5 +110,13 @@ const scheduleReconnect = (handler: ToolHandler): void => {
   }, 2000);
 };
 
+export const resetRelay = (): void => {
+  reconnectAttempts = 0;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+};
+
 export const isRelayConnected = (): boolean =>
   socket !== null && socket.readyState === WebSocket.OPEN;
