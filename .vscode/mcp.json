@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "ai-browser-copilot": {
+      "command": "node",
+      "args": [
+        "%LOCALAPPDATA%\\ai-browser-copilot/dist/index.js"
+      ]
+    }
+  }
+}

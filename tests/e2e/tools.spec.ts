@@ -619,7 +619,7 @@ test.describe('Setup wizard', () => {
     const body = await page.textContent('body');
     expect(body).toContain('Setup Assistant');
     expect(body).toContain('Install Browser Bridge');
-    expect(body).toContain('Configure AI App');
+    expect(body).toContain('Configure Your AI App');
     expect(body).toContain('Test Connection');
     expect(body).toContain('Step 1');
 
@@ -646,7 +646,7 @@ test.describe('Setup wizard', () => {
     expect(downloadBtn).toBeGreaterThan(0);
 
     // Check for "I've installed it" continue link
-    const continueLink = await page.getByText("I've installed it").count();
+    const continueLink = await page.getByText("I've downloaded it").count();
     expect(continueLink).toBeGreaterThan(0);
 
     await page.evaluate(() => chrome.storage.local.clear());

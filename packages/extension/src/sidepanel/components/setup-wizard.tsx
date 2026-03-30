@@ -2,7 +2,7 @@ import type { FunctionalComponent } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import { SetupStep } from './setup-step.js';
 import { ErrorCard } from './error-card.js';
-import { generateClaudeConfig, getClaudeConfigPath, getNativeHostInstallDir } from '../../setup/config-generator.js';
+import { generateMcpConfig, getConfigInstructions, getNativeHostInstallDir } from '../../setup/config-generator.js';
 import { trackSetupEvent } from '../../setup/telemetry.js';
 
 interface SetupWizardProps {
@@ -24,10 +24,11 @@ export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete 
   const [copied, setCopied] = useState(false);
   const [email, setEmail] = useState('');
 
+  const configOptions = getConfigInstructions();
+
   useEffect(() => {
     trackSetupEvent('setup_started');
-    const installDir = getNativeHostInstallDir();
-    const config = generateClaudeConfig(`${installDir}/dist/index.js`);
+    const config = generateMcpConfig();
     setConfigJson(JSON.stringify(config, null, 2));
   }, []);
 
@@ -48,14 +49,13 @@ export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete 
 
   const handleTestConnection = async () => {
     trackSetupEvent('first_connection');
-    // Check if relay port is set (indicates native host is running)
     const data = await chrome.storage.local.get('connectionState');
     const state = data.connectionState;
     if (state?.state === 'connected') {
       completeStep(3);
       onComplete();
     } else {
-      setError('Connection test failed. Make sure Claude Desktop is running and has loaded the MCP config.');
+      setError('Connection test failed. Make sure your AI app is running and has loaded the MCP config.');
     }
   };
 
@@ -72,14 +72,14 @@ export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete 
     <div class="py-4">
       <div class="px-3 mb-4">
         <h2 class="text-lg font-semibold text-neutral-900">Setup Assistant</h2>
-        <p class="text-xs text-neutral-500">Connect your browser to your AI assistant</p>
+        <p class="text-xs text-neutral-500">Connect your browser to your AI assistant (VS Code, Cursor, or Claude Desktop)</p>
       </div>
 
       {/* Step 1: Install Native Host */}
       <SetupStep step={1} totalSteps={3} title="Install Browser Bridge" status={getStepStatus(1)}>
         <div class="space-y-2">
           <p class="text-xs text-neutral-600">
-            Download the browser bridge for your platform. This small program runs locally and connects your browser to your AI.
+            Download the browser bridge. This small program runs locally on your machine and lets your AI read your browser.
           </p>
           <a
             href={GITHUB_RELEASES_URL}
@@ -90,27 +90,34 @@ export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete 
           >
             Download Bridge
           </a>
-          <p class="text-xs text-neutral-400">
-            Extract to: <code class="bg-neutral-100 px-1 rounded">{getNativeHostInstallDir()}</code>
-          </p>
+          <div class="text-xs text-neutral-400 space-y-1">
+            <p>Save it to: <code class="bg-neutral-100 px-1 rounded">{getNativeHostInstallDir()}</code></p>
+            <p>Windows users: you may see a SmartScreen warning — click "More info" → "Run anyway"</p>
+          </div>
           <button
             class="text-xs text-brand-primary hover:underline"
             onClick={() => { trackSetupEvent('bridge_registered'); completeStep(1); }}
           >
-            I've installed it → Continue
+            I've downloaded it → Continue
           </button>
         </div>
       </SetupStep>
 
-      {/* Step 2: Configure Claude Desktop */}
-      <SetupStep step={2} totalSteps={3} title="Configure AI App" status={getStepStatus(2)}>
-        <div class="space-y-2">
+      {/* Step 2: Configure AI App */}
+      <SetupStep step={2} totalSteps={3} title="Configure Your AI App" status={getStepStatus(2)}>
+        <div class="space-y-3">
           <p class="text-xs text-neutral-600">
-            Add this to your Claude Desktop config file:
+            Add the following MCP config to your AI app. Pick the one you use:
           </p>
-          <p class="text-xs text-neutral-400">
-            File: <code class="bg-neutral-100 px-1 rounded">{getClaudeConfigPath()}</code>
-          </p>
+
+          {configOptions.map((opt) => (
+            <div key={opt.app} class="text-xs">
+              <div class="font-medium text-neutral-700">{opt.app}</div>
+              <div class="text-neutral-400">{opt.instructions}</div>
+              <div class="text-neutral-400">Path: <code class="bg-neutral-100 px-1 rounded">{opt.path}</code></div>
+            </div>
+          ))}
+
           <div class="relative">
             <pre class="text-xs bg-neutral-100 p-2 rounded overflow-x-auto max-h-32">{configJson}</pre>
             <button
@@ -120,14 +127,15 @@ export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete 
               {copied ? '✓ Copied' : 'Copy'}
             </button>
           </div>
+
           <p class="text-xs text-neutral-400">
-            Restart Claude Desktop after saving the config.
+            After saving, restart your AI app to load the new config.
           </p>
           <button
             class="text-xs text-brand-primary hover:underline"
             onClick={() => { trackSetupEvent('ai_host_detected'); completeStep(2); }}
           >
-            Done — I've updated the config → Continue
+            Done — I've added the config → Continue
           </button>
         </div>
       </SetupStep>
@@ -136,7 +144,7 @@ export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete 
       <SetupStep step={3} totalSteps={3} title="Test Connection" status={getStepStatus(3)}>
         <div class="space-y-2">
           <p class="text-xs text-neutral-600">
-            Let's verify everything is connected. Make sure Claude Desktop is running.
+            Let's verify everything is connected. Make sure your AI app (VS Code, Cursor, or Claude Desktop) is running.
           </p>
           <button
             class="text-xs font-medium text-white bg-brand-primary px-3 py-1.5 rounded hover:bg-brand-primary-dark"
