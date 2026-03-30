@@ -12,6 +12,8 @@ const generateId = (): string => {
 };
 
 let port: chrome.runtime.Port | null = null;
+let connectAttempts = 0;
+const MAX_CONNECT_ATTEMPTS = 3;
 const pendingRequests = new Map<string, PendingRequest>();
 
 const persistConnectionState = async (info: ConnectionInfo): Promise<void> => {
@@ -52,6 +54,17 @@ const handleDisconnect = (): void => {
     pendingRequests.delete(id);
   }
 
+  connectAttempts++;
+
+  if (connectAttempts >= MAX_CONNECT_ATTEMPTS) {
+    persistConnectionState({
+      state: 'setup-needed',
+      lastConnected: null,
+      error: 'Native host not found. Run: npx ai-browser-copilot-setup',
+    });
+    return;
+  }
+
   persistConnectionState({
     state: 'reconnecting',
     lastConnected: null,
@@ -69,6 +82,8 @@ export const connect = (): void => {
     port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
     port.onMessage.addListener(handleMessage);
     port.onDisconnect.addListener(handleDisconnect);
+
+    connectAttempts = 0; // Reset on successful connection
 
     persistConnectionState({
       state: 'connected',

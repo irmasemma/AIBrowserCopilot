@@ -14,18 +14,16 @@ interface ToolResponse {
 
 type ToolHandler = (tool: string, params: Record<string, unknown>) => Promise<unknown>;
 
+const RELAY_PORT = 7483; // Fixed port — matches native host
+
 let socket: WebSocket | null = null;
 let toolHandler: ToolHandler | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 3;
 
 const persistConnectionState = async (info: ConnectionInfo): Promise<void> => {
   await chrome.storage.local.set({ connectionState: info });
-};
-
-const getRelayPort = async (): Promise<number | null> => {
-  // Read port from well-known storage key (set during setup)
-  const data = await chrome.storage.local.get('relayPort');
-  return data.relayPort ?? null;
 };
 
 const handleMessage = (event: MessageEvent) => {
@@ -51,20 +49,12 @@ const handleMessage = (event: MessageEvent) => {
 
 export const connectToRelay = async (handler: ToolHandler): Promise<void> => {
   toolHandler = handler;
-  const port = await getRelayPort();
-  if (!port) {
-    await persistConnectionState({
-      state: 'setup-needed',
-      lastConnected: null,
-      error: 'Relay port not configured. Run setup assistant.',
-    });
-    return;
-  }
 
   try {
-    socket = new WebSocket(`ws://127.0.0.1:${port}`);
+    socket = new WebSocket(`ws://127.0.0.1:${RELAY_PORT}`);
 
     socket.onopen = () => {
+      reconnectAttempts = 0; // Reset on successful connection
       persistConnectionState({
         state: 'connected',
         lastConnected: Date.now(),
@@ -80,6 +70,17 @@ export const connectToRelay = async (handler: ToolHandler): Promise<void> => {
 
     socket.onclose = () => {
       socket = null;
+      reconnectAttempts++;
+
+      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        persistConnectionState({
+          state: 'setup-needed',
+          lastConnected: null,
+          error: 'Native host not found. Run: npx ai-browser-copilot-setup',
+        });
+        return;
+      }
+
       persistConnectionState({
         state: 'reconnecting',
         lastConnected: null,
