@@ -1,5 +1,7 @@
 import { NATIVE_HOST_NAME } from '../shared/constants.js';
 
+const BINARY_PREFIX = 'ai-browser-copilot';
+
 interface McpConfig {
   mcpServers: Record<string, {
     command: string;
@@ -7,28 +9,54 @@ interface McpConfig {
   }>;
 }
 
+const detectPlatform = (): 'windows' | 'macos' | 'linux' => {
+  if (navigator.userAgent.includes('Windows')) return 'windows';
+  if (navigator.userAgent.includes('Mac')) return 'macos';
+  return 'linux';
+};
+
+const getBinaryName = (): string => {
+  const platform = detectPlatform();
+  switch (platform) {
+    case 'windows': return `${BINARY_PREFIX}-win-x64.exe`;
+    case 'macos': return `${BINARY_PREFIX}-macos-arm64`;
+    default: return `${BINARY_PREFIX}-linux-x64`;
+  }
+};
+
+export const getNativeHostInstallDir = (): string => {
+  const platform = detectPlatform();
+  switch (platform) {
+    case 'windows':
+      return '%LOCALAPPDATA%\\ai-browser-copilot';
+    case 'macos':
+      return '~/Library/Application Support/ai-browser-copilot';
+    default:
+      return '~/.local/share/ai-browser-copilot';
+  }
+};
+
+const getBinaryPath = (): string => {
+  const platform = detectPlatform();
+  const binaryName = getBinaryName();
+  switch (platform) {
+    case 'windows':
+      return `%LOCALAPPDATA%\\\\ai-browser-copilot\\\\${binaryName}`;
+    case 'macos':
+      return `~/Library/Application Support/ai-browser-copilot/${binaryName}`;
+    default:
+      return `~/.local/share/ai-browser-copilot/${binaryName}`;
+  }
+};
+
 export const generateMcpConfig = (): McpConfig => ({
   mcpServers: {
     'ai-browser-copilot': {
-      command: 'node',
-      args: [getNativeHostEntryPath()],
+      command: getBinaryPath(),
+      args: [],
     },
   },
 });
-
-export const getNativeHostEntryPath = (): string => {
-  const platform = navigator.userAgent.includes('Windows') ? 'windows'
-    : navigator.userAgent.includes('Mac') ? 'macos' : 'linux';
-
-  switch (platform) {
-    case 'windows':
-      return '%LOCALAPPDATA%\\\\ai-browser-copilot/dist/index.js';
-    case 'macos':
-      return '~/Library/Application Support/ai-browser-copilot/dist/index.js';
-    default:
-      return '~/.local/share/ai-browser-copilot/dist/index.js';
-  }
-};
 
 export const getConfigInstructions = (): Array<{ app: string; path: string; instructions: string }> => [
   {
@@ -49,9 +77,7 @@ export const getConfigInstructions = (): Array<{ app: string; path: string; inst
 ];
 
 const getClaudeConfigPath = (): string => {
-  const platform = navigator.userAgent.includes('Windows') ? 'windows'
-    : navigator.userAgent.includes('Mac') ? 'macos' : 'linux';
-
+  const platform = detectPlatform();
   switch (platform) {
     case 'windows':
       return '%APPDATA%\\Claude\\claude_desktop_config.json';
@@ -59,20 +85,6 @@ const getClaudeConfigPath = (): string => {
       return '~/Library/Application Support/Claude/claude_desktop_config.json';
     default:
       return '~/.config/Claude/claude_desktop_config.json';
-  }
-};
-
-export const getNativeHostInstallDir = (): string => {
-  const platform = navigator.userAgent.includes('Windows') ? 'windows'
-    : navigator.userAgent.includes('Mac') ? 'macos' : 'linux';
-
-  switch (platform) {
-    case 'windows':
-      return '%LOCALAPPDATA%\\ai-browser-copilot';
-    case 'macos':
-      return '~/Library/Application Support/ai-browser-copilot';
-    default:
-      return '~/.local/share/ai-browser-copilot';
   }
 };
 

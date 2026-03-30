@@ -1,61 +1,59 @@
 import type { FunctionalComponent } from 'preact';
-import { useState, useEffect } from 'preact/hooks';
-import { SetupStep } from './setup-step.js';
+import { useState, useEffect, useRef } from 'preact/hooks';
 import { ErrorCard } from './error-card.js';
-import { generateMcpConfig, getConfigInstructions, getNativeHostInstallDir } from '../../setup/config-generator.js';
 import { trackSetupEvent } from '../../setup/telemetry.js';
 
 interface SetupWizardProps {
   onComplete: () => void;
 }
 
-type Step = 1 | 2 | 3;
-type StepStatus = 'pending' | 'active' | 'complete' | 'error';
-
+const NPX_COMMAND = 'npx ai-browser-copilot-setup';
 const GITHUB_RELEASES_URL = 'https://github.com/irmasemma/AIBrowserCopilot/releases/latest';
+const POLL_INTERVAL_MS = 3000;
 
 export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete }) => {
-  const [_currentStep, setCurrentStep] = useState<Step>(1);
-  const [stepStatuses, setStepStatuses] = useState<Record<Step, StepStatus>>({
-    1: 'active', 2: 'pending', 3: 'pending',
-  });
-  const [error, setError] = useState<string | null>(null);
-  const [configJson, setConfigJson] = useState('');
   const [copied, setCopied] = useState(false);
+  const [polling, setPolling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState('');
-
-  const configOptions = getConfigInstructions();
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     trackSetupEvent('setup_started');
-    const config = generateMcpConfig();
-    setConfigJson(JSON.stringify(config, null, 2));
-  }, []);
 
-  const completeStep = (step: Step) => {
-    setStepStatuses((prev) => ({ ...prev, [step]: 'complete' }));
-    const next = (step + 1) as Step;
-    if (next <= 3) {
-      setStepStatuses((prev) => ({ ...prev, [next]: 'active' }));
-      setCurrentStep(next);
-    }
-  };
+    // Start polling for native host connection immediately
+    setPolling(true);
+    pollRef.current = setInterval(async () => {
+      const data = await chrome.storage.local.get('connectionState');
+      const state = data.connectionState;
+      if (state?.state === 'connected') {
+        if (pollRef.current) clearInterval(pollRef.current);
+        trackSetupEvent('first_connection');
+        onComplete();
+      }
+    }, POLL_INTERVAL_MS);
 
-  const handleCopyConfig = async () => {
-    await navigator.clipboard.writeText(configJson);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [onComplete]);
+
+  const handleCopyCommand = async () => {
+    await navigator.clipboard.writeText(NPX_COMMAND);
     setCopied(true);
+    trackSetupEvent('bridge_download_started');
     setTimeout(() => setCopied(false), 2000);
   };
 
   const handleTestConnection = async () => {
-    trackSetupEvent('first_connection');
     const data = await chrome.storage.local.get('connectionState');
     const state = data.connectionState;
     if (state?.state === 'connected') {
-      completeStep(3);
+      if (pollRef.current) clearInterval(pollRef.current);
+      trackSetupEvent('first_connection');
       onComplete();
     } else {
-      setError('Connection test failed. Make sure your AI app is running and has loaded the MCP config.');
+      setError('Not connected yet. Make sure the installer completed and your AI app has restarted.');
     }
   };
 
@@ -66,85 +64,57 @@ export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete 
     setError(null);
   };
 
-  const getStepStatus = (step: Step): StepStatus => stepStatuses[step];
-
   return (
     <div class="py-4">
       <div class="px-3 mb-4">
         <h2 class="text-lg font-semibold text-neutral-900">Setup Assistant</h2>
-        <p class="text-xs text-neutral-500">Connect your browser to your AI assistant (VS Code, Cursor, or Claude Desktop)</p>
+        <p class="text-xs text-neutral-500">One command to connect your browser to your AI assistant</p>
       </div>
 
-      {/* Step 1: Install Native Host */}
-      <SetupStep step={1} totalSteps={3} title="Install Browser Bridge" status={getStepStatus(1)}>
-        <div class="space-y-2">
-          <p class="text-xs text-neutral-600">
-            Download the browser bridge. This small program runs locally on your machine and lets your AI read your browser.
-          </p>
-          <a
-            href={GITHUB_RELEASES_URL}
-            target="_blank"
-            rel="noopener"
-            class="inline-block text-xs font-medium text-white bg-brand-primary px-3 py-1.5 rounded hover:bg-brand-primary-dark"
-            onClick={() => trackSetupEvent('bridge_download_started')}
-          >
-            Download Bridge
-          </a>
-          <div class="text-xs text-neutral-400 space-y-1">
-            <p>Save it to: <code class="bg-neutral-100 px-1 rounded">{getNativeHostInstallDir()}</code></p>
-            <p>Windows users: you may see a SmartScreen warning — click "More info" → "Run anyway"</p>
-          </div>
-          <button
-            class="text-xs text-brand-primary hover:underline"
-            onClick={() => { trackSetupEvent('bridge_registered'); completeStep(1); }}
-          >
-            I've downloaded it → Continue
-          </button>
+      {/* Step 1: Run the installer */}
+      <div class="mx-3 mb-3 p-3 rounded border-l-4 border-brand-primary bg-white">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="w-5 h-5 rounded-full text-xs flex items-center justify-center bg-brand-primary text-white">1</span>
+          <span class="text-sm font-medium text-neutral-900">Run Setup Command</span>
         </div>
-      </SetupStep>
-
-      {/* Step 2: Configure AI App */}
-      <SetupStep step={2} totalSteps={3} title="Configure Your AI App" status={getStepStatus(2)}>
-        <div class="space-y-3">
+        <div class="ml-7 space-y-3">
           <p class="text-xs text-neutral-600">
-            Add the following MCP config to your AI app. Pick the one you use:
+            Open a terminal and run this command. It downloads the bridge, registers it with Chrome, and configures your AI tools automatically.
           </p>
 
-          {configOptions.map((opt) => (
-            <div key={opt.app} class="text-xs">
-              <div class="font-medium text-neutral-700">{opt.app}</div>
-              <div class="text-neutral-400">{opt.instructions}</div>
-              <div class="text-neutral-400">Path: <code class="bg-neutral-100 px-1 rounded">{opt.path}</code></div>
-            </div>
-          ))}
-
+          {/* Command block */}
           <div class="relative">
-            <pre class="text-xs bg-neutral-100 p-2 rounded overflow-x-auto max-h-32">{configJson}</pre>
+            <pre class="text-sm bg-neutral-900 text-green-400 p-3 rounded font-mono overflow-x-auto">{NPX_COMMAND}</pre>
             <button
-              class="absolute top-1 right-1 text-xs text-brand-primary bg-white px-2 py-0.5 rounded border border-neutral-200"
-              onClick={handleCopyConfig}
+              class="absolute top-1.5 right-1.5 text-xs text-neutral-400 bg-neutral-800 px-2 py-0.5 rounded border border-neutral-700 hover:text-white"
+              onClick={handleCopyCommand}
             >
               {copied ? '✓ Copied' : 'Copy'}
             </button>
           </div>
 
           <p class="text-xs text-neutral-400">
-            After saving, restart your AI app to load the new config.
+            Requires <a href="https://nodejs.org" target="_blank" rel="noopener" class="text-brand-primary hover:underline">Node.js 18+</a>.
+            {' '}Or <a href={GITHUB_RELEASES_URL} target="_blank" rel="noopener" class="text-brand-primary hover:underline">download the binary</a> manually.
           </p>
-          <button
-            class="text-xs text-brand-primary hover:underline"
-            onClick={() => { trackSetupEvent('ai_host_detected'); completeStep(2); }}
-          >
-            Done — I've added the config → Continue
-          </button>
         </div>
-      </SetupStep>
+      </div>
 
-      {/* Step 3: Test Connection */}
-      <SetupStep step={3} totalSteps={3} title="Test Connection" status={getStepStatus(3)}>
-        <div class="space-y-2">
-          <p class="text-xs text-neutral-600">
-            Let's verify everything is connected. Make sure your AI app (VS Code, Cursor, or Claude Desktop) is running.
+      {/* Waiting indicator */}
+      <div class="mx-3 mb-3 p-3 rounded border-l-4 border-neutral-200 bg-neutral-50">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="w-5 h-5 rounded-full text-xs flex items-center justify-center bg-neutral-300 text-white">2</span>
+          <span class="text-sm font-medium text-neutral-900">Waiting for Connection</span>
+        </div>
+        <div class="ml-7 space-y-2">
+          {polling && !error && (
+            <div class="flex items-center gap-2">
+              <span class="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              <p class="text-xs text-neutral-500">Waiting for setup to complete...</p>
+            </div>
+          )}
+          <p class="text-xs text-neutral-400">
+            This page will update automatically once the bridge is connected.
           </p>
           <button
             class="text-xs font-medium text-white bg-brand-primary px-3 py-1.5 rounded hover:bg-brand-primary-dark"
@@ -153,7 +123,7 @@ export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete 
             Test Connection
           </button>
         </div>
-      </SetupStep>
+      </div>
 
       {/* Error with email capture */}
       {error && (
