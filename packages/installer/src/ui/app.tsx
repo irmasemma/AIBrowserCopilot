@@ -13,6 +13,14 @@ import { getAssetName } from '../shared/constants.js';
 import { join } from 'node:path';
 import { registerAllDetectors, runAll, clear } from '../detectors/index.js';
 import { StepInstall, type InstallStatus } from './step-install.js';
+
+const nativeExit = globalThis.process?.exit?.bind(globalThis.process);
+
+const forceExit = () => {
+  if (nativeExit && !process.env['VITEST']) {
+    setTimeout(() => nativeExit(0), 200);
+  }
+};
 import { StepRegister, type RegisterStatus } from './step-register.js';
 import { StepDetect, type DetectStatus } from './step-detect.js';
 import { StepDiscover, type DiscoverPhase, type ToolConfigStatus } from './step-discover.js';
@@ -206,7 +214,7 @@ export const App: React.FC<AppProps> = ({
     } else {
       setHealthStatus('health-fail');
       setPhase('done');
-      const timer = setTimeout(() => exit(), 100);
+      const timer = setTimeout(() => { exit(); forceExit(); }, 100);
       return () => clearTimeout(timer);
     }
   }, [platform, phase, checkHealthFn, exit]);
@@ -229,8 +237,8 @@ export const App: React.FC<AppProps> = ({
       if (installedTools.length === 0) {
         setDiscoverPhase('none-found');
         setPhase('done');
-        const timer = setTimeout(() => exit(), 100);
-        return () => clearTimeout(timer);
+        setTimeout(() => { exit(); forceExit(); }, 100);
+        return;
       }
 
       if (flags.yes) {
@@ -255,6 +263,7 @@ export const App: React.FC<AppProps> = ({
       setDiscoverPhase('done');
       setPhase('done');
       exit();
+      forceExit();
     }
   }, [exit]);
 
@@ -308,8 +317,10 @@ export const App: React.FC<AppProps> = ({
       if (!cancelled) {
         setDiscoverPhase('done');
         setPhase('done');
-        const timer = setTimeout(() => exit(), 100);
-        // Can't return cleanup from inside async, but timer is short-lived
+        setTimeout(() => {
+          exit();
+          forceExit();
+        }, 100);
       }
     };
 
