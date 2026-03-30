@@ -13,6 +13,7 @@ const generateId = (): string => {
 
 let port: chrome.runtime.Port | null = null;
 let connectAttempts = 0;
+let hasEverConnected = false;
 const MAX_CONNECT_ATTEMPTS = 3;
 const pendingRequests = new Map<string, PendingRequest>();
 
@@ -21,6 +22,17 @@ const persistConnectionState = async (info: ConnectionInfo): Promise<void> => {
 };
 
 const handleMessage = (message: NativeHostMessage): void => {
+  // We got a real message — this means the host is truly connected
+  if (!hasEverConnected) {
+    hasEverConnected = true;
+    connectAttempts = 0;
+    persistConnectionState({
+      state: 'connected',
+      lastConnected: Date.now(),
+      error: null,
+    });
+  }
+
   if (message.type === 'tool_response' || message.type === 'tool_error') {
     const pending = pendingRequests.get(message.id);
     if (!pending) return;
@@ -40,12 +52,23 @@ const handleMessage = (message: NativeHostMessage): void => {
       error: null,
     });
   } else if (message.type === 'pong') {
-    // Health check response — no action needed
+    // Health check response — confirms connection is alive
+    if (!hasEverConnected) {
+      hasEverConnected = true;
+      connectAttempts = 0;
+      persistConnectionState({
+        state: 'connected',
+        lastConnected: Date.now(),
+        error: null,
+      });
+    }
   }
 };
 
 const handleDisconnect = (): void => {
+  const wasConnected = hasEverConnected;
   port = null;
+  hasEverConnected = false;
 
   // Reject all pending requests
   for (const [id, pending] of pendingRequests) {
@@ -56,7 +79,11 @@ const handleDisconnect = (): void => {
 
   connectAttempts++;
 
-  if (connectAttempts >= MAX_CONNECT_ATTEMPTS) {
+  // Check chrome.runtime.lastError for specific native messaging errors
+  const lastError = chrome.runtime.lastError?.message ?? '';
+  const hostNotFound = lastError.includes('not found') || lastError.includes('not installed');
+
+  if (hostNotFound || connectAttempts >= MAX_CONNECT_ATTEMPTS) {
     persistConnectionState({
       state: 'setup-needed',
       lastConnected: null,
@@ -65,18 +92,27 @@ const handleDisconnect = (): void => {
     return;
   }
 
-  persistConnectionState({
-    state: 'reconnecting',
-    lastConnected: null,
-    error: 'Native host disconnected',
-  });
-
-  // Auto-reconnect after 1 second
-  setTimeout(() => connect(), 1000);
+  // Only retry if we previously had a working connection (host crashed/restarted)
+  if (wasConnected) {
+    persistConnectionState({
+      state: 'reconnecting',
+      lastConnected: null,
+      error: 'Native host disconnected',
+    });
+    setTimeout(() => connect(), 1000);
+  } else {
+    // Never successfully connected — don't retry, go to setup
+    persistConnectionState({
+      state: 'setup-needed',
+      lastConnected: null,
+      error: 'Native host not found. Run: npx ai-browser-copilot-setup',
+    });
+  }
 };
 
 export const resetAndConnect = (): void => {
   connectAttempts = 0;
+  hasEverConnected = false;
   if (port) return;
   connect();
 };
@@ -89,18 +125,14 @@ export const connect = (): void => {
     port.onMessage.addListener(handleMessage);
     port.onDisconnect.addListener(handleDisconnect);
 
-    connectAttempts = 0; // Reset on successful connection
-
-    persistConnectionState({
-      state: 'connected',
-      lastConnected: Date.now(),
-      error: null,
-    });
+    // Don't set "connected" here — wait for first message from host
+    // connectNative() returns a port even when host doesn't exist;
+    // the port just immediately disconnects
   } catch {
     persistConnectionState({
       state: 'setup-needed',
       lastConnected: null,
-      error: 'Native host not found. Run setup assistant.',
+      error: 'Native host not found. Run: npx ai-browser-copilot-setup',
     });
   }
 };
@@ -126,4 +158,4 @@ export const sendToolRequest = (tool: string, params: Record<string, unknown>): 
   });
 };
 
-export const isConnected = (): boolean => port !== null;
+export const isConnected = (): boolean => port !== null && hasEverConnected;
