@@ -1,0 +1,131 @@
+import { createWriteStream, existsSync, mkdirSync, unlinkSync, renameSync, chmodSync } from 'node:fs';
+import { join } from 'node:path';
+import { get as httpsGet } from 'node:https';
+import { get as httpGet, type IncomingMessage } from 'node:http';
+import type { PlatformInfo } from '../shared/platform.js';
+import { getAssetName, getDownloadUrl } from '../shared/constants.js';
+
+export interface DownloadProgress {
+  bytesReceived: number;
+  totalBytes: number;
+  percent: number;
+}
+
+export interface InstallResult {
+  success: boolean;
+  binaryPath: string;
+  error?: string;
+}
+
+const followRedirects = (
+  url: string,
+  maxRedirects = 5,
+): Promise<IncomingMessage> => {
+  return new Promise((resolve, reject) => {
+    if (maxRedirects <= 0) {
+      reject(new Error('Too many redirects'));
+      return;
+    }
+
+    const getter = url.startsWith('https:') ? httpsGet : httpGet;
+    getter(url, (res) => {
+      const status = res.statusCode ?? 0;
+      if (status >= 300 && status < 400 && res.headers.location) {
+        resolve(followRedirects(res.headers.location, maxRedirects - 1));
+      } else if (status >= 200 && status < 300) {
+        resolve(res);
+      } else {
+        reject(new Error(`Download failed with status ${status}`));
+      }
+    }).on('error', reject);
+  });
+};
+
+export const downloadBinary = async (
+  platform: PlatformInfo,
+  installDir: string,
+  onProgress?: (progress: DownloadProgress) => void,
+): Promise<InstallResult> => {
+  const assetName = getAssetName(platform.os, platform.arch);
+  const url = getDownloadUrl(platform.os, platform.arch);
+  const targetPath = join(installDir, assetName);
+  const tempPath = `${targetPath}.tmp`;
+
+  // Create install directory if needed
+  if (!existsSync(installDir)) {
+    mkdirSync(installDir, { recursive: true });
+  }
+
+  try {
+    const res = await followRedirects(url);
+    const totalBytes = parseInt(res.headers['content-length'] ?? '0', 10);
+
+    await new Promise<void>((resolve, reject) => {
+      const file = createWriteStream(tempPath);
+      let bytesReceived = 0;
+
+      res.on('data', (chunk: Buffer) => {
+        bytesReceived += chunk.length;
+        if (onProgress && totalBytes > 0) {
+          onProgress({
+            bytesReceived,
+            totalBytes,
+            percent: Math.round((bytesReceived / totalBytes) * 100),
+          });
+        }
+      });
+
+      res.on('end', () => {
+        file.end(() => resolve());
+      });
+
+      res.on('error', (err) => {
+        file.destroy();
+        reject(err);
+      });
+
+      file.on('error', (err) => {
+        res.destroy();
+        reject(err);
+      });
+
+      res.pipe(file);
+    });
+
+    // Atomic rename from temp to target
+    renameSync(tempPath, targetPath);
+
+    // Set executable permissions on macOS/Linux
+    if (platform.os !== 'windows') {
+      chmodSync(targetPath, 0o755);
+    }
+
+    return { success: true, binaryPath: targetPath };
+  } catch (err) {
+    // Clean up partial/temp files
+    cleanupFile(tempPath);
+    cleanupFile(targetPath);
+
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      success: false,
+      binaryPath: targetPath,
+      error: `Download failed: ${message}`,
+    };
+  }
+};
+
+const cleanupFile = (path: string): void => {
+  try {
+    if (existsSync(path)) {
+      unlinkSync(path);
+    }
+  } catch {
+    // Best effort cleanup
+  }
+};
+
+export const isBinaryInstalled = (installDir: string, platform: PlatformInfo): boolean => {
+  const assetName = getAssetName(platform.os, platform.arch);
+  return existsSync(join(installDir, assetName));
+};

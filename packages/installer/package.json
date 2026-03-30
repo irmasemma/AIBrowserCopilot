@@ -1,0 +1,35 @@
+{
+  "name": "ai-browser-copilot-setup",
+  "version": "0.1.0",
+  "description": "One-command setup for AI Browser CoPilot — installs the native host and configures your AI tools",
+  "type": "module",
+  "bin": {
+    "ai-browser-copilot-setup": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ink": "^5.2.0",
+    "meow": "^13.0.0",
+    "react": "^18.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "ink-testing-library": "^4.0.0",
+    "typescript": "^5.7.0",
+    "tsup": "^8.4.0",
+    "vitest": "^3.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
