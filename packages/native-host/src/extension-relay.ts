@@ -21,6 +21,7 @@ type PendingCallback = {
   timer: ReturnType<typeof setTimeout>;
 };
 
+const DEFAULT_PORT = 7483; // Fixed port so extension always knows where to connect
 const PORT_FILE_DIR = join(tmpdir(), 'ai-browser-copilot');
 const PORT_FILE = join(PORT_FILE_DIR, 'relay-port');
 const REQUEST_TIMEOUT = 30_000;
@@ -31,7 +32,7 @@ const pendingRequests = new Map<string, PendingCallback>();
 
 export const startRelay = (): Promise<number> => {
   return new Promise((resolve, reject) => {
-    wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    wss = new WebSocketServer({ host: '127.0.0.1', port: DEFAULT_PORT });
 
     wss.on('listening', () => {
       const addr = wss!.address();
