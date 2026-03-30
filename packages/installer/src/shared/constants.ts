@@ -6,7 +6,8 @@ export const GITHUB_RELEASES_BASE = `https://github.com/${GITHUB_REPO}/releases/
 export const NATIVE_HOST_NAME = 'com.copilot.native_host';
 export const NATIVE_HOST_DESCRIPTION = 'AI Browser CoPilot Native Messaging Host';
 export const BINARY_PREFIX = 'ai-browser-copilot';
-export const DEFAULT_EXTENSION_ID = '*';
+// No default — must be provided via --extension-id flag
+export const DEFAULT_EXTENSION_ID = '';
 
 const ASSET_MAP: Record<string, string> = {
   'windows-x64': `${BINARY_PREFIX}-win-x64.exe`,

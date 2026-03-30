@@ -7,11 +7,17 @@ interface SetupWizardProps {
   onComplete: () => void;
 }
 
-const NPX_COMMAND = 'npx ai-browser-copilot-setup';
+const getInstallCommand = () => {
+  const extId = chrome.runtime?.id ?? '';
+  return extId
+    ? `npx ai-browser-copilot-setup --extension-id ${extId}`
+    : 'npx ai-browser-copilot-setup';
+};
 const GITHUB_RELEASES_URL = 'https://github.com/irmasemma/AIBrowserCopilot/releases/latest';
 const POLL_INTERVAL_MS = 3000;
 
 export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete }) => {
+  const installCommand = getInstallCommand();
   const [copied, setCopied] = useState(false);
   const [polling, setPolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +47,7 @@ export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete 
   }, [onComplete]);
 
   const handleCopyCommand = async () => {
-    await navigator.clipboard.writeText(NPX_COMMAND);
+    await navigator.clipboard.writeText(installCommand);
     setCopied(true);
     trackSetupEvent('bridge_download_started');
     setTimeout(() => setCopied(false), 2000);
@@ -90,7 +96,7 @@ export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete 
 
           {/* Command block */}
           <div class="relative">
-            <pre class="text-sm bg-neutral-900 text-green-400 p-3 rounded font-mono overflow-x-auto">{NPX_COMMAND}</pre>
+            <pre class="text-sm bg-neutral-900 text-green-400 p-3 rounded font-mono overflow-x-auto">{installCommand}</pre>
             <button
               class="absolute top-1.5 right-1.5 text-xs text-neutral-400 bg-neutral-800 px-2 py-0.5 rounded border border-neutral-700 hover:text-white"
               onClick={handleCopyCommand}
