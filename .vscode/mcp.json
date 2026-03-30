@@ -3,7 +3,7 @@
     "ai-browser-copilot": {
       "command": "node",
       "args": [
-        "%LOCALAPPDATA%\\ai-browser-copilot/dist/index.js"
+        "C:/Dev/1M/ai-browser-copilot/packages/native-host/dist/index.js"
       ]
     }
   }

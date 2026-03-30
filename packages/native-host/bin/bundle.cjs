@@ -24754,6 +24754,7 @@ var import_websocket_server = __toESM(require_websocket_server(), 1);
 var import_node_fs = require("node:fs");
 var import_node_path = require("node:path");
 var import_node_os = require("node:os");
+var DEFAULT_PORT = 7483;
 var PORT_FILE_DIR = (0, import_node_path.join)((0, import_node_os.tmpdir)(), "ai-browser-copilot");
 var PORT_FILE = (0, import_node_path.join)(PORT_FILE_DIR, "relay-port");
 var REQUEST_TIMEOUT = 3e4;
@@ -24762,7 +24763,7 @@ var extensionSocket = null;
 var pendingRequests = /* @__PURE__ */ new Map();
 var startRelay = () => {
   return new Promise((resolve, reject) => {
-    wss = new import_websocket_server.default({ host: "127.0.0.1", port: 0 });
+    wss = new import_websocket_server.default({ host: "127.0.0.1", port: DEFAULT_PORT });
     wss.on("listening", () => {
       const addr = wss.address();
       if (typeof addr === "object" && addr !== null) {
