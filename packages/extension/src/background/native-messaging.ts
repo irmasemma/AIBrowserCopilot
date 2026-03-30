@@ -75,6 +75,12 @@ const handleDisconnect = (): void => {
   setTimeout(() => connect(), 1000);
 };
 
+export const resetAndConnect = (): void => {
+  connectAttempts = 0;
+  if (port) return;
+  connect();
+};
+
 export const connect = (): void => {
   if (port) return;
 

@@ -24,6 +24,8 @@ export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete 
     // Start polling for native host connection immediately
     setPolling(true);
     pollRef.current = setInterval(async () => {
+      // Ask background to retry connection (in case native host was just installed)
+      chrome.runtime.sendMessage({ type: 'retry_connection' }).catch(() => {});
       const data = await chrome.storage.local.get('connectionState');
       const state = data.connectionState;
       if (state?.state === 'connected') {
@@ -46,6 +48,10 @@ export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete 
   };
 
   const handleTestConnection = async () => {
+    // Trigger a fresh connection attempt
+    await chrome.runtime.sendMessage({ type: 'retry_connection' }).catch(() => {});
+    // Wait briefly for connection to establish
+    await new Promise((r) => setTimeout(r, 1000));
     const data = await chrome.storage.local.get('connectionState');
     const state = data.connectionState;
     if (state?.state === 'connected') {

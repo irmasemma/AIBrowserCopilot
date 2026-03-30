@@ -1,18 +1,22 @@
-import { connectToRelay } from '../background/relay-client';
+import { connect as connectNative, resetAndConnect } from '../background/native-messaging';
 import { dispatchTool } from '../background/tool-dispatcher';
 
 export default defineBackground(() => {
-  const handleToolRequest = async (tool: string, params: Record<string, unknown>): Promise<unknown> => {
-    return dispatchTool(tool, params);
-  };
-
   try {
     chrome.sidePanel?.setOptions({ enabled: true });
   } catch {
     // sidePanel API may not be available in all contexts
   }
 
-  connectToRelay(handleToolRequest).catch(() => {
-    // Relay not available yet — will retry
+  // Try native messaging connection (Chrome spawns the binary)
+  connectNative();
+
+  // Listen for retry requests from the setup wizard
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'retry_connection') {
+      resetAndConnect();
+      sendResponse({ ok: true });
+    }
+    return false;
   });
 });
