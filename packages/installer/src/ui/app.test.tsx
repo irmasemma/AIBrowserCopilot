@@ -127,6 +127,36 @@ describe('App - detection', () => {
     expect(lastFrame()).toContain('[Y/n]');
   });
 
+  it('auto-updates when --update flag is set and binary exists', async () => {
+    const mockDownload = vi.fn(async () => ({ success: true, binaryPath: 'test' }));
+    const { lastFrame } = render(
+      <App
+        platform={makePlatform()}
+        flags={{ ...defaultFlags, update: true }}
+        {...allMocks}
+        checkInstalledFn={() => true}
+        downloadFn={mockDownload}
+      />,
+    );
+    await delay(100);
+    expect(mockDownload).toHaveBeenCalled();
+  });
+
+  it('--update with no binary does fresh install', async () => {
+    const mockDownload = vi.fn(async () => ({ success: true, binaryPath: 'test' }));
+    const { lastFrame } = render(
+      <App
+        platform={makePlatform()}
+        flags={{ ...defaultFlags, update: true }}
+        {...allMocks}
+        checkInstalledFn={() => false}
+        downloadFn={mockDownload}
+      />,
+    );
+    await delay(100);
+    expect(mockDownload).toHaveBeenCalled();
+  });
+
   it('auto-updates when --yes flag is set and binary exists', async () => {
     const mockDownload = vi.fn(async () => ({ success: true, binaryPath: 'test' }));
     const { lastFrame } = render(
@@ -349,6 +379,32 @@ describe('App - tool discovery', () => {
     expect(lastFrame()).toContain('No AI tools found');
   });
 
+  it('auto-configures when --update flag and tools found', async () => {
+    const writeConfigFn = vi.fn(async () => ({ success: true, action: 'created' as const }));
+    const mockRunDetectors = vi.fn(async () => [{
+      detector: {
+        name: 'Claude Desktop',
+        slug: 'claude-desktop',
+        detect: async () => ({ installed: true }),
+        writeConfig: writeConfigFn,
+        verifyConfig: async () => true,
+      },
+      detection: { installed: true },
+    }]);
+
+    render(
+      <App
+        platform={makePlatform()}
+        flags={{ ...defaultFlags, update: true }}
+        {...allMocks}
+        runDetectorsFn={mockRunDetectors}
+      />,
+    );
+
+    await delay(400);
+    expect(writeConfigFn).toHaveBeenCalled();
+  });
+
   it('auto-configures when --yes flag and tools found', async () => {
     const writeConfigFn = vi.fn(async () => ({ success: true, action: 'created' as const }));
     const mockRunDetectors = vi.fn(async () => [{
@@ -373,5 +429,98 @@ describe('App - tool discovery', () => {
 
     await delay(400);
     expect(writeConfigFn).toHaveBeenCalled();
+  });
+});
+
+describe('App - uninstall', () => {
+  const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  it('runs uninstall when --uninstall flag is set', async () => {
+    const mockUninstall = vi.fn(async () => ({
+      binaryRemoved: true,
+      manifestRemoved: true,
+      registryRemoved: true,
+      configsRemoved: [],
+      errors: [],
+    }));
+
+    const { lastFrame } = render(
+      <App
+        platform={makePlatform()}
+        flags={{ ...defaultFlags, uninstall: true }}
+        {...allMocks}
+        uninstallFn={mockUninstall}
+      />,
+    );
+
+    await delay(200);
+    expect(mockUninstall).toHaveBeenCalled();
+    expect(lastFrame()).toContain('Uninstall');
+  });
+
+  it('does not run install flow when --uninstall is set', async () => {
+    const mockDownload = vi.fn(async () => ({ success: true, binaryPath: 'test' }));
+    const mockUninstall = vi.fn(async () => ({
+      binaryRemoved: true,
+      manifestRemoved: true,
+      registryRemoved: true,
+      configsRemoved: [],
+      errors: [],
+    }));
+
+    render(
+      <App
+        platform={makePlatform()}
+        flags={{ ...defaultFlags, uninstall: true }}
+        {...allMocks}
+        downloadFn={mockDownload}
+        uninstallFn={mockUninstall}
+      />,
+    );
+
+    await delay(200);
+    expect(mockDownload).not.toHaveBeenCalled();
+  });
+
+  it('shows uninstall complete status', async () => {
+    const mockUninstall = vi.fn(async () => ({
+      binaryRemoved: true,
+      manifestRemoved: true,
+      registryRemoved: true,
+      configsRemoved: [{ tool: 'Claude Desktop', removed: true }],
+      errors: [],
+    }));
+
+    const { lastFrame } = render(
+      <App
+        platform={makePlatform()}
+        flags={{ ...defaultFlags, uninstall: true }}
+        {...allMocks}
+        uninstallFn={mockUninstall}
+      />,
+    );
+
+    await delay(200);
+    expect(lastFrame()).toContain('Uninstall complete');
+    expect(lastFrame()).toContain('Native host binary');
+    expect(lastFrame()).toContain('Native messaging manifest');
+  });
+
+  it('shows error when uninstall fails', async () => {
+    const mockUninstall = vi.fn(async () => {
+      throw new Error('Permission denied');
+    });
+
+    const { lastFrame } = render(
+      <App
+        platform={makePlatform()}
+        flags={{ ...defaultFlags, uninstall: true }}
+        {...allMocks}
+        uninstallFn={mockUninstall}
+      />,
+    );
+
+    await delay(200);
+    expect(lastFrame()).toContain('Permission denied');
   });
 });

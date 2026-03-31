@@ -8,6 +8,7 @@ import {
   deepMerge,
   mergeConfig,
   verifyWrite,
+  removeConfigEntry,
 } from './config-merger.js';
 
 const TEST_DIR = join(tmpdir(), `copilot-merger-test-${Date.now()}`);
@@ -281,6 +282,26 @@ describe('integration: full merge flow', () => {
     expect(written.mcpServers['ai-browser-copilot'].command).toBe('C:\\path\\to\\binary.exe');
   });
 
+  it('merge then remove roundtrip', () => {
+    const filePath = join(TEST_DIR, 'roundtrip.json');
+    writeFileSync(filePath, JSON.stringify({
+      mcpServers: { existing: { command: 'test' } },
+    }, null, 2) + '\n');
+
+    // Merge
+    mergeConfig(filePath, { mcpServers: { 'ai-browser-copilot': { command: '/binary' } } });
+    let content = JSON.parse(readFileSync(filePath, 'utf-8'));
+    expect(content.mcpServers['ai-browser-copilot']).toBeDefined();
+    expect(content.mcpServers.existing).toBeDefined();
+
+    // Remove
+    const result = removeConfigEntry(filePath, 'ai-browser-copilot');
+    expect(result.success).toBe(true);
+    content = JSON.parse(readFileSync(filePath, 'utf-8'));
+    expect(content.mcpServers['ai-browser-copilot']).toBeUndefined();
+    expect(content.mcpServers.existing.command).toBe('test');
+  });
+
   it('handles VS Code settings.json merge with many existing settings', () => {
     const filePath = join(TEST_DIR, 'settings.json');
     const existingSettings: Record<string, unknown> = {
@@ -314,5 +335,117 @@ describe('integration: full merge flow', () => {
     // Verify 4-space indent preserved
     const content = readFileSync(filePath, 'utf-8');
     expect(content).toContain('    "editor.fontSize"');
+  });
+});
+
+describe('removeConfigEntry', () => {
+  it('removes entry from mcpServers (Claude format)', () => {
+    const filePath = join(TEST_DIR, 'claude-remove.json');
+    writeFileSync(filePath, JSON.stringify({
+      theme: 'dark',
+      mcpServers: {
+        'ai-browser-copilot': { command: '/binary', args: [] },
+        filesystem: { command: 'npx' },
+      },
+    }, null, 2) + '\n');
+
+    const result = removeConfigEntry(filePath, 'ai-browser-copilot');
+    expect(result.success).toBe(true);
+    expect(result.backupPath).toBeDefined();
+
+    const content = JSON.parse(readFileSync(filePath, 'utf-8'));
+    expect(content.mcpServers['ai-browser-copilot']).toBeUndefined();
+    expect(content.mcpServers.filesystem).toBeDefined();
+    expect(content.theme).toBe('dark');
+  });
+
+  it('removes entry from mcp.servers (VS Code format)', () => {
+    const filePath = join(TEST_DIR, 'vscode-remove.json');
+    writeFileSync(filePath, JSON.stringify({
+      'editor.fontSize': 14,
+      mcp: {
+        servers: {
+          'ai-browser-copilot': { command: '/binary' },
+          'other-tool': { command: 'other' },
+        },
+      },
+    }, null, 2) + '\n');
+
+    const result = removeConfigEntry(filePath, 'ai-browser-copilot');
+    expect(result.success).toBe(true);
+
+    const content = JSON.parse(readFileSync(filePath, 'utf-8'));
+    expect(content.mcp.servers['ai-browser-copilot']).toBeUndefined();
+    expect(content.mcp.servers['other-tool']).toBeDefined();
+    expect(content['editor.fontSize']).toBe(14);
+  });
+
+  it('succeeds when file does not exist', () => {
+    const result = removeConfigEntry(join(TEST_DIR, 'nonexistent.json'), 'ai-browser-copilot');
+    expect(result.success).toBe(true);
+    expect(result.backupPath).toBeUndefined();
+  });
+
+  it('succeeds when entry is not present', () => {
+    const filePath = join(TEST_DIR, 'no-entry.json');
+    writeFileSync(filePath, JSON.stringify({ mcpServers: { other: {} } }, null, 2));
+
+    const result = removeConfigEntry(filePath, 'ai-browser-copilot');
+    expect(result.success).toBe(true);
+    expect(result.backupPath).toBeUndefined(); // No backup needed
+  });
+
+  it('returns error for malformed JSON', () => {
+    const filePath = join(TEST_DIR, 'malformed-remove.json');
+    writeFileSync(filePath, '{ broken json !!!');
+
+    const result = removeConfigEntry(filePath, 'ai-browser-copilot');
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('malformed JSON');
+  });
+
+  it('creates backup before modifying', () => {
+    const filePath = join(TEST_DIR, 'backup-remove.json');
+    const original = JSON.stringify({ mcpServers: { 'ai-browser-copilot': {} } }, null, 2) + '\n';
+    writeFileSync(filePath, original);
+
+    const result = removeConfigEntry(filePath, 'ai-browser-copilot');
+    expect(result.backupPath).toBeDefined();
+    expect(existsSync(result.backupPath!)).toBe(true);
+    expect(readFileSync(result.backupPath!, 'utf-8')).toBe(original);
+  });
+
+  it('preserves indentation style', () => {
+    const filePath = join(TEST_DIR, 'indent-remove.json');
+    writeFileSync(filePath, '{\n    "mcpServers": {\n        "ai-browser-copilot": {},\n        "other": {}\n    }\n}\n');
+
+    removeConfigEntry(filePath, 'ai-browser-copilot');
+
+    const content = readFileSync(filePath, 'utf-8');
+    expect(content).toContain('    "mcpServers"');
+    expect(content).toContain('    '); // 4-space preserved
+  });
+
+  it('preserves trailing newline', () => {
+    const filePath = join(TEST_DIR, 'newline-remove.json');
+    writeFileSync(filePath, JSON.stringify({ mcpServers: { 'ai-browser-copilot': {} } }) + '\n');
+
+    removeConfigEntry(filePath, 'ai-browser-copilot');
+    expect(readFileSync(filePath, 'utf-8').endsWith('\n')).toBe(true);
+  });
+
+  it('removes from both formats if present in both', () => {
+    const filePath = join(TEST_DIR, 'dual-format.json');
+    writeFileSync(filePath, JSON.stringify({
+      mcpServers: { 'ai-browser-copilot': { command: 'a' } },
+      mcp: { servers: { 'ai-browser-copilot': { command: 'b' } } },
+    }, null, 2) + '\n');
+
+    const result = removeConfigEntry(filePath, 'ai-browser-copilot');
+    expect(result.success).toBe(true);
+
+    const content = JSON.parse(readFileSync(filePath, 'utf-8'));
+    expect(content.mcpServers['ai-browser-copilot']).toBeUndefined();
+    expect(content.mcp.servers['ai-browser-copilot']).toBeUndefined();
   });
 });

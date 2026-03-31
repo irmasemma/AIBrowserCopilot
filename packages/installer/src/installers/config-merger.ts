@@ -169,3 +169,74 @@ export const verifyWrite = (filePath: string): void => {
   const content = readFileSync(filePath, 'utf-8');
   JSON.parse(content);
 };
+
+export interface RemoveResult {
+  success: boolean;
+  backupPath?: string;
+  error?: string;
+}
+
+/**
+ * Remove an MCP server entry from a config file.
+ * Supports both `mcpServers.{key}` (Claude) and `mcp.servers.{key}` (VS Code/Cursor) formats.
+ * Creates a backup before modifying. Preserves formatting.
+ */
+export const removeConfigEntry = (
+  filePath: string,
+  entryKey: string,
+): RemoveResult => {
+  if (!existsSync(filePath)) {
+    return { success: true }; // Nothing to remove
+  }
+
+  const raw = readFileSync(filePath, 'utf-8');
+
+  let config: Record<string, unknown>;
+  try {
+    config = JSON.parse(raw);
+  } catch {
+    return { success: false, error: `Config file contains malformed JSON: ${filePath}` };
+  }
+
+  let modified = false;
+
+  // Remove from mcpServers (Claude Desktop / Claude Code format)
+  const mcpServers = config['mcpServers'] as Record<string, unknown> | undefined;
+  if (mcpServers && entryKey in mcpServers) {
+    delete mcpServers[entryKey];
+    modified = true;
+  }
+
+  // Remove from mcp.servers (VS Code / Cursor format)
+  const mcp = config['mcp'] as Record<string, unknown> | undefined;
+  const mcpServersSub = mcp?.['servers'] as Record<string, unknown> | undefined;
+  if (mcpServersSub && entryKey in mcpServersSub) {
+    delete mcpServersSub[entryKey];
+    modified = true;
+  }
+
+  if (!modified) {
+    return { success: true }; // Entry not present
+  }
+
+  // Create backup before writing
+  const backupPath = createBackup(filePath);
+
+  // Preserve formatting
+  const indent = detectIndent(raw);
+  const hasTrailingNewline = raw.endsWith('\n');
+  const indentStr = indent.type === 'tab' ? '\t' : ' '.repeat(indent.amount);
+  let output = JSON.stringify(config, null, indentStr);
+  if (hasTrailingNewline) {
+    output += '\n';
+  }
+
+  // Atomic write
+  const tempPath = `${filePath}.tmp`;
+  writeFileSync(tempPath, output, 'utf-8');
+  renameSync(tempPath, filePath);
+
+  verifyWrite(filePath);
+
+  return { success: true, backupPath };
+};

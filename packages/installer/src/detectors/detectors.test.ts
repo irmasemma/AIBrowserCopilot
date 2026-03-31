@@ -7,6 +7,10 @@ import { claudeDesktopDetector, getConfigPath as getDesktopConfigPath } from './
 import { claudeCodeDetector, getConfigPath as getCodeConfigPath } from './claude-code.js';
 import { vscodeDetector, getSettingsPath as getVscodeSettingsPath } from './vscode.js';
 import { cursorDetector, getSettingsPath as getCursorSettingsPath } from './cursor.js';
+import { windsurfDetector, getSettingsPath as getWindsurfSettingsPath } from './windsurf.js';
+import { jetbrainsDetector, getConfigPath as getJetbrainsConfigPath } from './jetbrains.js';
+import { zedDetector, getSettingsPath as getZedSettingsPath } from './zed.js';
+import { continueDevDetector, getConfigPath as getContinueConfigPath } from './continue-dev.js';
 import { registerAllDetectors, getAll, clear, runAll } from './index.js';
 
 const TEST_DIR = join(tmpdir(), `copilot-detectors-test-${Date.now()}`);
@@ -289,16 +293,227 @@ describe('Cursor Detector', () => {
   });
 });
 
+describe('Windsurf Detector', () => {
+  it('returns not installed when settings dir missing', async () => {
+    const platform = testPlatform('linux');
+    const result = await windsurfDetector.detect(platform);
+    expect(result.installed).toBe(false);
+  });
+
+  it('returns installed when settings dir exists', async () => {
+    const platform = testPlatform('linux');
+    mkdirSync(join(TEST_DIR, '.config', 'Windsurf', 'User'), { recursive: true });
+
+    const result = await windsurfDetector.detect(platform);
+    expect(result.installed).toBe(true);
+    expect(result.configPath).toContain('settings.json');
+  });
+
+  it('uses mcp.servers format', async () => {
+    const platform = testPlatform('linux');
+    const settingsDir = join(TEST_DIR, '.config', 'Windsurf', 'User');
+    mkdirSync(settingsDir, { recursive: true });
+
+    await windsurfDetector.writeConfig(platform, '/binary');
+
+    const written = JSON.parse(readFileSync(join(settingsDir, 'settings.json'), 'utf-8'));
+    expect(written.mcp.servers['ai-browser-copilot']).toBeDefined();
+    expect(written.mcpServers).toBeUndefined();
+  });
+
+  it('preserves existing settings during merge', async () => {
+    const platform = testPlatform('linux');
+    const settingsDir = join(TEST_DIR, '.config', 'Windsurf', 'User');
+    mkdirSync(settingsDir, { recursive: true });
+    writeFileSync(
+      join(settingsDir, 'settings.json'),
+      JSON.stringify({ 'editor.theme': 'dark' }, null, 2) + '\n',
+    );
+
+    await windsurfDetector.writeConfig(platform, '/binary');
+
+    const written = JSON.parse(readFileSync(join(settingsDir, 'settings.json'), 'utf-8'));
+    expect(written['editor.theme']).toBe('dark');
+    expect(written.mcp.servers['ai-browser-copilot'].command).toBe('/binary');
+  });
+});
+
+describe('JetBrains IDE Detector', () => {
+  it('returns not installed when config dir missing', async () => {
+    const platform = testPlatform('linux');
+    const result = await jetbrainsDetector.detect(platform);
+    expect(result.installed).toBe(false);
+  });
+
+  it('returns not installed when dir exists but no product dirs', async () => {
+    const platform = testPlatform('linux');
+    mkdirSync(join(TEST_DIR, '.config', 'JetBrains'), { recursive: true });
+
+    const result = await jetbrainsDetector.detect(platform);
+    expect(result.installed).toBe(false);
+  });
+
+  it('returns installed when IntelliJ product dir exists', async () => {
+    const platform = testPlatform('linux');
+    mkdirSync(join(TEST_DIR, '.config', 'JetBrains', 'IntelliJIdea2024.3'), { recursive: true });
+
+    const result = await jetbrainsDetector.detect(platform);
+    expect(result.installed).toBe(true);
+    expect(result.configPath).toContain('mcp.json');
+  });
+
+  it('returns installed when WebStorm product dir exists', async () => {
+    const platform = testPlatform('linux');
+    mkdirSync(join(TEST_DIR, '.config', 'JetBrains', 'WebStorm2024.3'), { recursive: true });
+
+    const result = await jetbrainsDetector.detect(platform);
+    expect(result.installed).toBe(true);
+  });
+
+  it('uses mcpServers format', async () => {
+    const platform = testPlatform('linux');
+    mkdirSync(join(TEST_DIR, '.config', 'JetBrains', 'IntelliJIdea2024.3'), { recursive: true });
+
+    await jetbrainsDetector.writeConfig(platform, '/binary');
+
+    const configPath = getJetbrainsConfigPath(platform);
+    const written = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(written.mcpServers['ai-browser-copilot'].command).toBe('/binary');
+  });
+
+  it('preserves existing entries', async () => {
+    const platform = testPlatform('linux');
+    const configDir = join(TEST_DIR, '.config', 'JetBrains');
+    mkdirSync(join(configDir, 'PyCharm2024.3'), { recursive: true });
+    writeFileSync(
+      join(configDir, 'mcp.json'),
+      JSON.stringify({ mcpServers: { existing: { command: 'test' } } }, null, 2) + '\n',
+    );
+
+    await jetbrainsDetector.writeConfig(platform, '/binary');
+
+    const written = JSON.parse(readFileSync(join(configDir, 'mcp.json'), 'utf-8'));
+    expect(written.mcpServers.existing.command).toBe('test');
+    expect(written.mcpServers['ai-browser-copilot'].command).toBe('/binary');
+  });
+});
+
+describe('Zed Detector', () => {
+  it('returns not installed when config dir missing', async () => {
+    const platform = testPlatform('linux');
+    const result = await zedDetector.detect(platform);
+    expect(result.installed).toBe(false);
+  });
+
+  it('returns installed when config dir exists', async () => {
+    const platform = testPlatform('linux');
+    mkdirSync(join(TEST_DIR, '.config', 'zed'), { recursive: true });
+
+    const result = await zedDetector.detect(platform);
+    expect(result.installed).toBe(true);
+    expect(result.configPath).toContain('settings.json');
+  });
+
+  it('uses mcp.servers format', async () => {
+    const platform = testPlatform('linux');
+    const configDir = join(TEST_DIR, '.config', 'zed');
+    mkdirSync(configDir, { recursive: true });
+
+    await zedDetector.writeConfig(platform, '/binary');
+
+    const written = JSON.parse(readFileSync(join(configDir, 'settings.json'), 'utf-8'));
+    expect(written.mcp.servers['ai-browser-copilot']).toBeDefined();
+  });
+
+  it('preserves existing settings', async () => {
+    const platform = testPlatform('linux');
+    const configDir = join(TEST_DIR, '.config', 'zed');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, 'settings.json'),
+      JSON.stringify({ theme: 'one-dark', vim_mode: true }, null, 2) + '\n',
+    );
+
+    await zedDetector.writeConfig(platform, '/binary');
+
+    const written = JSON.parse(readFileSync(join(configDir, 'settings.json'), 'utf-8'));
+    expect(written.theme).toBe('one-dark');
+    expect(written.vim_mode).toBe(true);
+    expect(written.mcp.servers['ai-browser-copilot'].command).toBe('/binary');
+  });
+});
+
+describe('Continue.dev Detector', () => {
+  it('returns not installed when .continue dir missing', async () => {
+    const platform = testPlatform('linux');
+    const result = await continueDevDetector.detect(platform);
+    expect(result.installed).toBe(false);
+  });
+
+  it('returns installed when .continue dir exists', async () => {
+    const platform = testPlatform('linux');
+    mkdirSync(join(TEST_DIR, '.continue'), { recursive: true });
+
+    const result = await continueDevDetector.detect(platform);
+    expect(result.installed).toBe(true);
+    expect(result.configPath).toContain('config.json');
+  });
+
+  it('uses mcpServers format', async () => {
+    const platform = testPlatform('linux');
+    mkdirSync(join(TEST_DIR, '.continue'), { recursive: true });
+
+    await continueDevDetector.writeConfig(platform, '/binary');
+
+    const configPath = getContinueConfigPath(platform);
+    const written = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(written.mcpServers['ai-browser-copilot'].command).toBe('/binary');
+  });
+
+  it('preserves existing config', async () => {
+    const platform = testPlatform('linux');
+    const continueDir = join(TEST_DIR, '.continue');
+    mkdirSync(continueDir, { recursive: true });
+    writeFileSync(
+      join(continueDir, 'config.json'),
+      JSON.stringify({
+        models: [{ title: 'Claude', provider: 'anthropic' }],
+        mcpServers: { existing: { command: 'test' } },
+      }, null, 2) + '\n',
+    );
+
+    await continueDevDetector.writeConfig(platform, '/binary');
+
+    const written = JSON.parse(readFileSync(join(continueDir, 'config.json'), 'utf-8'));
+    expect(written.models).toHaveLength(1);
+    expect(written.mcpServers.existing.command).toBe('test');
+    expect(written.mcpServers['ai-browser-copilot'].command).toBe('/binary');
+  });
+
+  it('detects existing ai-browser-copilot entry', async () => {
+    const platform = testPlatform('linux');
+    const continueDir = join(TEST_DIR, '.continue');
+    mkdirSync(continueDir, { recursive: true });
+    writeFileSync(
+      join(continueDir, 'config.json'),
+      JSON.stringify({ mcpServers: { 'ai-browser-copilot': { command: 'old' } } }),
+    );
+
+    const result = await continueDevDetector.detect(platform);
+    expect(result.hasExistingMcp).toBe(true);
+  });
+});
+
 describe('Detector Registry Integration', () => {
-  it('registerAllDetectors registers 4 detectors', () => {
+  it('registerAllDetectors registers 8 detectors', () => {
     registerAllDetectors();
-    expect(getAll()).toHaveLength(4);
+    expect(getAll()).toHaveLength(8);
   });
 
   it('all detectors have unique slugs', () => {
     registerAllDetectors();
     const slugs = getAll().map((d) => d.slug);
-    expect(new Set(slugs).size).toBe(slugs.length);
+    expect(new Set(slugs).size).toBe(8);
   });
 
   it('runAll executes all detectors in parallel', async () => {
@@ -306,7 +521,7 @@ describe('Detector Registry Integration', () => {
     const platform = testPlatform('linux');
 
     const results = await runAll(platform);
-    expect(results).toHaveLength(4);
+    expect(results).toHaveLength(8);
 
     // None should be installed in test dir
     for (const r of results) {

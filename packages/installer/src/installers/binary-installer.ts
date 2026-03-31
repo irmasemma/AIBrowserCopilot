@@ -4,6 +4,7 @@ import { get as httpsGet } from 'node:https';
 import { get as httpGet, type IncomingMessage } from 'node:http';
 import type { PlatformInfo } from '../shared/platform.js';
 import { getAssetName, getDownloadUrl } from '../shared/constants.js';
+import { withRetry } from '../shared/retry.js';
 
 export interface DownloadProgress {
   bytesReceived: number;
@@ -15,6 +16,7 @@ export interface InstallResult {
   success: boolean;
   binaryPath: string;
   error?: string;
+  attempts?: number;
 }
 
 const followRedirects = (
@@ -41,10 +43,62 @@ const followRedirects = (
   });
 };
 
+const downloadOnce = async (
+  url: string,
+  targetPath: string,
+  tempPath: string,
+  platform: PlatformInfo,
+  onProgress?: (progress: DownloadProgress) => void,
+): Promise<void> => {
+  const res = await followRedirects(url);
+  const totalBytes = parseInt(res.headers['content-length'] ?? '0', 10);
+
+  await new Promise<void>((resolve, reject) => {
+    const file = createWriteStream(tempPath);
+    let bytesReceived = 0;
+
+    res.on('data', (chunk: Buffer) => {
+      bytesReceived += chunk.length;
+      if (onProgress && totalBytes > 0) {
+        onProgress({
+          bytesReceived,
+          totalBytes,
+          percent: Math.round((bytesReceived / totalBytes) * 100),
+        });
+      }
+    });
+
+    res.on('end', () => {
+      file.end(() => resolve());
+    });
+
+    res.on('error', (err) => {
+      file.destroy();
+      reject(err);
+    });
+
+    file.on('error', (err) => {
+      res.destroy();
+      reject(err);
+    });
+
+    res.pipe(file);
+  });
+
+  // Atomic rename from temp to target
+  renameSync(tempPath, targetPath);
+
+  // Set executable permissions on macOS/Linux
+  if (platform.os !== 'windows') {
+    chmodSync(targetPath, 0o755);
+  }
+};
+
 export const downloadBinary = async (
   platform: PlatformInfo,
   installDir: string,
   onProgress?: (progress: DownloadProgress) => void,
+  onRetry?: (attempt: number, error: Error, delayMs: number) => void,
 ): Promise<InstallResult> => {
   const assetName = getAssetName(platform.os, platform.arch);
   const url = getDownloadUrl(platform.os, platform.arch);
@@ -56,51 +110,25 @@ export const downloadBinary = async (
     mkdirSync(installDir, { recursive: true });
   }
 
+  let attempts = 0;
+
   try {
-    const res = await followRedirects(url);
-    const totalBytes = parseInt(res.headers['content-length'] ?? '0', 10);
+    await withRetry(
+      async () => {
+        attempts++;
+        // Clean up any partial temp file from a previous attempt
+        cleanupFile(tempPath);
+        await downloadOnce(url, targetPath, tempPath, platform, onProgress);
+      },
+      {
+        maxAttempts: 3,
+        baseDelayMs: 1000,
+        maxDelayMs: 10000,
+        onRetry,
+      },
+    );
 
-    await new Promise<void>((resolve, reject) => {
-      const file = createWriteStream(tempPath);
-      let bytesReceived = 0;
-
-      res.on('data', (chunk: Buffer) => {
-        bytesReceived += chunk.length;
-        if (onProgress && totalBytes > 0) {
-          onProgress({
-            bytesReceived,
-            totalBytes,
-            percent: Math.round((bytesReceived / totalBytes) * 100),
-          });
-        }
-      });
-
-      res.on('end', () => {
-        file.end(() => resolve());
-      });
-
-      res.on('error', (err) => {
-        file.destroy();
-        reject(err);
-      });
-
-      file.on('error', (err) => {
-        res.destroy();
-        reject(err);
-      });
-
-      res.pipe(file);
-    });
-
-    // Atomic rename from temp to target
-    renameSync(tempPath, targetPath);
-
-    // Set executable permissions on macOS/Linux
-    if (platform.os !== 'windows') {
-      chmodSync(targetPath, 0o755);
-    }
-
-    return { success: true, binaryPath: targetPath };
+    return { success: true, binaryPath: targetPath, attempts };
   } catch (err) {
     // Clean up partial/temp files
     cleanupFile(tempPath);
@@ -110,7 +138,8 @@ export const downloadBinary = async (
     return {
       success: false,
       binaryPath: targetPath,
-      error: `Download failed: ${message}`,
+      error: `Download failed after ${attempts} attempt(s): ${message}`,
+      attempts,
     };
   }
 };

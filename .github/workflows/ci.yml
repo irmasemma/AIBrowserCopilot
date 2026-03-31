@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  lint-and-typecheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,6 +15,70 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm install
+      - run: npm ci
       - run: npm run typecheck
+
+  test:
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test
       - run: npm run build
+
+  build-extension:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build:extension
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension-build
+          path: packages/extension/.output/chrome-mv3/
+          retention-days: 14
+
+  build-native-host:
+    runs-on: ${{ matrix.os }}
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+            compile-script: compile:linux
+          - os: ubuntu-latest
+            target: linux-arm64
+            compile-script: compile:linux-arm
+          - os: macos-latest
+            target: macos-x64
+            compile-script: compile:mac
+          - os: macos-latest
+            target: macos-arm64
+            compile-script: compile:mac-arm
+          - os: windows-latest
+            target: win-x64
+            compile-script: compile:win
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run ${{ matrix.compile-script }} -w packages/native-host
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-host-${{ matrix.target }}
+          path: packages/native-host/bin/ai-browser-copilot-*
+          retention-days: 14

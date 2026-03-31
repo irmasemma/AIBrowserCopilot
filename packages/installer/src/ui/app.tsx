@@ -8,6 +8,7 @@ import type { ToolDetectionSummary } from '../detectors/types.js';
 import { downloadBinary, isBinaryInstalled } from '../installers/binary-installer.js';
 import { registerHost } from '../installers/host-registrar.js';
 import { checkBinaryHealth } from '../installers/health-check.js';
+import { uninstall, type UninstallResult } from '../installers/uninstaller.js';
 import { getInstallDir } from '../shared/platform.js';
 import { getAssetName } from '../shared/constants.js';
 import { join } from 'node:path';
@@ -24,6 +25,7 @@ const forceExit = () => {
 import { StepRegister, type RegisterStatus } from './step-register.js';
 import { StepDetect, type DetectStatus } from './step-detect.js';
 import { StepDiscover, type DiscoverPhase, type ToolConfigStatus } from './step-discover.js';
+import { StepUninstall, type UninstallStatus } from './step-uninstall.js';
 
 export interface CliFlags {
   yes: boolean;
@@ -41,9 +43,10 @@ export interface AppProps {
   checkHealthFn?: typeof checkBinaryHealth;
   checkInstalledFn?: typeof isBinaryInstalled;
   runDetectorsFn?: typeof runAll;
+  uninstallFn?: typeof uninstall;
 }
 
-type AppPhase = 'detect' | 'prompt' | 'download' | 'register' | 'health' | 'discover' | 'configure-prompt' | 'configure' | 'done';
+type AppPhase = 'uninstall' | 'detect' | 'prompt' | 'download' | 'register' | 'health' | 'discover' | 'configure-prompt' | 'configure' | 'done';
 
 export const App: React.FC<AppProps> = ({
   platform,
@@ -53,9 +56,15 @@ export const App: React.FC<AppProps> = ({
   checkHealthFn = checkBinaryHealth,
   checkInstalledFn = isBinaryInstalled,
   runDetectorsFn = runAll,
+  uninstallFn = uninstall,
 }) => {
   const { exit } = useApp();
-  const [phase, setPhase] = React.useState<AppPhase>('detect');
+  const [phase, setPhase] = React.useState<AppPhase>(flags.uninstall ? 'uninstall' : 'detect');
+
+  // Uninstall state
+  const [uninstallStatus, setUninstallStatus] = React.useState<UninstallStatus | null>(null);
+  const [uninstallResult, setUninstallResult] = React.useState<UninstallResult | undefined>();
+  const [uninstallError, setUninstallError] = React.useState<string | undefined>();
 
   // Detection state
   const [detectStatus, setDetectStatus] = React.useState<DetectStatus>('checking');
@@ -87,6 +96,32 @@ export const App: React.FC<AppProps> = ({
     }
   }, [platform.isSupported, exit]);
 
+  // Uninstall phase
+  React.useEffect(() => {
+    if (!platform.isSupported || phase !== 'uninstall') return;
+
+    let cancelled = false;
+    const run = async () => {
+      setUninstallStatus('removing');
+      try {
+        const result = await uninstallFn(platform);
+        if (cancelled) return;
+        setUninstallResult(result);
+        setUninstallStatus('complete');
+      } catch (err) {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : String(err);
+        setUninstallError(message);
+        setUninstallStatus('error');
+      }
+      setPhase('done');
+      setTimeout(() => { exit(); forceExit(); }, 100);
+    };
+
+    run();
+    return () => { cancelled = true; };
+  }, [platform, phase, uninstallFn, exit]);
+
   // Phase 1: Detection
   React.useEffect(() => {
     if (!platform.isSupported || phase !== 'detect') return;
@@ -98,8 +133,8 @@ export const App: React.FC<AppProps> = ({
       setExistingBinaryPath(join(installDir, getAssetName(platform.os, platform.arch)));
       setDetectStatus('found');
 
-      if (flags.yes) {
-        // Auto-update when --yes flag is passed
+      if (flags.yes || flags.update) {
+        // Auto-update when --yes or --update flag is passed
         setPhase('download');
       } else {
         setPhase('prompt');
@@ -108,7 +143,7 @@ export const App: React.FC<AppProps> = ({
       setDetectStatus('not-found');
       setPhase('download');
     }
-  }, [platform, phase, flags.yes, checkInstalledFn]);
+  }, [platform, phase, flags.yes, flags.update, checkInstalledFn]);
 
   // Handle user's update choice
   const handleUpdateChoice = React.useCallback((update: boolean) => {
@@ -241,7 +276,7 @@ export const App: React.FC<AppProps> = ({
         return;
       }
 
-      if (flags.yes) {
+      if (flags.yes || flags.update) {
         setDiscoverPhase('configuring');
         setPhase('configure');
       } else {
@@ -252,7 +287,7 @@ export const App: React.FC<AppProps> = ({
 
     run();
     return () => { cancelled = true; };
-  }, [platform, phase, flags.yes, runDetectorsFn, exit]);
+  }, [platform, phase, flags.yes, flags.update, runDetectorsFn, exit]);
 
   // Handle configure choice
   const handleConfigureChoice = React.useCallback((configure: boolean) => {
@@ -333,7 +368,16 @@ export const App: React.FC<AppProps> = ({
       <Header />
       <PlatformDisplay platform={platform} />
       {!platform.isSupported && <UnsupportedError platform={platform} />}
-      {platform.isSupported && (
+      {platform.isSupported && uninstallStatus && (
+        <Box marginTop={1}>
+          <StepUninstall
+            status={uninstallStatus}
+            result={uninstallResult}
+            errorMessage={uninstallError}
+          />
+        </Box>
+      )}
+      {platform.isSupported && !flags.uninstall && (
         <>
           {/* Detection step */}
           <Box marginTop={1}>
