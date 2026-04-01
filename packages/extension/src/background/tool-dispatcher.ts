@@ -61,13 +61,43 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
     const format = (params.format as string) ?? 'png';
     const quality = (params.quality as number) ?? 80;
 
-    const dataUrl = await chrome.tabs.captureVisibleTab({
-      format: format as 'png' | 'jpeg',
-      quality,
-    });
+    // Check if the active tab is a chrome:// page (can't capture those)
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.url?.startsWith('chrome://')) {
+      throw Object.assign(
+        new Error(`Cannot screenshot chrome:// pages (${tab.url}). Navigate to a website first.`),
+        { code: 'CONTENT_UNAVAILABLE' },
+      );
+    }
 
-    const base64 = dataUrl.split(',')[1] ?? dataUrl;
-    return { content: [{ type: 'image', data: base64, mimeType: `image/${format}` }] };
+    // Get the active window ID — required in service worker context
+    const window = await chrome.windows.getCurrent();
+
+    try {
+      const dataUrl = await chrome.tabs.captureVisibleTab(window.id, {
+        format: format as 'png' | 'jpeg',
+        quality,
+      });
+
+      const base64 = dataUrl.split(',')[1] ?? dataUrl;
+      return { content: [{ type: 'image', data: base64, mimeType: `image/${format}` }] };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Provide helpful error messages for common failures
+      if (message.includes('activeTab') || message.includes('permission')) {
+        throw Object.assign(
+          new Error('Cannot capture this page. Try clicking on the page first, or navigate to a different site.'),
+          { code: 'CONTENT_UNAVAILABLE' },
+        );
+      }
+      if (message.includes('readback') || message.includes('capture')) {
+        throw Object.assign(
+          new Error('Screenshot failed — make sure the browser window is visible (not minimized).'),
+          { code: 'CONTENT_UNAVAILABLE' },
+        );
+      }
+      throw Object.assign(new Error(`Screenshot failed: ${message}`), { code: 'CONTENT_UNAVAILABLE' });
+    }
   },
 
   async list_tabs(params) {
