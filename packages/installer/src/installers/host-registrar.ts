@@ -20,14 +20,20 @@ export interface RegistrationResult {
 
 export const generateManifest = (
   binaryPath: string,
-  extensionId: string = DEFAULT_EXTENSION_ID,
-): NativeManifest => ({
-  name: NATIVE_HOST_NAME,
-  description: NATIVE_HOST_DESCRIPTION,
-  path: resolve(binaryPath),
-  type: 'stdio',
-  allowed_origins: [`chrome-extension://${extensionId}/`],
-});
+  extensionId?: string,
+): NativeManifest => {
+  const id = extensionId || DEFAULT_EXTENSION_ID;
+  if (!id) {
+    throw new Error('Extension ID is required — cannot generate manifest with empty allowed_origins');
+  }
+  return {
+    name: NATIVE_HOST_NAME,
+    description: NATIVE_HOST_DESCRIPTION,
+    path: resolve(binaryPath),
+    type: 'stdio',
+    allowed_origins: [`chrome-extension://${id}/`],
+  };
+};
 
 export const getManifestDir = (platform: PlatformInfo): string => {
   switch (platform.os) {

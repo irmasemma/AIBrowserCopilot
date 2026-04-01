@@ -99,8 +99,14 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
     if (isFirstConnect || !options.discoverUrl) return;
     try {
       const result = await options.discoverUrl();
+      const urlChanged = result.url !== currentUrl;
       currentUrl = result.url;
       setDiagnostic(result.diagnostic);
+      // If the server appeared (lock file found after being gone, or URL changed),
+      // reset failure count so next attempt is immediate — don't make the user wait 30s
+      if (urlChanged || (result.diagnostic === 'connecting' && context.failureCount > 2)) {
+        context = { ...context, failureCount: 0 };
+      }
     } catch {
       // Keep current URL if discovery fails
     }

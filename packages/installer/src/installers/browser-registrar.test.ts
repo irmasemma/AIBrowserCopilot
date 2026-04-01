@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { detectBrowsers, registerForBrowser, HELPER_HOST_NAME } from './browser-registrar.js';
+import { detectBrowsers, registerForBrowser, registerAllBrowsers, HELPER_HOST_NAME } from './browser-registrar.js';
 import { NATIVE_HOST_NAME } from '../shared/constants.js';
 import type { PlatformInfo } from '../shared/platform.js';
 
@@ -91,6 +91,32 @@ describe('browser-registrar', () => {
       );
       expect(result.success).toBe(false);
       expect(result.error).toContain('No registry path');
+    });
+
+    it('fails when extensionIds is empty (prevents corrupt manifests)', () => {
+      const browser = { name: 'Chrome', slug: 'chrome', installed: true, manifestDir: '/tmp/test-nm' };
+      const result = registerForBrowser(
+        browser,
+        makePlatform('macos'),
+        NATIVE_HOST_NAME,
+        'Test',
+        '/path/to/binary',
+        [], // empty — should fail
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('allowed_origins');
+    });
+  });
+
+  describe('registerAllBrowsers', () => {
+    it('returns empty array when extensionIds is empty (never writes corrupt manifests)', () => {
+      const results = registerAllBrowsers(
+        makePlatform('macos'),
+        '/path/to/binary',
+        '/path/to/helper',
+        [], // empty — should skip all registration
+      );
+      expect(results).toEqual([]);
     });
   });
 });

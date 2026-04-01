@@ -26,10 +26,10 @@ describe('calculateBackoff', () => {
     }
   });
 
-  it('never exceeds MAX_BACKOFF + jitter (36000ms)', () => {
+  it('never exceeds MAX_BACKOFF + jitter (6000ms)', () => {
     for (let i = 0; i < 50; i++) {
       const delay = calculateBackoff(100);
-      expect(delay).toBeLessThanOrEqual(36000);
+      expect(delay).toBeLessThanOrEqual(6000);
     }
   });
 
@@ -47,6 +47,25 @@ describe('calculateBackoff', () => {
       results.add(calculateBackoff(0));
     }
     expect(results.size).toBeGreaterThan(1);
+  });
+
+  it('worst-case reconnect delay is under 6 seconds at any failure count', () => {
+    // User kills server, opens new Claude Code. Extension must reconnect within 6s.
+    // This tests the actual user experience — not just the algorithm.
+    for (let failureCount = 0; failureCount < 100; failureCount++) {
+      const delay = calculateBackoff(failureCount);
+      expect(delay).toBeLessThanOrEqual(6000);
+    }
+  });
+
+  it('reaches max backoff by attempt 4', () => {
+    // Backoff should plateau quickly: 1s, 1.6s, 2.6s, 4s, 5s, 5s...
+    // By attempt 4 we should be at or near the 5s cap
+    for (let i = 0; i < 50; i++) {
+      const delay = calculateBackoff(4);
+      expect(delay).toBeGreaterThanOrEqual(4000);
+      expect(delay).toBeLessThanOrEqual(6000);
+    }
   });
 });
 

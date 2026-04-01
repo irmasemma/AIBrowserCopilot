@@ -142,6 +142,10 @@ function writeManifest(
   binaryPath: string,
   extensionIds: string[],
 ): string {
+  if (extensionIds.length === 0) {
+    throw new Error('Cannot write manifest with empty allowed_origins — no extension ID provided');
+  }
+
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
@@ -212,6 +216,11 @@ export function registerAllBrowsers(
   extensionIds: string[],
   browserFilter?: string[],
 ): MultiRegistrationResult[] {
+  // Never write manifests with empty allowed_origins — Chrome will reject all connections
+  if (extensionIds.length === 0) {
+    return [];
+  }
+
   const browsers = detectBrowsers(platform);
   const filtered = browserFilter
     ? browsers.filter((b) => browserFilter.includes(b.slug))
