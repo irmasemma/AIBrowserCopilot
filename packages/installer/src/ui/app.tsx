@@ -7,7 +7,9 @@ import type { HealthCheckResult } from '../installers/health-check.js';
 import type { ToolDetectionSummary } from '../detectors/types.js';
 import { downloadBinary, isBinaryInstalled } from '../installers/binary-installer.js';
 import { registerHost } from '../installers/host-registrar.js';
+import { registerAllBrowsers } from '../installers/browser-registrar.js';
 import { checkBinaryHealth } from '../installers/health-check.js';
+import { getHelperAssetName } from '../shared/constants.js';
 import { uninstall, type UninstallResult } from '../installers/uninstaller.js';
 import { getInstallDir } from '../shared/platform.js';
 import { getAssetName } from '../shared/constants.js';
@@ -213,6 +215,15 @@ export const App: React.FC<AppProps> = ({
         );
 
         if (cancelled) return;
+
+        // Also register helper for all detected browsers (best-effort — main host registration is the critical path)
+        try {
+          const helperBinPath = join(getInstallDir(platform), getHelperAssetName(platform.os, platform.arch));
+          const extensionIds = flags.extensionId ? [flags.extensionId] : [];
+          registerAllBrowsers(platform, binPath, helperBinPath, extensionIds);
+        } catch {
+          // Helper registration is best-effort — extension falls back to default port if helper unavailable
+        }
 
         if (regResult.success) {
           setManifestPath(regResult.manifestPath);

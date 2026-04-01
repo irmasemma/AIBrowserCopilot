@@ -1,3 +1,5 @@
+import type { DiagnosticReason } from '../shared/types';
+
 const NM_HELPER_NAME = 'com.copilot.native_host_helper';
 const DEFAULT_URL = 'ws://127.0.0.1:7483';
 
@@ -18,8 +20,14 @@ export interface ToolScanResult {
   configPath: string;
 }
 
+export interface DiscoveryResult {
+  url: string;
+  token?: string;
+  diagnostic: DiagnosticReason;
+}
+
 export interface ServiceDiscovery {
-  discoverEndpoint(): Promise<{ url: string; token?: string }>;
+  discoverEndpoint(): Promise<DiscoveryResult>;
   scanTools(): Promise<ToolScanResult[]>;
 }
 
@@ -41,19 +49,21 @@ export function createServiceDiscovery(): ServiceDiscovery {
   }
 
   return {
-    async discoverEndpoint() {
+    async discoverEndpoint(): Promise<DiscoveryResult> {
       try {
         const response = await sendNativeMessage('read_lock_file');
         if (response.exists && response.port) {
           const port = response.port as number;
           const token = response.token as string | undefined;
           const url = `ws://127.0.0.1:${port}${token ? `?token=${token}` : ''}`;
-          return { url, token };
+          return { url, token, diagnostic: 'connecting' };
         }
+        // Helper works but no lock file — server not running
+        return { url: DEFAULT_URL, diagnostic: 'no_lock_file' };
       } catch {
-        // NM helper not available — fall back
+        // Helper not available — setup incomplete
+        return { url: DEFAULT_URL, diagnostic: 'helper_unavailable' };
       }
-      return { url: DEFAULT_URL };
     },
 
     async scanTools() {

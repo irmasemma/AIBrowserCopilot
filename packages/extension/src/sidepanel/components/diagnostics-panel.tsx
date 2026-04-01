@@ -1,5 +1,5 @@
 import type { FunctionalComponent } from 'preact';
-import { useState } from 'preact/hooks';
+import { useState, useEffect } from 'preact/hooks';
 import type { ServerInfo, ConnectionContext } from '../../shared/types.js';
 
 export interface DiagnosticsPanelProps {
@@ -19,12 +19,13 @@ export const formatUptime = (seconds: number): string => {
 };
 
 const buildDiagnosticsText = (serverInfo: ServerInfo | null, ctx: ConnectionContext): string => {
+  const uptime = ctx.lastConnectedAt ? formatUptime((Date.now() - ctx.lastConnectedAt) / 1000) : 'N/A';
   const lines: string[] = [
     `State: ${ctx.state}`,
     `Server PID: ${serverInfo?.pid ?? 'N/A'}`,
     `Port: ${serverInfo?.port ?? 'N/A'}`,
     `Version: ${serverInfo?.version ?? 'N/A'}`,
-    `Uptime: ${serverInfo ? formatUptime(serverInfo.uptime) : 'N/A'}`,
+    `Uptime: ${uptime}`,
     `Started by: ${serverInfo?.startedBy ?? 'N/A'}`,
     `Reconnects this session: ${ctx.reconnectsThisSession}`,
     `Missed heartbeats: ${ctx.missedHeartbeats}`,
@@ -37,6 +38,14 @@ const buildDiagnosticsText = (serverInfo: ServerInfo | null, ctx: ConnectionCont
 
 export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ serverInfo, connectionContext }) => {
   const [copied, setCopied] = useState(false);
+  const [now, setNow] = useState(Date.now());
+
+  // Update "now" every second for live uptime
+  useEffect(() => {
+    if (connectionContext.state !== 'connected' && connectionContext.state !== 'degraded') return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [connectionContext.state]);
 
   const handleCopy = async (): Promise<void> => {
     const text = buildDiagnosticsText(serverInfo, connectionContext);
@@ -59,7 +68,7 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
       <div>PID: {serverInfo?.pid ?? 'N/A'}</div>
       <div>Port: {serverInfo?.port ?? 'N/A'}</div>
       <div>Version: {serverInfo?.version ?? 'N/A'}</div>
-      <div>Uptime: {serverInfo ? formatUptime(serverInfo.uptime) : 'N/A'}</div>
+      <div>Uptime: {connectionContext.lastConnectedAt ? formatUptime((now - connectionContext.lastConnectedAt) / 1000) : 'N/A'}</div>
       <div>Started by: {serverInfo?.startedBy ?? 'N/A'}</div>
       <div>Reconnects: {connectionContext.reconnectsThisSession}</div>
       <div>Missed heartbeats: {connectionContext.missedHeartbeats}</div>

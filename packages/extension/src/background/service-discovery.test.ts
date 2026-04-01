@@ -31,6 +31,7 @@ describe('service-discovery', () => {
 
       expect(result.url).toBe('ws://127.0.0.1:8080?token=abc123');
       expect(result.token).toBe('abc123');
+      expect(result.diagnostic).toBe('connecting');
     });
 
     it('returns URL without token when lock file has no token', async () => {
@@ -45,6 +46,7 @@ describe('service-discovery', () => {
 
       expect(result.url).toBe('ws://127.0.0.1:9000');
       expect(result.token).toBeUndefined();
+      expect(result.diagnostic).toBe('connecting');
     });
 
     it('falls back to default URL when NM helper fails', async () => {
@@ -61,6 +63,7 @@ describe('service-discovery', () => {
 
       expect(result.url).toBe('ws://127.0.0.1:7483');
       expect(result.token).toBeUndefined();
+      expect(result.diagnostic).toBe('helper_unavailable');
     });
 
     it('falls back to default URL when lock file does not exist', async () => {
@@ -74,6 +77,7 @@ describe('service-discovery', () => {
       const result = await sd.discoverEndpoint();
 
       expect(result.url).toBe('ws://127.0.0.1:7483');
+      expect(result.diagnostic).toBe('no_lock_file');
     });
 
     it('falls back to default URL when chrome API is not available', async () => {
@@ -83,6 +87,7 @@ describe('service-discovery', () => {
       const result = await sd.discoverEndpoint();
 
       expect(result.url).toBe('ws://127.0.0.1:7483');
+      expect(result.diagnostic).toBe('helper_unavailable');
     });
   });
 

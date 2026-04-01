@@ -7,11 +7,11 @@ import { useStore } from '../store.js';
 export const ConnectionHeader: FunctionalComponent = () => {
   const [showDiag, setShowDiag] = useState(false);
   const connectionContext = useStore((s) => s.connectionContext);
-  const { state, serverInfo, reconnectsThisSession, failureCount } = connectionContext;
+  const { state, serverInfo, failureCount, diagnosticReason } = connectionContext;
 
   const subtitleText = (): string | null => {
-    if (state === 'connected' && serverInfo?.startedBy) {
-      return `Connected to ${serverInfo.startedBy}`;
+    if (state === 'connected' && serverInfo?.startedBy && serverInfo.startedBy !== 'unknown') {
+      return `Connected via ${serverInfo.startedBy}`;
     }
     if (state === 'reconnecting') {
       return `Reconnecting (attempt ${failureCount})...`;
@@ -19,7 +19,28 @@ export const ConnectionHeader: FunctionalComponent = () => {
     return null;
   };
 
+  const guidanceText = (): string | null => {
+    if (state !== 'reconnecting' && state !== 'disconnected') return null;
+    switch (diagnosticReason) {
+      case 'was_connected': {
+        const tool = serverInfo?.startedBy;
+        return tool && tool !== 'unknown'
+          ? `Lost connection to ${tool}. Reopen it to reconnect.`
+          : 'Lost connection. Reopen your AI tool to reconnect.';
+      }
+      case 'no_lock_file':
+        return 'No AI tool is running. Open Claude Code, VS Code, or Cursor.';
+      case 'helper_unavailable':
+        return 'Setup incomplete \u2014 run the installer to finish setup.';
+      case 'server_not_responding':
+        return `Server on port ${serverInfo?.port ?? 7483} isn\u2019t responding. Restart your AI tool.`;
+      default:
+        return 'Looking for AI tool...';
+    }
+  };
+
   const subtitle = subtitleText();
+  const guidance = guidanceText();
 
   return (
     <header class="border-b border-neutral-200 bg-white" role="banner">
@@ -47,6 +68,11 @@ export const ConnectionHeader: FunctionalComponent = () => {
       {subtitle && (
         <div class="px-6 pb-2">
           <span class="text-xs text-neutral-500">{subtitle}</span>
+        </div>
+      )}
+      {guidance && (
+        <div class="px-6 pb-2">
+          <p class="text-xs text-neutral-500">{guidance}</p>
         </div>
       )}
       {showDiag && (

@@ -12,6 +12,8 @@ Monorepo with 4 packages:
 
 **CRITICAL: Always rebuild compiled binaries, not just TypeScript source. The MCP config and real users run the compiled .exe, not the dev version. Never point configs to dev/source as a shortcut.**
 
+**CRITICAL: When pushing code that changes the native host, ALWAYS publish a new GitHub release with the recompiled binary.** The installer downloads from GitHub releases — if the release is stale, every customer gets the old broken binary. Run `gh release create` after compiling. This is not optional.
+
 ```bash
 # Full clean build (from project root)
 npm run build --workspaces

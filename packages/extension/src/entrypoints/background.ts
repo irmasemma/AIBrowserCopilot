@@ -62,10 +62,9 @@ export default defineBackground(() => {
   // Discover endpoint and connect
   async function startConnection() {
     try {
-      const { url } = await discovery.discoverEndpoint();
-      await manager.connect(url);
+      const result = await discovery.discoverEndpoint();
+      await manager.connect(result.url);
     } catch {
-      // Fall back to default
       await manager.connect();
     }
   }

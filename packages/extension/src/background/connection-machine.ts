@@ -21,6 +21,7 @@ export function createInitialContext(): ConnectionContext {
     serverInfo: null,
     error: null,
     reconnectsThisSession: 0,
+    diagnosticReason: null,
   };
 }
 

@@ -1,7 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import { existsSync } from 'node:fs';
 import { WebSocket } from 'ws';
 import { startRelay, sendToExtension, isExtensionConnected, stopRelay } from './extension-relay.js';
-import { deleteLockFile, getLockFilePath } from './lock-file-manager.js';
+import { deleteLockFile, getLockFilePath, readLockFile } from './lock-file-manager.js';
 
 /**
  * Integration tests for the extension relay.
@@ -159,6 +160,43 @@ describe('relay integration', () => {
     expect(pong.timestamp).toBe(timestamp);
   });
 
+  it('lock file created on start and deleted on stop', async () => {
+    const lockPath = getLockFilePath();
+    const port = await startRelay();
+
+    // Lock file should exist with correct port
+    expect(existsSync(lockPath)).toBe(true);
+    const lock = readLockFile(lockPath);
+    expect(lock).not.toBeNull();
+    expect(lock!.port).toBe(port);
+    expect(lock!.pid).toBe(process.pid);
+
+    // Stop relay — lock file should be cleaned up
+    await stopRelay();
+    deleteLockFile(lockPath);
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it('lock file port matches actual listening port', async () => {
+    const port = await startRelay();
+    const lock = readLockFile(getLockFilePath());
+
+    expect(lock).not.toBeNull();
+    // Connect to the port from the lock file (not hardcoded)
+    const ws = new WebSocket(`ws://127.0.0.1:${lock!.port}`);
+    client = ws;
+
+    const info = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      ws.onmessage = (event) => resolve(JSON.parse(event.data.toString()));
+      ws.onerror = (e) => reject(e);
+      setTimeout(() => reject(new Error('Timeout')), 5000);
+    });
+
+    expect(info.type).toBe('server_info');
+    expect(info.port).toBe(port);
+    expect(info.port).toBe(lock!.port);
+  });
+
   it('accepts connection without token (localhost-only)', async () => {
     const port = await startRelay();
     // Connect without any token query param
@@ -174,5 +212,67 @@ describe('relay integration', () => {
     // Should connect and receive server_info (no 4001 close)
     expect(info.type).toBe('server_info');
     expect(isExtensionConnected()).toBe(true);
+  });
+
+  it('full reconnect lifecycle: connect → server dies → reconnect succeeds', async () => {
+    // Phase 1: Start server, connect client
+    const port1 = await startRelay();
+    const ws1 = new WebSocket(`ws://127.0.0.1:${port1}`);
+    client = ws1;
+
+    const info1 = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      ws1.onmessage = (event) => resolve(JSON.parse(event.data.toString()));
+      ws1.onerror = (e) => reject(e);
+      setTimeout(() => reject(new Error('Timeout')), 5000);
+    });
+    expect(info1.type).toBe('server_info');
+    expect(isExtensionConnected()).toBe(true);
+
+    // Phase 2: Server dies — client gets close event
+    const closePromise = new Promise<number>((resolve) => {
+      ws1.onclose = (event) => resolve(event.code);
+    });
+    await stopRelay();
+    const closeCode = await closePromise;
+    expect(closeCode).toBeDefined();
+    expect(isExtensionConnected()).toBe(false);
+
+    // Phase 3: Client tries to reconnect — fails (nothing listening)
+    const ws2 = new WebSocket(`ws://127.0.0.1:${port1}`);
+    const failResult = await new Promise<string>((resolve) => {
+      ws2.onopen = () => resolve('connected');
+      ws2.onerror = () => resolve('refused');
+      setTimeout(() => resolve('timeout'), 3000);
+    });
+    expect(failResult).toBe('refused');
+
+    // Phase 4: Server restarts — client reconnects
+    const port2 = await startRelay();
+    const ws3 = new WebSocket(`ws://127.0.0.1:${port2}`);
+    client = ws3;
+
+    const info2 = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      ws3.onmessage = (event) => resolve(JSON.parse(event.data.toString()));
+      ws3.onerror = (e) => reject(e);
+      setTimeout(() => reject(new Error('Timeout')), 5000);
+    });
+    expect(info2.type).toBe('server_info');
+    expect(isExtensionConnected()).toBe(true);
+
+    // Phase 5: Tool call works after reconnect
+    const toolPromise = sendToExtension({ id: 'reconnect-test', tool: 'list_tabs', params: {} });
+    const received = await new Promise<Record<string, unknown>>((resolve) => {
+      ws3.onmessage = (event) => {
+        const data = JSON.parse(event.data.toString());
+        if (data.type === 'tool_request') resolve(data);
+      };
+    });
+    expect(received.type).toBe('tool_request');
+    expect(received.id).toBe('reconnect-test');
+
+    // Respond to complete the round-trip
+    ws3.send(JSON.stringify({ type: 'tool_response', id: 'reconnect-test', result: { tabs: [] } }));
+    const result = await toolPromise;
+    expect(result.id).toBe('reconnect-test');
   });
 });

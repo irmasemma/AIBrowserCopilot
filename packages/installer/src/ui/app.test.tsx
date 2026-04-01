@@ -7,6 +7,11 @@ import type { CliFlags } from './app.js';
 import type { DownloadProgress, InstallResult } from '../installers/binary-installer.js';
 import type { RegistrationResult } from '../installers/host-registrar.js';
 
+// Mock browser-registrar to avoid reg query calls in tests
+vi.mock('../installers/browser-registrar.js', () => ({
+  registerAllBrowsers: vi.fn(() => []),
+}));
+
 const defaultFlags: CliFlags = {
   yes: false,
   update: false,

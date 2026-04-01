@@ -15,6 +15,13 @@ export type NativeHostMessage =
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'degraded' | 'reconnecting';
 
+export type DiagnosticReason =
+  | 'connecting'
+  | 'no_lock_file'
+  | 'server_not_responding'
+  | 'helper_unavailable'
+  | 'was_connected';
+
 /** @deprecated Use ConnectionContext instead. Kept for backward compatibility. */
 export interface ConnectionInfo {
   state: ConnectionState;
@@ -42,6 +49,7 @@ export interface ConnectionContext {
   serverInfo: ServerInfo | null;
   error: string | null;
   reconnectsThisSession: number;
+  diagnosticReason: DiagnosticReason | null;
 }
 
 export interface ToolScanResult {

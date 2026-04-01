@@ -6,6 +6,10 @@
   "scripts": {
     "build": "tsc",
     "bundle": "esbuild src/index.ts --bundle --platform=node --target=node18 --format=cjs --outfile=bin/bundle.cjs",
+    "compile:win": "npm run bundle && pkg bin/bundle.cjs --targets node18-win-x64 --output bin/ai-browser-copilot-helper-win-x64.exe",
+    "compile:mac": "npm run bundle && pkg bin/bundle.cjs --targets node18-macos-x64 --output bin/ai-browser-copilot-helper-macos-x64",
+    "compile:mac-arm": "npm run bundle && pkg bin/bundle.cjs --targets node18-macos-arm64 --output bin/ai-browser-copilot-helper-macos-arm64",
+    "compile:linux": "npm run bundle && pkg bin/bundle.cjs --targets node18-linux-x64 --output bin/ai-browser-copilot-helper-linux-x64",
     "test": "vitest run"
   },
   "dependencies": {},

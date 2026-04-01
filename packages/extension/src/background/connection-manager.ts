@@ -1,4 +1,4 @@
-import type { ConnectionContext, ServerInfo, ToolScanResult } from '../shared/types';
+import type { ConnectionContext, ServerInfo, ToolScanResult, DiagnosticReason } from '../shared/types';
 import { transition, createInitialContext } from './connection-machine';
 import type { ConnectionEvent } from './connection-machine';
 import { createBackoffTimer } from './backoff-manager';
@@ -6,13 +6,14 @@ import { createHeartbeatMonitor, DEFAULT_HEARTBEAT_CONFIG } from './heartbeat-mo
 import type { HeartbeatMonitor } from './heartbeat-monitor';
 import { createRelay } from './relay-client';
 import type { Relay } from './relay-client';
+import type { DiscoveryResult } from './service-discovery';
 
 const DEFAULT_URL = 'ws://127.0.0.1:7483';
 const SERVER_INFO_TIMEOUT_MS = 10_000;
 
 export type ToolRequestHandler = (id: string, tool: string, params: Record<string, unknown>) => void;
 export type ToolScanHandler = (tools: ToolScanResult[]) => void;
-export type DiscoverUrlFn = () => Promise<{ url: string; token?: string }>;
+export type DiscoverUrlFn = () => Promise<DiscoveryResult>;
 
 export interface ConnectionManagerOptions {
   onToolRequest?: ToolRequestHandler;
@@ -82,11 +83,24 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
 
   let isFirstConnect = true;
 
+  function setDiagnostic(reason: DiagnosticReason): void {
+    // If we previously had a connection, override to 'was_connected'
+    const effectiveReason = context.serverInfo !== null && reason !== 'connecting' ? 'was_connected' : reason;
+    if (context.diagnosticReason !== effectiveReason) {
+      context = { ...context, diagnosticReason: effectiveReason };
+      persistContext(context);
+      for (const listener of listeners) {
+        listener(context);
+      }
+    }
+  }
+
   async function refreshUrl(): Promise<void> {
     if (isFirstConnect || !options.discoverUrl) return;
     try {
-      const { url } = await options.discoverUrl();
-      currentUrl = url;
+      const result = await options.discoverUrl();
+      currentUrl = result.url;
+      setDiagnostic(result.diagnostic);
     } catch {
       // Keep current URL if discovery fails
     }
@@ -125,6 +139,10 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
         heartbeat?.stop();
         heartbeat = null;
         relay = null;
+        // Set diagnostic immediately — don't wait for next discovery cycle
+        if (context.serverInfo !== null) {
+          setDiagnostic('was_connected');
+        }
         dispatch({ type: 'WS_CLOSE' });
         // Schedule backoff if we're in reconnecting state
         if (context.state === 'reconnecting') {
@@ -134,6 +152,10 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
 
       onError(_error: Event) {
         if (context.state === 'connecting') {
+          // If diagnostic was 'connecting' (lock file said server exists), but WS failed → server not responding
+          if (context.diagnosticReason === 'connecting') {
+            setDiagnostic('server_not_responding');
+          }
           dispatch({ type: 'WS_ERROR' });
         }
       },
