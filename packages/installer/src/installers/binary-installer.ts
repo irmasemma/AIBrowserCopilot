@@ -158,3 +158,47 @@ export const isBinaryInstalled = (installDir: string, platform: PlatformInfo): b
   const assetName = getAssetName(platform.os, platform.arch);
   return existsSync(join(installDir, assetName));
 };
+
+export interface BinaryLockCheck {
+  locked: boolean;
+  path: string;
+  error?: string;
+}
+
+/**
+ * Check if the binary file is locked (currently running).
+ * On Windows, running executables cannot be renamed/deleted.
+ * On macOS/Linux, files can be overwritten while running (not locked).
+ */
+export const checkBinaryLocked = (installDir: string, platform: PlatformInfo): BinaryLockCheck => {
+  const assetName = getAssetName(platform.os, platform.arch);
+  const binaryPath = join(installDir, assetName);
+
+  if (!existsSync(binaryPath)) {
+    return { locked: false, path: binaryPath };
+  }
+
+  // Only Windows locks running executables
+  if (platform.os !== 'windows') {
+    return { locked: false, path: binaryPath };
+  }
+
+  // Try a test rename — if it fails with EPERM/EBUSY, file is locked
+  const testPath = `${binaryPath}.lock-test`;
+  try {
+    renameSync(binaryPath, testPath);
+    renameSync(testPath, binaryPath); // Rename back
+    return { locked: false, path: binaryPath };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EPERM' || code === 'EBUSY' || code === 'EACCES') {
+      return {
+        locked: true,
+        path: binaryPath,
+        error: 'The browser bridge is currently running. Close your AI tool (Claude Code, Cursor, etc.) and try again.',
+      };
+    }
+    // Some other error — not a lock
+    return { locked: false, path: binaryPath };
+  }
+};

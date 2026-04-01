@@ -1,29 +1,15 @@
-import { NATIVE_HOST_NAME } from '../shared/constants.js';
-
-// Native messaging is used ONLY to spawn the native host binary.
-// Actual communication happens via the WebSocket relay client.
-// This module does NOT manage connectionState — the relay client does.
-
-let port: chrome.runtime.Port | null = null;
+// Native messaging is no longer used to spawn the native host.
+// The AI tool (Claude Code, VS Code, Claude Desktop, etc.) manages the native host lifecycle.
+// The extension is a pure WebSocket client that connects to port 7483.
+//
+// This file is kept as a no-op stub so existing imports don't break.
 
 export const connect = (): void => {
-  if (port) return;
-
-  try {
-    port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
-
-    port.onDisconnect.addListener(() => {
-      port = null;
-      // Binary exited — will be respawned on next connect() call
-    });
-  } catch {
-    // Native host not registered — relay client will handle the state
-  }
+  // No-op: extension no longer spawns the native host
 };
 
 export const resetAndConnect = (): void => {
-  port = null;
-  connect();
+  // No-op
 };
 
-export const isConnected = (): boolean => port !== null;
+export const isConnected = (): boolean => false;

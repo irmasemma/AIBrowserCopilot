@@ -1,122 +1,126 @@
-import type { ConnectionInfo } from '../shared/types.js';
+import type { ServerInfo, ToolScanResult } from '../shared/types';
 
-interface ToolRequest {
-  id: string;
-  tool: string;
-  params: Record<string, unknown>;
+export interface RelayCallbacks {
+  onOpen: () => void;
+  onClose: (code: number, reason: string) => void;
+  onError: (error: Event) => void;
+  onServerInfo: (info: ServerInfo) => void;
+  onPong: (timestamp: number) => void;
+  onToolRequest: (id: string, tool: string, params: Record<string, unknown>) => void;
+  onToolScan: (tools: ToolScanResult[]) => void;
 }
 
-interface ToolResponse {
-  id: string;
-  result?: unknown;
-  error?: { message: string; code: string };
+export interface Relay {
+  connect(url: string): void;
+  disconnect(): void;
+  send(message: unknown): void;
+  sendPing(timestamp: number): void;
+  sendToolResponse(id: string, result: unknown): void;
+  sendToolError(id: string, error: { message: string; code: string }): void;
+  isConnected(): boolean;
 }
 
-type ToolHandler = (tool: string, params: Record<string, unknown>) => Promise<unknown>;
+export function createRelay(callbacks: RelayCallbacks): Relay {
+  let ws: WebSocket | null = null;
 
-const RELAY_PORT = 7483; // Fixed port — matches native host
-
-let socket: WebSocket | null = null;
-let toolHandler: ToolHandler | null = null;
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 3;
-
-const persistConnectionState = async (info: ConnectionInfo): Promise<void> => {
-  await chrome.storage.local.set({ connectionState: info });
-};
-
-const handleMessage = (event: MessageEvent) => {
-  try {
-    const request = JSON.parse(event.data as string) as ToolRequest;
-    if (!request.id || !request.tool || !toolHandler) return;
-
-    toolHandler(request.tool, request.params)
-      .then((result) => {
-        const response: ToolResponse = { id: request.id, result };
-        socket?.send(JSON.stringify(response));
-      })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        const code = (error as { code?: string })?.code ?? 'CONTENT_UNAVAILABLE';
-        const response: ToolResponse = { id: request.id, error: { message, code } };
-        socket?.send(JSON.stringify(response));
-      });
-  } catch {
-    // Ignore malformed messages
+  function safeSend(data: unknown): void {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify(data));
   }
-};
 
-export const connectToRelay = async (handler: ToolHandler): Promise<void> => {
-  toolHandler = handler;
-
-  try {
-    socket = new WebSocket(`ws://127.0.0.1:${RELAY_PORT}`);
-
-    socket.onopen = () => {
-      reconnectAttempts = 0; // Reset on successful connection
-      persistConnectionState({
-        state: 'connected',
-        lastConnected: Date.now(),
-        error: null,
-      });
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
+  function routeMessage(event: MessageEvent): void {
+    try {
+      const data = JSON.parse(event.data as string);
+      switch (data.type) {
+        case 'server_info':
+          callbacks.onServerInfo({
+            pid: data.pid,
+            port: data.port,
+            version: data.version,
+            startedBy: data.startedBy,
+            capabilities: data.capabilities,
+            uptime: data.uptime,
+          });
+          break;
+        case 'pong':
+          callbacks.onPong(data.timestamp);
+          break;
+        case 'tool_request':
+          callbacks.onToolRequest(data.id, data.tool, data.params ?? {});
+          break;
+        case 'tool_scan':
+          callbacks.onToolScan(data.tools ?? []);
+          break;
+        default:
+          break;
       }
-    };
+    } catch {
+      // Ignore malformed messages
+    }
+  }
 
-    socket.onmessage = handleMessage;
+  function cleanup(): void {
+    if (ws) {
+      ws.onopen = null;
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.onmessage = null;
+      ws = null;
+    }
+  }
 
-    socket.onclose = () => {
-      socket = null;
-      reconnectAttempts++;
-
-      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-        persistConnectionState({
-          state: 'setup-needed',
-          lastConnected: null,
-          error: 'Native host not found. Run: npx ai-browser-copilot-setup',
-        });
-        return;
+  return {
+    connect(url: string): void {
+      // Close any existing connection first
+      if (ws) {
+        ws.onclose = null; // Prevent callback from old socket
+        ws.close();
+        cleanup();
       }
 
-      persistConnectionState({
-        state: 'reconnecting',
-        lastConnected: null,
-        error: 'Connection lost',
-      });
-      scheduleReconnect(handler);
-    };
+      ws = new WebSocket(url);
 
-    socket.onerror = () => {
-      socket?.close();
-    };
-  } catch {
-    await persistConnectionState({
-      state: 'disconnected',
-      lastConnected: null,
-      error: 'Failed to connect to relay',
-    });
-    scheduleReconnect(handler);
-  }
-};
+      ws.onopen = () => {
+        callbacks.onOpen();
+      };
 
-const scheduleReconnect = (handler: ToolHandler): void => {
-  if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    connectToRelay(handler);
-  }, 2000);
-};
+      ws.onclose = (event: CloseEvent) => {
+        callbacks.onClose(event.code, event.reason);
+        cleanup();
+      };
 
-export const resetRelay = (): void => {
-  reconnectAttempts = 0;
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
-};
+      ws.onerror = (event: Event) => {
+        callbacks.onError(event);
+      };
 
-export const isRelayConnected = (): boolean =>
-  socket !== null && socket.readyState === WebSocket.OPEN;
+      ws.onmessage = routeMessage;
+    },
+
+    disconnect(): void {
+      if (ws) {
+        ws.close();
+        // onclose handler will call cleanup
+      }
+    },
+
+    send(message: unknown): void {
+      safeSend(message);
+    },
+
+    sendPing(timestamp: number): void {
+      safeSend({ type: 'ping', timestamp });
+    },
+
+    sendToolResponse(id: string, result: unknown): void {
+      safeSend({ type: 'tool_response', id, result });
+    },
+
+    sendToolError(id: string, error: { message: string; code: string }): void {
+      safeSend({ type: 'tool_error', id, error });
+    },
+
+    isConnected(): boolean {
+      return ws !== null && ws.readyState === WebSocket.OPEN;
+    },
+  };
+}

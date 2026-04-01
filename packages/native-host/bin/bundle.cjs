@@ -28,6 +28,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
   mod
 ));
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
 // ../../node_modules/ajv/dist/compile/codegen/code.js
 var require_code = __commonJS({
@@ -8999,7 +9000,7 @@ var require_websocket = __commonJS({
     var EventEmitter = require("events");
     var https = require("https");
     var http = require("http");
-    var net = require("net");
+    var net2 = require("net");
     var tls = require("tls");
     var { randomBytes, createHash } = require("crypto");
     var { Duplex, Readable } = require("stream");
@@ -9733,12 +9734,12 @@ var require_websocket = __commonJS({
     }
     function netConnect(options) {
       options.path = options.socketPath;
-      return net.connect(options);
+      return net2.connect(options);
     }
     function tlsConnect(options) {
       options.path = void 0;
       if (!options.servername && options.servername !== "") {
-        options.servername = net.isIP(options.host) ? "" : options.host;
+        options.servername = net2.isIP(options.host) ? "" : options.host;
       }
       return tls.connect(options);
     }
@@ -10413,6 +10414,13 @@ var require_websocket_server = __commonJS({
     }
   }
 });
+
+// src/index.ts
+var index_exports = {};
+__export(index_exports, {
+  VERSION: () => VERSION2
+});
+module.exports = __toCommonJS(index_exports);
 
 // ../../node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 var import_node_process = __toESM(require("node:process"), 1);
@@ -24619,7 +24627,7 @@ var EMPTY_COMPLETION_RESULT = {
 // src/tools/get-page-content.ts
 var getPageContent = {
   name: "get_page_content",
-  description: "Extract text or HTML content from the active browser tab",
+  description: "Read the text or HTML content of the web page the user is currently viewing in their browser. Use this when the user asks about what is on their screen, current tab, or current page.",
   tier: "free",
   inputSchema: {
     url: external_exports.string().optional().describe("Target URL (defaults to active tab)"),
@@ -24633,7 +24641,7 @@ var getPageContent = {
 // src/tools/get-page-metadata.ts
 var getPageMetadata = {
   name: "get_page_metadata",
-  description: "Get metadata (title, URL, description, Open Graph, favicon) from the active tab",
+  description: "Get metadata (title, URL, description, Open Graph tags, favicon) from the page the user is viewing. Use this when you need a quick summary of what a page is about without reading the full content.",
   tier: "pro",
   inputSchema: {
     url: external_exports.string().optional().describe("Target URL (defaults to active tab)")
@@ -24646,7 +24654,7 @@ var getPageMetadata = {
 // src/tools/take-screenshot.ts
 var takeScreenshot = {
   name: "take_screenshot",
-  description: "Capture a screenshot of the visible browser tab",
+  description: "Take a screenshot of what the user currently sees in their browser. Use this when the user asks you to look at, see, or visually inspect their screen or browser tab.",
   tier: "free",
   inputSchema: {
     format: external_exports.enum(["png", "jpeg"]).default("png").describe("Image format"),
@@ -24660,7 +24668,7 @@ var takeScreenshot = {
 // src/tools/list-tabs.ts
 var listTabs = {
   name: "list_tabs",
-  description: "List all open browser tabs with titles and URLs",
+  description: "List all tabs the user has open in their browser with titles and URLs. Use this when the user asks what tabs they have open, or needs help finding or organizing tabs.",
   tier: "free",
   inputSchema: {
     query: external_exports.string().optional().describe("Filter tabs by title or URL match")
@@ -24673,7 +24681,7 @@ var listTabs = {
 // src/tools/navigate.ts
 var navigate = {
   name: "navigate",
-  description: "Navigate the active browser tab to a specified URL",
+  description: "Navigate the user's browser to a URL. Use this when the user asks you to go to a website, open a page, or navigate somewhere in their browser.",
   tier: "pro",
   inputSchema: {
     url: external_exports.string().describe("Target URL to navigate to"),
@@ -24687,7 +24695,7 @@ var navigate = {
 // src/tools/fill-form.ts
 var fillForm = {
   name: "fill_form",
-  description: "Fill form fields on the active browser tab with specified data",
+  description: "Fill in form fields on the page the user is viewing. Use this when the user asks you to fill out a form, enter data into fields, or auto-complete form inputs in their browser.",
   tier: "pro",
   inputSchema: {
     fields: external_exports.array(external_exports.object({
@@ -24703,7 +24711,7 @@ var fillForm = {
 // src/tools/click-element.ts
 var clickElement = {
   name: "click_element",
-  description: "Click an element on the active browser tab by CSS selector or visible text",
+  description: "Click a button, link, or other element on the page the user is viewing. Use this when the user asks you to click something, press a button, or interact with an element in their browser.",
   tier: "pro",
   inputSchema: {
     selector: external_exports.string().optional().describe("CSS selector for the element"),
@@ -24717,7 +24725,7 @@ var clickElement = {
 // src/tools/extract-table.ts
 var extractTable = {
   name: "extract_table",
-  description: "Extract structured table data from the active browser tab",
+  description: "Extract structured table data from the page the user is viewing. Use this when the user asks you to read a table, get spreadsheet data, or extract tabular information from a web page.",
   tier: "pro",
   inputSchema: {
     selector: external_exports.string().optional().describe("CSS selector for a specific table"),
@@ -24751,52 +24759,244 @@ var import_websocket = __toESM(require_websocket(), 1);
 var import_websocket_server = __toESM(require_websocket_server(), 1);
 
 // src/extension-relay.ts
+var import_node_net = __toESM(require("node:net"), 1);
+
+// src/lock-file-manager.ts
 var import_node_fs = require("node:fs");
 var import_node_path = require("node:path");
 var import_node_os = require("node:os");
+function getLockDir() {
+  switch ((0, import_node_os.platform)()) {
+    case "win32":
+      return (0, import_node_path.join)(process.env.LOCALAPPDATA ?? (0, import_node_path.join)((0, import_node_os.homedir)(), "AppData", "Local"), "ai-browser-copilot");
+    case "darwin":
+      return (0, import_node_path.join)((0, import_node_os.homedir)(), "Library", "Application Support", "ai-browser-copilot");
+    default:
+      return (0, import_node_path.join)((0, import_node_os.homedir)(), ".local", "share", "ai-browser-copilot");
+  }
+}
+function getLockFilePath() {
+  return (0, import_node_path.join)(getLockDir(), "server.lock");
+}
+function readLockFile(lockPath) {
+  const filePath = lockPath ?? getLockFilePath();
+  try {
+    const content = (0, import_node_fs.readFileSync)(filePath, "utf-8");
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
+}
+function writeLockFile(data, lockPath) {
+  const filePath = lockPath ?? getLockFilePath();
+  const dir = (0, import_node_path.join)(filePath, "..");
+  if (!(0, import_node_fs.existsSync)(dir)) {
+    (0, import_node_fs.mkdirSync)(dir, { recursive: true });
+  }
+  (0, import_node_fs.writeFileSync)(filePath, JSON.stringify(data, null, 2), "utf-8");
+}
+function deleteLockFile(lockPath) {
+  const filePath = lockPath ?? getLockFilePath();
+  try {
+    (0, import_node_fs.unlinkSync)(filePath);
+  } catch {
+  }
+}
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function probeWebSocket(port, expectedPid, timeoutMs = 3e3) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      ws.close();
+      resolve(false);
+    }, timeoutMs);
+    const ws = new import_websocket.default(`ws://127.0.0.1:${port}`);
+    ws.onopen = () => {
+    };
+    ws.onmessage = (event) => {
+      clearTimeout(timer);
+      try {
+        const data = JSON.parse(String(event.data));
+        ws.close();
+        resolve(data.type === "server_info" && data.pid === expectedPid);
+      } catch {
+        ws.close();
+        resolve(false);
+      }
+    };
+    ws.onerror = () => {
+      clearTimeout(timer);
+      resolve(false);
+    };
+  });
+}
+function killProcess(pid) {
+  try {
+    process.kill(pid, "SIGTERM");
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function waitForProcessExit(pid, timeoutMs = 3e3) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (!isProcessAlive(pid)) return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+  }
+  return !isProcessAlive(pid);
+}
+async function checkExistingInstance(lockPath) {
+  const lock = readLockFile(lockPath);
+  if (!lock) return "none";
+  if (!isProcessAlive(lock.pid)) {
+    return "orphaned";
+  }
+  const isOurs = await probeWebSocket(lock.port, lock.pid);
+  return isOurs ? "alive" : "orphaned";
+}
+function registerCleanupHandlers(lockPath) {
+  const cleanup = () => deleteLockFile(lockPath);
+  process.on("exit", cleanup);
+  process.on("SIGTERM", () => {
+    cleanup();
+    process.exit(0);
+  });
+  process.on("SIGINT", () => {
+    cleanup();
+    process.exit(0);
+  });
+  process.on("uncaughtException", (err) => {
+    cleanup();
+    throw err;
+  });
+  process.on("unhandledRejection", (reason) => {
+    cleanup();
+    throw reason;
+  });
+}
+
+// src/extension-relay.ts
+var VERSION = "0.1.0";
 var DEFAULT_PORT = 7483;
-var PORT_FILE_DIR = (0, import_node_path.join)((0, import_node_os.tmpdir)(), "ai-browser-copilot");
-var PORT_FILE = (0, import_node_path.join)(PORT_FILE_DIR, "relay-port");
 var REQUEST_TIMEOUT = 3e4;
 var wss = null;
 var extensionSocket = null;
 var pendingRequests = /* @__PURE__ */ new Map();
-var startRelay = () => {
-  return new Promise((resolve, reject) => {
-    wss = new import_websocket_server.default({ host: "127.0.0.1", port: DEFAULT_PORT });
-    wss.on("listening", () => {
-      const addr = wss.address();
-      if (typeof addr === "object" && addr !== null) {
-        const port = addr.port;
-        (0, import_node_fs.mkdirSync)(PORT_FILE_DIR, { recursive: true });
-        (0, import_node_fs.writeFileSync)(PORT_FILE, String(port), "utf-8");
-        resolve(port);
+var serverPort = 0;
+var startedBy = "unknown";
+var startTime = Date.now();
+function setStartedBy(tool) {
+  startedBy = tool;
+}
+function getServerInfo() {
+  return {
+    type: "server_info",
+    pid: process.pid,
+    port: serverPort,
+    version: VERSION,
+    startedBy,
+    capabilities: toolRegistry.map((t) => t.name),
+    uptime: Math.floor((Date.now() - startTime) / 1e3)
+  };
+}
+var handleConnection = (ws, _req) => {
+  extensionSocket = ws;
+  ws.send(JSON.stringify(getServerInfo()));
+  ws.on("message", (data) => {
+    try {
+      const parsed = JSON.parse(data.toString());
+      if (parsed.type === "ping") {
+        ws.send(JSON.stringify({ type: "pong", timestamp: parsed.timestamp }));
+        return;
       }
+      if (parsed.type === "request_tool_scan") {
+        ws.send(JSON.stringify({ type: "tool_scan", tools: [] }));
+        return;
+      }
+      const response = parsed;
+      const pending = pendingRequests.get(response.id);
+      if (pending) {
+        clearTimeout(pending.timer);
+        pendingRequests.delete(response.id);
+        pending.resolve(response);
+      }
+    } catch {
+    }
+  });
+  ws.on("close", () => {
+    extensionSocket = null;
+    for (const [id, pending] of pendingRequests) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("Extension disconnected"));
+      pendingRequests.delete(id);
+    }
+  });
+};
+async function findAvailablePort(preferred) {
+  return new Promise((resolve) => {
+    const server = import_node_net.default.createServer();
+    server.listen(preferred, "127.0.0.1", () => {
+      server.close(() => resolve(preferred));
     });
-    wss.on("connection", (ws) => {
-      extensionSocket = ws;
-      ws.on("message", (data) => {
-        try {
-          const response = JSON.parse(data.toString());
-          const pending = pendingRequests.get(response.id);
-          if (pending) {
-            clearTimeout(pending.timer);
-            pendingRequests.delete(response.id);
-            pending.resolve(response);
-          }
-        } catch {
-        }
-      });
-      ws.on("close", () => {
-        extensionSocket = null;
-        for (const [id, pending] of pendingRequests) {
-          clearTimeout(pending.timer);
-          pending.reject(new Error("Extension disconnected"));
-          pendingRequests.delete(id);
-        }
+    server.on("error", () => {
+      const fallback = import_node_net.default.createServer();
+      fallback.listen(0, "127.0.0.1", () => {
+        const addr = fallback.address();
+        const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+        fallback.close(() => resolve(port));
       });
     });
-    wss.on("error", reject);
+  });
+}
+var startRelay = async () => {
+  const lockPath = getLockFilePath();
+  const status = await checkExistingInstance(lockPath);
+  if (status === "alive") {
+    const lock = readLockFile(lockPath);
+    if (lock) {
+      process.stderr.write(`Taking over from existing instance (PID ${lock.pid})
+`);
+      killProcess(lock.pid);
+      await waitForProcessExit(lock.pid);
+    }
+    deleteLockFile(lockPath);
+  }
+  if (status === "orphaned") {
+    deleteLockFile(lockPath);
+  }
+  const port = await findAvailablePort(DEFAULT_PORT);
+  serverPort = port;
+  return new Promise((resolve, reject) => {
+    wss = new import_websocket_server.default({ host: "127.0.0.1", port });
+    wss.on("listening", () => {
+      writeLockFile({
+        pid: process.pid,
+        port,
+        token: "",
+        startedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        version: VERSION,
+        startedBy
+      }, lockPath);
+      registerCleanupHandlers(lockPath);
+      resolve(port);
+    });
+    wss.on("error", (err) => {
+      reject(err);
+    });
+    wss.on("connection", (ws, req) => {
+      handleConnection(ws, req);
+    });
   });
 };
 var sendToExtension = (request) => {
@@ -24810,7 +25010,7 @@ var sendToExtension = (request) => {
       reject(new Error("Tool request timed out"));
     }, REQUEST_TIMEOUT);
     pendingRequests.set(request.id, { resolve, reject, timer });
-    extensionSocket.send(JSON.stringify(request));
+    extensionSocket.send(JSON.stringify({ type: "tool_request", ...request }));
   });
 };
 var isExtensionConnected = () => extensionSocket !== null && extensionSocket.readyState === import_websocket.default.OPEN;
@@ -24860,6 +25060,15 @@ var registerTool = (server, tool) => {
 };
 
 // src/index.ts
+var VERSION2 = "0.1.0";
+if (process.argv.includes("--version")) {
+  process.stdout.write(`${VERSION2}
+`);
+  process.exit(0);
+}
+var startedByArg = process.argv.find((a) => a.startsWith("--started-by="));
+var startedBy2 = startedByArg?.split("=")[1] ?? process.env["COPILOT_STARTED_BY"] ?? "unknown";
+setStartedBy(startedBy2);
 var main = async () => {
   const port = await startRelay();
   process.stderr.write(`Extension relay listening on 127.0.0.1:${port}
@@ -24872,4 +25081,8 @@ main().catch((error2) => {
   process.stderr.write(`Fatal error: ${error2}
 `);
   process.exit(1);
+});
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
+  VERSION
 });

@@ -1,15 +1,21 @@
 import { create } from 'zustand';
-import type { ConnectionInfo, ActivityEntry } from '../shared/types.js';
+import type { ConnectionInfo, ConnectionContext, ActivityEntry, ToolScanResult } from '../shared/types.js';
 
 interface AppState {
+  /** @deprecated Use connectionContext instead */
   connection: ConnectionInfo;
+  connectionContext: ConnectionContext;
   activityLog: ActivityEntry[];
   toolPermissions: Record<string, boolean>;
+  toolScanResults: ToolScanResult[];
+  toolScanTimestamp: number | null;
   setConnection: (info: ConnectionInfo) => void;
+  setConnectionContext: (ctx: ConnectionContext) => void;
   addActivity: (entry: ActivityEntry) => void;
   setActivityLog: (log: ActivityEntry[]) => void;
   toggleTool: (tool: string) => void;
   setToolPermissions: (permissions: Record<string, boolean>) => void;
+  setToolScanResults: (results: ToolScanResult[]) => void;
 }
 
 const DEFAULT_PERMISSIONS: Record<string, boolean> = {
@@ -23,12 +29,27 @@ const DEFAULT_PERMISSIONS: Record<string, boolean> = {
   extract_table: true,
 };
 
+const DEFAULT_CONNECTION_CONTEXT: ConnectionContext = {
+  state: 'disconnected',
+  failureCount: 0,
+  missedHeartbeats: 0,
+  lastConnectedAt: null,
+  serverInfo: null,
+  error: null,
+  reconnectsThisSession: 0,
+};
+
 export const useStore = create<AppState>((set) => ({
-  connection: { state: 'setup-needed', lastConnected: null, error: null },
+  connection: { state: 'disconnected', lastConnected: null, error: null },
+  connectionContext: { ...DEFAULT_CONNECTION_CONTEXT },
   activityLog: [],
   toolPermissions: { ...DEFAULT_PERMISSIONS },
+  toolScanResults: [],
+  toolScanTimestamp: null,
 
   setConnection: (info) => set({ connection: info }),
+
+  setConnectionContext: (ctx) => set({ connectionContext: ctx }),
 
   addActivity: (entry) =>
     set((state) => ({
@@ -45,20 +66,34 @@ export const useStore = create<AppState>((set) => ({
     }),
 
   setToolPermissions: (permissions) => set({ toolPermissions: permissions }),
+
+  setToolScanResults: (results) => set({ toolScanResults: results, toolScanTimestamp: Date.now() }),
 }));
 
 // Sync from chrome.storage on load
 export const initStoreFromStorage = async (): Promise<void> => {
-  const data = await chrome.storage.local.get(['connectionState', 'activityLog', 'toolPermissions']);
+  const data = await chrome.storage.local.get([
+    'connectionState',
+    'connectionContext',
+    'activityLog',
+    'toolPermissions',
+    'toolScanResults',
+  ]);
 
   if (data.connectionState) {
     useStore.getState().setConnection(data.connectionState as ConnectionInfo);
+  }
+  if (data.connectionContext) {
+    useStore.getState().setConnectionContext(data.connectionContext as ConnectionContext);
   }
   if (data.activityLog) {
     useStore.getState().setActivityLog(data.activityLog as ActivityEntry[]);
   }
   if (data.toolPermissions) {
     useStore.getState().setToolPermissions(data.toolPermissions as Record<string, boolean>);
+  }
+  if (data.toolScanResults) {
+    useStore.getState().setToolScanResults(data.toolScanResults as ToolScanResult[]);
   }
 };
 
@@ -73,6 +108,12 @@ export const listenForUpdates = (): void => {
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.connectionState?.newValue) {
       useStore.getState().setConnection(changes.connectionState.newValue as ConnectionInfo);
+    }
+    if (changes.connectionContext?.newValue) {
+      useStore.getState().setConnectionContext(changes.connectionContext.newValue as ConnectionContext);
+    }
+    if (changes.toolScanResults?.newValue) {
+      useStore.getState().setToolScanResults(changes.toolScanResults.newValue as ToolScanResult[]);
     }
   });
 };

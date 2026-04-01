@@ -3,7 +3,7 @@ import type { ToolPlugin } from '../shared/types.js';
 
 export const getPageContent: ToolPlugin = {
   name: 'get_page_content',
-  description: 'Extract text or HTML content from the active browser tab',
+  description: 'Read the text or HTML content of the web page the user is currently viewing in their browser. Use this when the user asks about what is on their screen, current tab, or current page.',
   tier: 'free',
   inputSchema: {
     url: z.string().optional().describe('Target URL (defaults to active tab)'),

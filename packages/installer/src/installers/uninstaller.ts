@@ -7,6 +7,7 @@ import { getAssetName, NATIVE_HOST_NAME } from '../shared/constants.js';
 import { getManifestPath } from './host-registrar.js';
 import { removeConfigEntry } from './config-merger.js';
 import { registerAllDetectors, getAll, clear } from '../detectors/index.js';
+import { detectBrowsers, HELPER_HOST_NAME } from './browser-registrar.js';
 
 export interface UninstallResult {
   binaryRemoved: boolean;
@@ -121,7 +122,52 @@ const removeConfigs = async (platform: PlatformInfo): Promise<ConfigRemovalResul
 };
 
 /**
+ * Remove NM registrations from all detected browsers (main + helper hosts).
+ */
+const removeMultiBrowserRegistrations = (platform: PlatformInfo): string[] => {
+  const errors: string[] = [];
+  const browsers = detectBrowsers(platform);
+
+  for (const browser of browsers) {
+    const hostNames = [NATIVE_HOST_NAME, HELPER_HOST_NAME];
+
+    for (const hostName of hostNames) {
+      try {
+        if (platform.os === 'windows' && browser.registryKey) {
+          const regPath = `${browser.registryKey}\\${hostName}`;
+          try {
+            execSync(`reg delete "${regPath}" /f`, { stdio: 'ignore' });
+          } catch {
+            // Key may not exist
+          }
+        } else if (browser.manifestDir) {
+          const manifestPath = join(browser.manifestDir, `${hostName}.json`);
+          if (existsSync(manifestPath)) {
+            unlinkSync(manifestPath);
+          }
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`${browser.name}/${hostName}: ${msg}`);
+      }
+    }
+  }
+
+  // Also remove lock file
+  const installDir = getInstallDir(platform);
+  const lockFile = join(installDir, 'server.lock');
+  try {
+    if (existsSync(lockFile)) unlinkSync(lockFile);
+  } catch {
+    // Best effort
+  }
+
+  return errors;
+};
+
+/**
  * Full uninstall: remove binary, manifest, registry key, and MCP config entries.
+ * Also removes NM registrations from all detected browsers.
  */
 export const uninstall = async (platform: PlatformInfo): Promise<UninstallResult> => {
   const errors: string[] = [];
@@ -139,6 +185,10 @@ export const uninstall = async (platform: PlatformInfo): Promise<UninstallResult
   for (const cr of configsRemoved) {
     if (cr.error) errors.push(`${cr.tool}: ${cr.error}`);
   }
+
+  // Remove NM registrations from all browsers (main + helper hosts)
+  const browserErrors = removeMultiBrowserRegistrations(platform);
+  errors.push(...browserErrors);
 
   return {
     binaryRemoved: binaryResult.removed,

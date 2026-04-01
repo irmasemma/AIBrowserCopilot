@@ -3,7 +3,7 @@ import type { ToolPlugin } from '../shared/types.js';
 
 export const extractTable: ToolPlugin = {
   name: 'extract_table',
-  description: 'Extract structured table data from the active browser tab',
+  description: 'Extract structured table data from the page the user is viewing. Use this when the user asks you to read a table, get spreadsheet data, or extract tabular information from a web page.',
   tier: 'pro',
   inputSchema: {
     selector: z.string().optional().describe('CSS selector for a specific table'),

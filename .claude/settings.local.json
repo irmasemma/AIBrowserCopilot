@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__ai-browser-copilot__list_tabs"
+    ]
+  }
+}

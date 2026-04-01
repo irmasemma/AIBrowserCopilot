@@ -71,7 +71,7 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
   },
 
   async list_tabs(params) {
-    const query = params.query as string | undefined;
+    const query = (params.query as string) ?? null;
     let tabs = await chrome.tabs.query({});
 
     if (query) {
@@ -147,13 +147,13 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
   },
 
   async click_element(params) {
-    const selector = params.selector as string | undefined;
-    const text = params.text as string | undefined;
+    const selector = (params.selector as string) ?? null;
+    const text = (params.text as string) ?? null;
     const tab = await getActiveTab();
 
     const result = await chrome.scripting.executeScript({
       target: { tabId: tab.id! },
-      func: (sel: string | undefined, txt: string | undefined) => {
+      func: (sel: string | null, txt: string | null) => {
         let el: Element | null = null;
         if (sel) {
           el = document.querySelector(sel);
@@ -177,13 +177,13 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
   },
 
   async extract_table(params) {
-    const selector = params.selector as string | undefined;
+    const selector = (params.selector as string) ?? null;
     const index = (params.index as number) ?? 0;
     const tab = await getActiveTab();
 
     const result = await chrome.scripting.executeScript({
       target: { tabId: tab.id! },
-      func: (sel: string | undefined, idx: number) => {
+      func: (sel: string | null, idx: number) => {
         const tables = sel
           ? [document.querySelector(sel) as HTMLTableElement]
           : Array.from(document.querySelectorAll('table'));

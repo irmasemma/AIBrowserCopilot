@@ -12,6 +12,8 @@
     "compile:linux": "npm run bundle && pkg bin/bundle.cjs --targets node18-linux-x64 --output bin/ai-browser-copilot-linux-x64",
     "compile:linux-arm": "npm run bundle && pkg bin/bundle.cjs --targets node18-linux-arm64 --output bin/ai-browser-copilot-linux-arm64",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "start": "node dist/index.js"
   },
   "dependencies": {
@@ -24,6 +26,7 @@
     "@types/ws": "^8.18.1",
     "esbuild": "^0.27.4",
     "pkg": "^5.8.1",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.2"
   }
 }

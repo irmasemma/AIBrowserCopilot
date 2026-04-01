@@ -52,8 +52,8 @@ English
 
 ## Permissions Justification
 
-### activeTab
-Required to read page content and take screenshots when the user's AI assistant requests it. Only activates on the currently visible tab when a tool is invoked.
+### host_permissions: <all_urls>
+Required so the AI assistant can read page content, take screenshots, fill forms, click elements, and extract table data on any website the user is viewing. Tool invocations are programmatic (triggered by the AI, not by a user click), so activeTab alone is insufficient. Users control which tools are enabled via toggles in the side panel, and sensitive domains (banking, email) are blocked by default.
 
 ### tabs
 Required for the "List Tabs" tool, which lets the AI assistant see what tabs are open to help the user navigate. Also used for the "Navigate" tool to update the active tab's URL.
@@ -63,6 +63,9 @@ Required to display the extension's control panel where users can see connection
 
 ### nativeMessaging
 Required to communicate with the local native messaging host (the MCP bridge). This is the core mechanism that connects the browser to the AI assistant. All communication is local — no network requests are made.
+
+### scripting
+Required to execute content scripts that read page content, extract metadata, fill forms, click elements, and extract table data. Scripts run only when the AI assistant invokes a tool and only on the active tab.
 
 ### storage
 Required to persist user preferences (tool permission toggles, connection state) across browser sessions.

@@ -27,29 +27,41 @@ const updateStatus = (state: string) => {
       dot.style.background = '#16A34A';
       label.textContent = 'Connected';
       break;
-    case 'disconnected':
-      dot.style.background = '#EF4444';
-      label.textContent = 'Disconnected';
+    case 'connecting':
+      dot.style.background = '#F59E0B';
+      label.textContent = 'Connecting...';
+      break;
+    case 'degraded':
+      dot.style.background = '#F59E0B';
+      label.textContent = 'Unstable';
       break;
     case 'reconnecting':
       dot.style.background = '#F59E0B';
       label.textContent = 'Reconnecting...';
       break;
+    case 'disconnected':
+      dot.style.background = '#9CA3AF';
+      label.textContent = 'Not Connected';
+      break;
     default:
       dot.style.background = '#9CA3AF';
-      label.textContent = 'Setup Required';
+      label.textContent = 'Not Connected';
   }
 };
 
-// Initial read
-chrome.storage.local.get('connectionState', (data: Record<string, unknown>) => {
-  const state = (data.connectionState as { state?: string } | undefined)?.state ?? 'setup-needed';
+// Read from connectionContext (new key) with fallback to connectionState (old key)
+chrome.storage.local.get(['connectionContext', 'connectionState'], (data: Record<string, unknown>) => {
+  const ctx = data.connectionContext as { state?: string } | undefined;
+  const old = data.connectionState as { state?: string } | undefined;
+  const state = ctx?.state ?? old?.state ?? 'disconnected';
   updateStatus(state);
 });
 
-// Listen for changes so popup stays in sync
+// Listen for changes on both keys
 chrome.storage.onChanged.addListener((changes) => {
-  if (changes.connectionState?.newValue) {
-    updateStatus(changes.connectionState.newValue.state ?? 'setup-needed');
+  if (changes.connectionContext?.newValue) {
+    updateStatus(changes.connectionContext.newValue.state ?? 'disconnected');
+  } else if (changes.connectionState?.newValue) {
+    updateStatus(changes.connectionState.newValue.state ?? 'disconnected');
   }
 });

@@ -3,7 +3,7 @@ import type { ToolPlugin } from '../shared/types.js';
 
 export const fillForm: ToolPlugin = {
   name: 'fill_form',
-  description: 'Fill form fields on the active browser tab with specified data',
+  description: 'Fill in form fields on the page the user is viewing. Use this when the user asks you to fill out a form, enter data into fields, or auto-complete form inputs in their browser.',
   tier: 'pro',
   inputSchema: {
     fields: z.array(z.object({

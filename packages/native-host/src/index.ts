@@ -1,6 +1,6 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createMcpServer } from './mcp-server.js';
-import { startRelay } from './extension-relay.js';
+import { startRelay, setStartedBy } from './extension-relay.js';
 
 export const VERSION = '0.1.0';
 
@@ -8,6 +8,11 @@ if (process.argv.includes('--version')) {
   process.stdout.write(`${VERSION}\n`);
   process.exit(0);
 }
+
+// Detect which AI tool started us (passed via MCP config args or env)
+const startedByArg = process.argv.find((a) => a.startsWith('--started-by='));
+const startedBy = startedByArg?.split('=')[1] ?? process.env['COPILOT_STARTED_BY'] ?? 'unknown';
+setStartedBy(startedBy);
 
 const main = async () => {
   const port = await startRelay();

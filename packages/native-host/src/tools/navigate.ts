@@ -3,7 +3,7 @@ import type { ToolPlugin } from '../shared/types.js';
 
 export const navigate: ToolPlugin = {
   name: 'navigate',
-  description: 'Navigate the active browser tab to a specified URL',
+  description: "Navigate the user's browser to a URL. Use this when the user asks you to go to a website, open a page, or navigate somewhere in their browser.",
   tier: 'pro',
   inputSchema: {
     url: z.string().describe('Target URL to navigate to'),

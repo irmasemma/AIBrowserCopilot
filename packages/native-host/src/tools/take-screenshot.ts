@@ -3,7 +3,7 @@ import type { ToolPlugin } from '../shared/types.js';
 
 export const takeScreenshot: ToolPlugin = {
   name: 'take_screenshot',
-  description: 'Capture a screenshot of the visible browser tab',
+  description: 'Take a screenshot of what the user currently sees in their browser. Use this when the user asks you to look at, see, or visually inspect their screen or browser tab.',
   tier: 'free',
   inputSchema: {
     format: z.enum(['png', 'jpeg']).default('png').describe('Image format'),

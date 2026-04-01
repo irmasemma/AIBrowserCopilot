@@ -3,7 +3,7 @@ import type { ToolPlugin } from '../shared/types.js';
 
 export const clickElement: ToolPlugin = {
   name: 'click_element',
-  description: 'Click an element on the active browser tab by CSS selector or visible text',
+  description: 'Click a button, link, or other element on the page the user is viewing. Use this when the user asks you to click something, press a button, or interact with an element in their browser.',
   tier: 'pro',
   inputSchema: {
     selector: z.string().optional().describe('CSS selector for the element'),

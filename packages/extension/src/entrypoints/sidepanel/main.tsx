@@ -31,7 +31,7 @@ const App = () => {
   if (needsSetup) {
     return (
       <div class="flex flex-col h-screen bg-neutral-50">
-        <ConnectionHeader state={connection.state} />
+        <ConnectionHeader state={connection.state} connectionInfo={connection} />
         <div class="flex-1 overflow-y-auto">
           <SetupWizard onComplete={() => setSetupComplete(true)} />
         </div>
@@ -41,13 +41,21 @@ const App = () => {
 
   return (
     <div class="flex flex-col h-screen bg-neutral-50">
-      <ConnectionHeader state={connection.state} />
+      <ConnectionHeader state={connection.state} connectionInfo={connection} />
       <div class="flex-1 overflow-y-auto">
+        {connection.state === 'waiting' && (
+          <ErrorCard
+            message="Waiting for AI tool — start Claude Code, VS Code, or another MCP host to connect."
+            actionLabel="Retry Now"
+            onAction={() => chrome.runtime.sendMessage({ type: 'retry_connection' })}
+            helpUrl={FAQ_URL}
+          />
+        )}
         {connection.state === 'disconnected' && connection.error && (
           <ErrorCard
             message={connection.error}
             actionLabel="Reconnect"
-            onAction={() => chrome.runtime.sendMessage({ type: 'reconnect' })}
+            onAction={() => chrome.runtime.sendMessage({ type: 'retry_connection' })}
             helpUrl={FAQ_URL}
           />
         )}
