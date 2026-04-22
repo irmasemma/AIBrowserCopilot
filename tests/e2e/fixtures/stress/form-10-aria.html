@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form 10 - ARIA-Heavy Accessible Form</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; padding: 20px; color: #333; }
+  h1 { margin-bottom: 20px; font-size: 1.5rem; }
+  .form-card { background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 600px; }
+  .form-card h2 { margin-bottom: 16px; font-size: 1.1rem; }
+  .field { margin-bottom: 20px; }
+  .field-label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; }
+
+  /* ARIA Combobox */
+  .combobox-wrapper { position: relative; }
+  .combobox-input { width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.95rem; cursor: pointer; background: #fff; display: flex; justify-content: space-between; align-items: center; }
+  .combobox-input:focus { outline: 2px solid #2563eb; outline-offset: -2px; }
+  .combobox-input .arrow { font-size: 0.7rem; color: #64748b; }
+  .combobox-listbox { position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #cbd5e1; border-top: none; border-radius: 0 0 4px 4px; max-height: 200px; overflow-y: auto; z-index: 100; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+  .combobox-listbox.open { display: block; }
+  .combobox-option { padding: 8px 12px; cursor: pointer; font-size: 0.9rem; }
+  .combobox-option:hover, .combobox-option[aria-selected="true"] { background: #eff6ff; color: #1d4ed8; }
+  .combobox-option:focus { outline: 2px solid #2563eb; outline-offset: -2px; }
+
+  /* ARIA Radio Group */
+  .radiogroup { display: flex; gap: 0; border: 1px solid #cbd5e1; border-radius: 4px; overflow: hidden; }
+  .radio-item { flex: 1; padding: 10px 16px; text-align: center; cursor: pointer; font-size: 0.9rem; border-right: 1px solid #cbd5e1; background: #fff; transition: background 0.15s; }
+  .radio-item:last-child { border-right: none; }
+  .radio-item:hover { background: #f1f5f9; }
+  .radio-item:focus { outline: 2px solid #2563eb; outline-offset: -2px; }
+  .radio-item[aria-checked="true"] { background: #2563eb; color: #fff; font-weight: 600; }
+
+  /* ARIA Switch */
+  .switch-wrapper { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+  .switch-track { width: 44px; height: 24px; background: #cbd5e1; border-radius: 12px; position: relative; transition: background 0.2s; }
+  .switch-track:focus { outline: 2px solid #2563eb; outline-offset: 2px; }
+  .switch-track[aria-checked="true"] { background: #2563eb; }
+  .switch-thumb { width: 20px; height: 20px; background: #fff; border-radius: 50%; position: absolute; top: 2px; left: 2px; transition: transform 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+  .switch-track[aria-checked="true"] .switch-thumb { transform: translateX(20px); }
+  .switch-label { font-size: 0.9rem; }
+
+  /* ARIA Slider */
+  .slider-wrapper { position: relative; padding: 8px 0; }
+  .slider-track { width: 100%; height: 6px; background: #e2e8f0; border-radius: 3px; position: relative; cursor: pointer; }
+  .slider-fill { height: 100%; background: #2563eb; border-radius: 3px; position: absolute; top: 0; left: 0; }
+  .slider-thumb { width: 20px; height: 20px; background: #2563eb; border-radius: 50%; position: absolute; top: 50%; transform: translate(-50%, -50%); cursor: grab; box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
+  .slider-thumb:focus { outline: 2px solid #1d4ed8; outline-offset: 2px; box-shadow: 0 0 0 4px rgba(37,99,235,0.2); }
+  .slider-thumb:active { cursor: grabbing; }
+  .slider-value { text-align: center; font-size: 1.1rem; font-weight: 600; color: #2563eb; margin-top: 8px; }
+
+  .btn-submit { background: #2563eb; color: #fff; border: none; padding: 10px 24px; border-radius: 4px; font-size: 1rem; cursor: pointer; margin-top: 12px; }
+  .btn-submit:hover { background: #1d4ed8; }
+  #results, #click-log { background: #fff; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 600px; margin-top: 16px; white-space: pre-wrap; font-family: monospace; font-size: 0.85rem; min-height: 40px; }
+  #results::before { content: "Results:"; display: block; font-weight: 600; margin-bottom: 8px; font-family: sans-serif; }
+  #click-log::before { content: "Click Log:"; display: block; font-weight: 600; margin-bottom: 8px; font-family: sans-serif; }
+</style>
+</head>
+<body>
+<h1>Form 10 - ARIA-Heavy Accessible Form (No Native Controls)</h1>
+
+<div class="form-card">
+  <h2>Preferences</h2>
+
+  <!-- ARIA Combobox -->
+  <div class="field">
+    <span class="field-label" id="combo-label">Favorite Framework</span>
+    <div class="combobox-wrapper">
+      <div role="combobox"
+           aria-expanded="false"
+           aria-haspopup="listbox"
+           aria-labelledby="combo-label"
+           data-testid="form-10-combobox"
+           id="combo-trigger"
+           class="combobox-input"
+           tabindex="0">
+        <span id="combo-text">-- Select --</span>
+        <span class="arrow">&#9660;</span>
+      </div>
+      <div role="listbox"
+           aria-labelledby="combo-label"
+           id="combo-listbox"
+           class="combobox-listbox"
+           data-testid="form-10-combobox-listbox">
+        <div role="option" class="combobox-option" data-value="react" tabindex="-1" data-testid="form-10-option-react">React</div>
+        <div role="option" class="combobox-option" data-value="vue" tabindex="-1" data-testid="form-10-option-vue">Vue</div>
+        <div role="option" class="combobox-option" data-value="angular" tabindex="-1" data-testid="form-10-option-angular">Angular</div>
+        <div role="option" class="combobox-option" data-value="svelte" tabindex="-1" data-testid="form-10-option-svelte">Svelte</div>
+        <div role="option" class="combobox-option" data-value="solid" tabindex="-1" data-testid="form-10-option-solid">Solid</div>
+      </div>
+      <input type="hidden" name="framework" id="hidden-framework" data-testid="form-10-hidden-framework">
+    </div>
+  </div>
+
+  <!-- ARIA Radio Group -->
+  <div class="field">
+    <span class="field-label" id="radio-label">Experience Level</span>
+    <div role="radiogroup"
+         aria-labelledby="radio-label"
+         class="radiogroup"
+         data-testid="form-10-radiogroup"
+         id="experience-group">
+      <div role="radio" aria-checked="false" tabindex="0" data-value="beginner" class="radio-item" data-testid="form-10-radio-beginner">Beginner</div>
+      <div role="radio" aria-checked="false" tabindex="-1" data-value="intermediate" class="radio-item" data-testid="form-10-radio-intermediate">Intermediate</div>
+      <div role="radio" aria-checked="false" tabindex="-1" data-value="advanced" class="radio-item" data-testid="form-10-radio-advanced">Advanced</div>
+      <div role="radio" aria-checked="false" tabindex="-1" data-value="expert" class="radio-item" data-testid="form-10-radio-expert">Expert</div>
+    </div>
+    <input type="hidden" name="experience" id="hidden-experience" data-testid="form-10-hidden-experience">
+  </div>
+
+  <!-- ARIA Switch -->
+  <div class="field">
+    <span class="field-label">Dark Mode</span>
+    <div class="switch-wrapper" data-testid="form-10-switch-darkmode" id="switch-darkmode">
+      <div role="switch"
+           aria-checked="false"
+           aria-label="Dark Mode"
+           tabindex="0"
+           class="switch-track"
+           id="switch-track-darkmode">
+        <div class="switch-thumb"></div>
+      </div>
+      <span class="switch-label" id="switch-label-darkmode">Off</span>
+    </div>
+    <input type="hidden" name="darkMode" id="hidden-darkmode" value="false" data-testid="form-10-hidden-darkmode">
+  </div>
+
+  <!-- ARIA Switch 2 -->
+  <div class="field">
+    <span class="field-label">Email Notifications</span>
+    <div class="switch-wrapper" data-testid="form-10-switch-notifications" id="switch-notifications">
+      <div role="switch"
+           aria-checked="false"
+           aria-label="Email Notifications"
+           tabindex="0"
+           class="switch-track"
+           id="switch-track-notifications">
+        <div class="switch-thumb"></div>
+      </div>
+      <span class="switch-label" id="switch-label-notifications">Off</span>
+    </div>
+    <input type="hidden" name="notifications" id="hidden-notifications" value="false" data-testid="form-10-hidden-notifications">
+  </div>
+
+  <!-- ARIA Slider -->
+  <div class="field">
+    <span class="field-label" id="slider-label">Skill Rating: <span id="slider-display">50</span> / 100</span>
+    <div class="slider-wrapper" data-testid="form-10-slider" id="slider-wrapper">
+      <div class="slider-track" id="slider-track">
+        <div class="slider-fill" id="slider-fill" style="width: 50%"></div>
+        <div role="slider"
+             aria-valuemin="0"
+             aria-valuemax="100"
+             aria-valuenow="50"
+             aria-labelledby="slider-label"
+             tabindex="0"
+             class="slider-thumb"
+             id="slider-thumb"
+             style="left: 50%">
+        </div>
+      </div>
+    </div>
+    <input type="hidden" name="rating" id="hidden-rating" value="50" data-testid="form-10-hidden-rating">
+  </div>
+
+  <button class="btn-submit" id="submit-btn" data-testid="form-10-submit">Submit</button>
+</div>
+
+<div id="results"></div>
+<div id="click-log"></div>
+
+<script>
+  // ---- COMBOBOX ----
+  const comboTrigger = document.getElementById('combo-trigger');
+  const comboListbox = document.getElementById('combo-listbox');
+  const comboText = document.getElementById('combo-text');
+  const hiddenFramework = document.getElementById('hidden-framework');
+  const comboOptions = comboListbox.querySelectorAll('[role="option"]');
+  let comboOpen = false;
+  let comboIndex = -1;
+
+  function toggleCombo(open) {
+    comboOpen = open;
+    comboTrigger.setAttribute('aria-expanded', String(open));
+    comboListbox.classList.toggle('open', open);
+  }
+
+  function selectComboOption(option) {
+    comboOptions.forEach(o => o.setAttribute('aria-selected', 'false'));
+    option.setAttribute('aria-selected', 'true');
+    comboText.textContent = option.textContent;
+    hiddenFramework.value = option.getAttribute('data-value');
+    toggleCombo(false);
+    comboTrigger.focus();
+  }
+
+  comboTrigger.addEventListener('click', () => toggleCombo(!comboOpen));
+
+  comboTrigger.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (!comboOpen) {
+        toggleCombo(true);
+        comboIndex = 0;
+        comboOptions[0].focus();
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      toggleCombo(true);
+      comboIndex = 0;
+      comboOptions[0].focus();
+    } else if (e.key === 'Escape') {
+      toggleCombo(false);
+    }
+  });
+
+  comboListbox.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      comboIndex = Math.min(comboIndex + 1, comboOptions.length - 1);
+      comboOptions[comboIndex].focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      comboIndex = Math.max(comboIndex - 1, 0);
+      comboOptions[comboIndex].focus();
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (comboIndex >= 0) selectComboOption(comboOptions[comboIndex]);
+    } else if (e.key === 'Escape') {
+      toggleCombo(false);
+      comboTrigger.focus();
+    }
+  });
+
+  comboOptions.forEach((opt, i) => {
+    opt.addEventListener('click', () => {
+      comboIndex = i;
+      selectComboOption(opt);
+    });
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.combobox-wrapper')) toggleCombo(false);
+  });
+
+  // ---- RADIO GROUP ----
+  const radioGroup = document.getElementById('experience-group');
+  const radioItems = radioGroup.querySelectorAll('[role="radio"]');
+  const hiddenExperience = document.getElementById('hidden-experience');
+
+  function selectRadio(item) {
+    radioItems.forEach(r => {
+      r.setAttribute('aria-checked', 'false');
+      r.setAttribute('tabindex', '-1');
+    });
+    item.setAttribute('aria-checked', 'true');
+    item.setAttribute('tabindex', '0');
+    item.focus();
+    hiddenExperience.value = item.getAttribute('data-value');
+  }
+
+  radioItems.forEach(item => {
+    item.addEventListener('click', () => selectRadio(item));
+  });
+
+  radioGroup.addEventListener('keydown', (e) => {
+    const current = radioGroup.querySelector('[aria-checked="true"]') || radioItems[0];
+    const items = Array.from(radioItems);
+    let idx = items.indexOf(current);
+
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      idx = (idx + 1) % items.length;
+      selectRadio(items[idx]);
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      idx = (idx - 1 + items.length) % items.length;
+      selectRadio(items[idx]);
+    } else if (e.key === ' ') {
+      e.preventDefault();
+      selectRadio(current);
+    }
+  });
+
+  // ---- SWITCHES ----
+  function setupSwitch(trackId, labelId, hiddenId) {
+    const track = document.getElementById(trackId);
+    const label = document.getElementById(labelId);
+    const hidden = document.getElementById(hiddenId);
+
+    function toggle() {
+      const checked = track.getAttribute('aria-checked') === 'true';
+      const newVal = !checked;
+      track.setAttribute('aria-checked', String(newVal));
+      label.textContent = newVal ? 'On' : 'Off';
+      hidden.value = String(newVal);
+    }
+
+    track.addEventListener('click', toggle);
+    track.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  setupSwitch('switch-track-darkmode', 'switch-label-darkmode', 'hidden-darkmode');
+  setupSwitch('switch-track-notifications', 'switch-label-notifications', 'hidden-notifications');
+
+  // ---- SLIDER ----
+  const sliderThumb = document.getElementById('slider-thumb');
+  const sliderTrack = document.getElementById('slider-track');
+  const sliderFill = document.getElementById('slider-fill');
+  const sliderDisplay = document.getElementById('slider-display');
+  const hiddenRating = document.getElementById('hidden-rating');
+  let dragging = false;
+
+  function updateSlider(val) {
+    val = Math.max(0, Math.min(100, Math.round(val)));
+    sliderThumb.setAttribute('aria-valuenow', String(val));
+    sliderThumb.style.left = val + '%';
+    sliderFill.style.width = val + '%';
+    sliderDisplay.textContent = val;
+    hiddenRating.value = String(val);
+  }
+
+  function getSliderValFromEvent(e) {
+    const rect = sliderTrack.getBoundingClientRect();
+    const x = (e.clientX || e.touches[0].clientX) - rect.left;
+    return (x / rect.width) * 100;
+  }
+
+  sliderThumb.addEventListener('keydown', (e) => {
+    const current = parseInt(sliderThumb.getAttribute('aria-valuenow'));
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      updateSlider(current + 1);
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      updateSlider(current - 1);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      updateSlider(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      updateSlider(100);
+    } else if (e.key === 'PageUp') {
+      e.preventDefault();
+      updateSlider(current + 10);
+    } else if (e.key === 'PageDown') {
+      e.preventDefault();
+      updateSlider(current - 10);
+    }
+  });
+
+  sliderThumb.addEventListener('mousedown', (e) => {
+    dragging = true;
+    e.preventDefault();
+  });
+
+  sliderTrack.addEventListener('click', (e) => {
+    updateSlider(getSliderValFromEvent(e));
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (dragging) updateSlider(getSliderValFromEvent(e));
+  });
+
+  document.addEventListener('mouseup', () => { dragging = false; });
+
+  // ---- SUBMIT ----
+  document.getElementById('submit-btn').addEventListener('click', () => {
+    const data = {
+      framework: hiddenFramework.value,
+      experience: hiddenExperience.value,
+      darkMode: document.getElementById('hidden-darkmode').value,
+      notifications: document.getElementById('hidden-notifications').value,
+      rating: hiddenRating.value
+    };
+    document.getElementById('results').textContent = JSON.stringify(data, null, 2);
+  });
+
+  // Click log
+  const clickLog = document.getElementById('click-log');
+  document.addEventListener('click', function(e) {
+    const testid = e.target.getAttribute('data-testid') || '';
+    const tag = e.target.tagName.toLowerCase();
+    const role = e.target.getAttribute('role') || '';
+    const info = testid ? `[${testid}]` : (role ? `<${tag} role="${role}">` : `<${tag}>`);
+    const entry = document.createElement('div');
+    entry.textContent = new Date().toISOString().substr(11,12) + ' click ' + info;
+    clickLog.appendChild(entry);
+  });
+</script>
+</body>
+</html>

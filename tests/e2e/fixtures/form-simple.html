@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simple Forms Test Fixture</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #f8f9fa; color: #333; }
+    h1 { color: #1a1a2e; border-bottom: 2px solid #4F46E5; padding-bottom: 8px; }
+    h2 { color: #4F46E5; margin-top: 32px; }
+    form { background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 24px; }
+    .field { margin-bottom: 16px; }
+    label { display: block; margin-bottom: 4px; font-weight: 600; font-size: 14px; }
+    input[type="text"], input[type="email"], input[type="password"], input[type="url"],
+    input[type="tel"], input[type="date"], input[type="number"], textarea, select {
+      width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px;
+    }
+    input:focus, textarea:focus, select:focus { outline: none; border-color: #4F46E5; box-shadow: 0 0 0 2px rgba(79,70,229,0.2); }
+    textarea { resize: vertical; min-height: 80px; }
+    .radio-group label, .checkbox-group label { display: inline-flex; align-items: center; gap: 4px; margin-right: 16px; font-weight: normal; }
+    .btn { padding: 10px 20px; border: none; border-radius: 4px; font-size: 14px; cursor: pointer; margin-right: 8px; }
+    .btn-submit { background: #4F46E5; color: #fff; }
+    .btn-submit:hover { background: #4338CA; }
+    .btn-reset { background: #e5e7eb; color: #333; }
+    .btn-reset:hover { background: #d1d5db; }
+    .required-star { color: red; }
+    #results, #click-log { margin-top: 24px; padding: 16px; border-radius: 8px; font-family: monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; }
+    #results { background: #e8f5e9; border: 1px solid #a5d6a7; min-height: 40px; }
+    #click-log { background: #fff3e0; border: 1px solid #ffcc80; min-height: 40px; }
+    .range-value { display: inline-block; min-width: 30px; text-align: center; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+  <h1>Simple Forms Test Fixture</h1>
+  <p>Multiple HTML forms with standard input types for e2e testing.</p>
+
+  <!-- FORM 1: Contact / Personal Info -->
+  <h2>Form 1: Contact Information</h2>
+  <form id="contact-form" onsubmit="return handleSubmit(event, 'contact-form')">
+    <div class="field">
+      <label for="full-name">Full Name <span class="required-star">*</span></label>
+      <input type="text" id="full-name" name="fullName" placeholder="Enter your full name" required aria-label="Full name">
+    </div>
+
+    <div class="field">
+      <label for="email">Email <span class="required-star">*</span></label>
+      <input type="email" id="email" name="email" placeholder="user@example.com" required>
+    </div>
+
+    <div class="field">
+      <label for="password">Password <span class="required-star">*</span></label>
+      <input type="password" id="password" name="password" placeholder="Min 8 characters" required minlength="8">
+    </div>
+
+    <div class="field">
+      <label for="website">Website</label>
+      <input type="url" id="website" name="website" placeholder="https://example.com">
+    </div>
+
+    <div class="field">
+      <label for="phone">Phone</label>
+      <input type="tel" id="phone" name="phone" placeholder="+1 (555) 000-0000" aria-label="Phone number">
+    </div>
+
+    <div class="field">
+      <label for="bio">Bio</label>
+      <textarea id="bio" name="bio" placeholder="Tell us about yourself..." rows="3"></textarea>
+    </div>
+
+    <div class="field">
+      <label for="country">Country</label>
+      <select id="country" name="country">
+        <option value="">-- Select a country --</option>
+        <option value="us">United States</option>
+        <option value="uk">United Kingdom</option>
+        <option value="ca">Canada</option>
+        <option value="au">Australia</option>
+        <option value="de">Germany</option>
+        <option value="fr">France</option>
+        <option value="jp">Japan</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>Gender</label>
+      <div class="radio-group">
+        <label><input type="radio" name="gender" value="male"> Male</label>
+        <label><input type="radio" name="gender" value="female"> Female</label>
+        <label><input type="radio" name="gender" value="other"> Other</label>
+        <label><input type="radio" name="gender" value="prefer-not"> Prefer not to say</label>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="dob">Date of Birth</label>
+      <input type="date" id="dob" name="dob">
+    </div>
+
+    <div class="field">
+      <label><input type="checkbox" name="newsletter" value="yes"> Subscribe to newsletter</label>
+    </div>
+
+    <div class="field">
+      <label><input type="checkbox" name="terms" value="agreed" required> I agree to the Terms of Service <span class="required-star">*</span></label>
+    </div>
+
+    <div>
+      <button type="submit" class="btn btn-submit" onclick="logClick('Submit Contact Form')">Submit</button>
+      <button type="reset" class="btn btn-reset" onclick="logClick('Reset Contact Form')">Reset</button>
+    </div>
+  </form>
+
+  <!-- FORM 2: Preferences -->
+  <h2>Form 2: Preferences</h2>
+  <form id="preferences-form" onsubmit="return handleSubmit(event, 'preferences-form')">
+    <div class="field">
+      <label for="experience">Experience Level</label>
+      <input type="number" id="experience" name="experience" min="0" max="50" value="5" step="1">
+    </div>
+
+    <div class="field">
+      <label for="satisfaction">Satisfaction: <span class="range-value" id="satisfaction-value">50</span>%</label>
+      <input type="range" id="satisfaction" name="satisfaction" min="0" max="100" value="50"
+        oninput="document.getElementById('satisfaction-value').textContent = this.value">
+    </div>
+
+    <div class="field">
+      <label>Preferred Languages</label>
+      <div class="checkbox-group">
+        <label><input type="checkbox" name="languages" value="javascript"> JavaScript</label>
+        <label><input type="checkbox" name="languages" value="python"> Python</label>
+        <label><input type="checkbox" name="languages" value="rust"> Rust</label>
+        <label><input type="checkbox" name="languages" value="go"> Go</label>
+        <label><input type="checkbox" name="languages" value="typescript"> TypeScript</label>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="color">Favorite Color</label>
+      <input type="color" id="color" name="color" value="#4F46E5">
+    </div>
+
+    <div class="field">
+      <label for="priority">Priority Level</label>
+      <select id="priority" name="priority">
+        <option value="low">Low</option>
+        <option value="medium" selected>Medium</option>
+        <option value="high">High</option>
+        <option value="critical">Critical</option>
+      </select>
+    </div>
+
+    <div>
+      <button type="submit" class="btn btn-submit" onclick="logClick('Submit Preferences')">Save Preferences</button>
+      <button type="reset" class="btn btn-reset" onclick="logClick('Reset Preferences')">Reset</button>
+    </div>
+  </form>
+
+  <!-- FORM 3: Minimal form (fields without labels, only name) -->
+  <h2>Form 3: Unlabeled Fields</h2>
+  <form id="unlabeled-form" onsubmit="return handleSubmit(event, 'unlabeled-form')">
+    <div class="field">
+      <input type="text" name="first" placeholder="First name">
+    </div>
+    <div class="field">
+      <input type="text" name="last" placeholder="Last name">
+    </div>
+    <div class="field">
+      <input type="text" name="company" aria-label="Company name" placeholder="Company">
+    </div>
+    <div>
+      <button type="submit" class="btn btn-submit" onclick="logClick('Submit Unlabeled')">Submit</button>
+    </div>
+  </form>
+
+  <h2>Results</h2>
+  <div id="results">No submissions yet.</div>
+
+  <h2>Click Log</h2>
+  <div id="click-log">No clicks recorded.</div>
+
+  <script>
+    var clickCount = 0;
+
+    function logClick(label) {
+      clickCount++;
+      var log = document.getElementById('click-log');
+      var entry = '[' + clickCount + '] Clicked: ' + label + ' at ' + new Date().toLocaleTimeString();
+      if (clickCount === 1) {
+        log.textContent = entry;
+      } else {
+        log.textContent += '\n' + entry;
+      }
+    }
+
+    function handleSubmit(event, formId) {
+      event.preventDefault();
+      var form = document.getElementById(formId);
+      var formData = new FormData(form);
+      var data = {};
+      formData.forEach(function(value, key) {
+        if (data[key]) {
+          if (Array.isArray(data[key])) {
+            data[key].push(value);
+          } else {
+            data[key] = [data[key], value];
+          }
+        } else {
+          data[key] = value;
+        }
+      });
+
+      var resultsDiv = document.getElementById('results');
+      resultsDiv.textContent = 'Form: ' + formId + '\nSubmitted at: ' + new Date().toLocaleTimeString() + '\n\n' + JSON.stringify(data, null, 2);
+      logClick('Form submitted: ' + formId);
+      return false;
+    }
+  </script>
+
+</body>
+</html>

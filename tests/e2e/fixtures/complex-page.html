@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Complex Page — Multiple Buttons, Forms, Nested Elements</title>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 40px auto; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin: 16px 0; }
+    .card h3 { margin-top: 0; }
+    button, .btn { padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+    .btn-primary { background: #2563EB; color: white; border: none; }
+    .btn-secondary { background: #E5E7EB; color: #374151; border: none; }
+    .form-group { margin: 12px 0; }
+    .form-group label { display: block; margin-bottom: 4px; font-weight: 600; }
+    .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+    .radio-group label { display: flex; align-items: center; gap: 8px; font-weight: normal; margin: 4px 0; }
+    #results { margin-top: 20px; padding: 12px; background: #f0f0f0; border-radius: 4px; min-height: 20px; }
+    nav { display: flex; gap: 16px; margin-bottom: 20px; }
+    nav a { color: #2563EB; text-decoration: none; }
+    .support-widget { position: fixed; bottom: 20px; right: 20px; }
+    .support-widget button { background: #10B981; color: white; border: none; border-radius: 50%; width: 48px; height: 48px; font-size: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Product Submission</h1>
+
+  <nav>
+    <a href="#" id="nav-home">Home</a>
+    <a href="#" id="nav-products">Products</a>
+    <a href="#" id="nav-submit">Submit</a>
+    <a href="#" id="nav-about">About</a>
+  </nav>
+
+  <!-- Multiple cards with "Get started" buttons — like Product Hunt -->
+  <div class="card" id="card-1">
+    <h3>Launch Your Product</h3>
+    <p>Submit your product to our community.</p>
+    <button class="btn btn-primary" onclick="recordClick('get-started-1')">Get started</button>
+  </div>
+
+  <div class="card" id="card-2">
+    <h3>Upgrade to Pro</h3>
+    <p>Get featured placement and analytics.</p>
+    <button class="btn btn-primary" onclick="recordClick('get-started-2')">Get started</button>
+  </div>
+
+  <div class="card" id="card-3">
+    <h3>Advertise</h3>
+    <p>Reach our audience of early adopters.</p>
+    <button class="btn btn-secondary" onclick="recordClick('get-started-3')">Get started</button>
+  </div>
+
+  <!-- Form with various field types -->
+  <div class="card" id="submission-form">
+    <h3>Submit Your Product</h3>
+    <form id="product-form" onsubmit="event.preventDefault(); recordClick('form-submit')">
+      <div class="form-group">
+        <label for="product-name">Product Name</label>
+        <input type="text" id="product-name" name="name" placeholder="Enter product name" />
+      </div>
+
+      <div class="form-group">
+        <label for="product-url">Website URL</label>
+        <input type="url" id="product-url" name="url" placeholder="https://example.com" />
+      </div>
+
+      <div class="form-group">
+        <label for="tagline">Tagline</label>
+        <input type="text" id="tagline" name="tagline" placeholder="A short description" />
+      </div>
+
+      <div class="form-group">
+        <label for="description">Description</label>
+        <textarea id="description" name="description" rows="3" placeholder="Tell us about your product"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="category">Category</label>
+        <select id="category" name="category">
+          <option value="">Select a category</option>
+          <option value="ai">AI & Machine Learning</option>
+          <option value="dev">Developer Tools</option>
+          <option value="design">Design Tools</option>
+          <option value="productivity">Productivity</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Product Type</label>
+        <div class="radio-group">
+          <label><input type="radio" name="type" value="new" /> This is a new product</label>
+          <label><input type="radio" name="type" value="existing" /> No, it's a different product</label>
+          <label><input type="radio" name="type" value="update" /> This is an update to existing</label>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label><input type="checkbox" id="agree-terms" name="agree" /> I agree to the terms</label>
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-top: 16px;">
+        <button type="submit" class="btn btn-primary">Get started</button>
+        <button type="button" class="btn btn-secondary" onclick="recordClick('save-draft')">Save Draft</button>
+        <button type="button" class="btn btn-secondary" onclick="recordClick('cancel')">Cancel</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Links that look like buttons -->
+  <div class="card">
+    <h3>Resources</h3>
+    <a href="#" class="btn btn-primary" onclick="event.preventDefault(); recordClick('learn-more')" style="display:inline-block; text-decoration:none;">Learn more</a>
+    <a href="#" class="btn btn-secondary" onclick="event.preventDefault(); recordClick('docs')" style="display:inline-block; text-decoration:none;">Documentation</a>
+  </div>
+
+  <!-- Support widget (like Intercom/Drift) -->
+  <div class="support-widget">
+    <button onclick="recordClick('support')">?</button>
+  </div>
+
+  <div id="results">
+    <strong>Click log:</strong> <span id="click-log">none</span>
+  </div>
+
+  <script>
+    const clicks = [];
+    function recordClick(id) {
+      clicks.push(id);
+      document.getElementById('click-log').textContent = clicks.join(', ');
+    }
+  </script>
+</body>
+</html>

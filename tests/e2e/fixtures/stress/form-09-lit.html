@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form 09 - Reactive Web Components (Lit-style)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #faf5ff; padding: 20px; color: #333; }
+  h1 { margin-bottom: 20px; font-size: 1.5rem; }
+  .form-card { background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 550px; }
+  .form-card h2 { margin-bottom: 16px; font-size: 1.1rem; }
+  reactive-text, reactive-email, reactive-select { display: block; margin-bottom: 16px; }
+  .btn-submit { background: #7c3aed; color: #fff; border: none; padding: 10px 24px; border-radius: 4px; font-size: 1rem; cursor: pointer; margin-top: 8px; }
+  .btn-submit:hover { background: #6d28d9; }
+  .validation-summary { background: #fef2f2; border: 1px solid #fca5a5; padding: 12px; border-radius: 4px; margin-top: 12px; font-size: 0.85rem; color: #991b1b; display: none; }
+  .validation-summary.visible { display: block; }
+  .debug-panel { background: #f5f3ff; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 550px; margin-top: 16px; font-family: monospace; font-size: 0.85rem; white-space: pre-wrap; }
+  .debug-panel::before { content: "Component State:"; display: block; font-weight: 600; margin-bottom: 8px; font-family: sans-serif; }
+  #results, #click-log { background: #fff; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 550px; margin-top: 16px; white-space: pre-wrap; font-family: monospace; font-size: 0.85rem; min-height: 40px; }
+  #results::before { content: "Results:"; display: block; font-weight: 600; margin-bottom: 8px; font-family: sans-serif; }
+  #click-log::before { content: "Click Log:"; display: block; font-weight: 600; margin-bottom: 8px; font-family: sans-serif; }
+</style>
+</head>
+<body>
+<h1>Form 09 - Reactive Web Components (Lit-style)</h1>
+
+<div class="form-card">
+  <h2>User Registration</h2>
+  <reactive-text
+    data-testid="form-9-username"
+    label="Username"
+    placeholder="johndoe"
+    required="true"
+    minlength="3"
+    maxlength="20"
+    pattern="^[a-zA-Z0-9_]+$"
+    pattern-message="Only letters, numbers, and underscores"
+  ></reactive-text>
+
+  <reactive-email
+    data-testid="form-9-email"
+    label="Email Address"
+    placeholder="john@example.com"
+    required="true"
+  ></reactive-email>
+
+  <reactive-text
+    data-testid="form-9-password"
+    label="Password"
+    placeholder="Min 8 characters"
+    input-type="password"
+    required="true"
+    minlength="8"
+  ></reactive-text>
+
+  <reactive-text
+    data-testid="form-9-fullname"
+    label="Full Name"
+    placeholder="John Doe"
+    required="true"
+  ></reactive-text>
+
+  <reactive-select
+    data-testid="form-9-role"
+    label="Account Type"
+    required="true"
+    options='[{"value":"","text":"-- Choose --"},{"value":"personal","text":"Personal"},{"value":"business","text":"Business"},{"value":"enterprise","text":"Enterprise"}]'
+  ></reactive-select>
+
+  <reactive-select
+    data-testid="form-9-region"
+    label="Region"
+    options='[{"value":"","text":"-- Choose --"},{"value":"na","text":"North America"},{"value":"eu","text":"Europe"},{"value":"ap","text":"Asia Pacific"},{"value":"sa","text":"South America"}]'
+  ></reactive-select>
+
+  <div class="validation-summary" id="validation-summary"></div>
+
+  <button class="btn-submit" id="submit-btn" data-testid="form-9-submit">Register</button>
+</div>
+
+<div class="debug-panel" id="debug-panel"></div>
+<div id="results"></div>
+<div id="click-log"></div>
+
+<script>
+  // Base class mimicking Lit's reactive properties pattern
+  class ReactiveElement extends HTMLElement {
+    static get observedAttributes() { return []; }
+
+    constructor() {
+      super();
+      this.attachShadow({ mode: 'open' });
+      this._props = {};
+      this._dirty = false;
+    }
+
+    connectedCallback() {
+      this.render();
+      this._setupListeners();
+    }
+
+    attributeChangedCallback(name, oldVal, newVal) {
+      if (oldVal !== newVal) {
+        this._props[name] = newVal;
+        this.requestUpdate();
+      }
+    }
+
+    requestUpdate() {
+      if (!this._dirty) {
+        this._dirty = true;
+        Promise.resolve().then(() => {
+          this._dirty = false;
+          this.render();
+        });
+      }
+    }
+
+    render() { /* override */ }
+    _setupListeners() { /* override */ }
+  }
+
+  // ---- reactive-text ----
+  class ReactiveText extends ReactiveElement {
+    static get observedAttributes() { return ['label', 'placeholder', 'required', 'minlength', 'maxlength', 'pattern', 'input-type']; }
+
+    constructor() {
+      super();
+      this._value = '';
+      this._touched = false;
+      this._errors = [];
+    }
+
+    get value() { return this._value; }
+    set value(v) { this._value = v; this.validate(); this.requestUpdate(); }
+
+    validate() {
+      this._errors = [];
+      const req = this.getAttribute('required') === 'true';
+      const min = parseInt(this.getAttribute('minlength')) || 0;
+      const max = parseInt(this.getAttribute('maxlength')) || Infinity;
+      const pat = this.getAttribute('pattern');
+
+      if (req && !this._value) this._errors.push('This field is required');
+      if (this._value && this._value.length < min) this._errors.push(`Minimum ${min} characters`);
+      if (this._value && this._value.length > max) this._errors.push(`Maximum ${max} characters`);
+      if (pat && this._value && !new RegExp(pat).test(this._value)) {
+        this._errors.push(this.getAttribute('pattern-message') || 'Invalid format');
+      }
+      return this._errors.length === 0;
+    }
+
+    render() {
+      const label = this.getAttribute('label') || '';
+      const placeholder = this.getAttribute('placeholder') || '';
+      const type = this.getAttribute('input-type') || 'text';
+      const hasError = this._touched && this._errors.length > 0;
+
+      this.shadowRoot.innerHTML = `
+        <style>
+          :host { display: block; }
+          label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.9rem; color: #333; }
+          input { width: 100%; padding: 8px 12px; border: 1px solid ${hasError ? '#f87171' : '#c4b5fd'}; border-radius: 4px; font-size: 0.95rem; box-sizing: border-box; }
+          input:focus { outline: none; border-color: ${hasError ? '#ef4444' : '#7c3aed'}; box-shadow: 0 0 0 3px ${hasError ? 'rgba(239,68,68,0.1)' : 'rgba(124,58,237,0.1)'}; }
+          .error { color: #dc2626; font-size: 0.8rem; margin-top: 4px; }
+          .char-count { font-size: 0.75rem; color: #9ca3af; text-align: right; margin-top: 2px; }
+        </style>
+        <label>${label}</label>
+        <input type="${type}" placeholder="${placeholder}" value="${this._value}">
+        ${hasError ? this._errors.map(e => `<div class="error">${e}</div>`).join('') : ''}
+        ${this.getAttribute('maxlength') ? `<div class="char-count">${this._value.length}/${this.getAttribute('maxlength')}</div>` : ''}
+      `;
+    }
+
+    _setupListeners() {
+      this.shadowRoot.addEventListener('input', (e) => {
+        if (e.target.tagName === 'INPUT') {
+          this._value = e.target.value;
+          this._touched = true;
+          this.validate();
+          this.requestUpdate();
+          updateDebug();
+        }
+      });
+      this.shadowRoot.addEventListener('blur', (e) => {
+        if (e.target.tagName === 'INPUT') {
+          this._touched = true;
+          this.validate();
+          this.requestUpdate();
+        }
+      }, true);
+    }
+  }
+  customElements.define('reactive-text', ReactiveText);
+
+  // ---- reactive-email ----
+  class ReactiveEmail extends ReactiveElement {
+    static get observedAttributes() { return ['label', 'placeholder', 'required']; }
+
+    constructor() {
+      super();
+      this._value = '';
+      this._touched = false;
+      this._errors = [];
+    }
+
+    get value() { return this._value; }
+    set value(v) { this._value = v; this.validate(); this.requestUpdate(); }
+
+    validate() {
+      this._errors = [];
+      const req = this.getAttribute('required') === 'true';
+      if (req && !this._value) this._errors.push('Email is required');
+      if (this._value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this._value)) {
+        this._errors.push('Invalid email format');
+      }
+      return this._errors.length === 0;
+    }
+
+    render() {
+      const label = this.getAttribute('label') || '';
+      const placeholder = this.getAttribute('placeholder') || '';
+      const hasError = this._touched && this._errors.length > 0;
+
+      this.shadowRoot.innerHTML = `
+        <style>
+          :host { display: block; }
+          label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.9rem; color: #333; }
+          input { width: 100%; padding: 8px 12px; border: 1px solid ${hasError ? '#f87171' : '#c4b5fd'}; border-radius: 4px; font-size: 0.95rem; box-sizing: border-box; }
+          input:focus { outline: none; border-color: ${hasError ? '#ef4444' : '#7c3aed'}; box-shadow: 0 0 0 3px ${hasError ? 'rgba(239,68,68,0.1)' : 'rgba(124,58,237,0.1)'}; }
+          .error { color: #dc2626; font-size: 0.8rem; margin-top: 4px; }
+        </style>
+        <label>${label}</label>
+        <input type="email" placeholder="${placeholder}" value="${this._value}">
+        ${hasError ? this._errors.map(e => `<div class="error">${e}</div>`).join('') : ''}
+      `;
+    }
+
+    _setupListeners() {
+      this.shadowRoot.addEventListener('input', (e) => {
+        if (e.target.tagName === 'INPUT') {
+          this._value = e.target.value;
+          this._touched = true;
+          this.validate();
+          this.requestUpdate();
+          updateDebug();
+        }
+      });
+      this.shadowRoot.addEventListener('blur', (e) => {
+        if (e.target.tagName === 'INPUT') {
+          this._touched = true;
+          this.validate();
+          this.requestUpdate();
+        }
+      }, true);
+    }
+  }
+  customElements.define('reactive-email', ReactiveEmail);
+
+  // ---- reactive-select ----
+  class ReactiveSelect extends ReactiveElement {
+    static get observedAttributes() { return ['label', 'required', 'options']; }
+
+    constructor() {
+      super();
+      this._value = '';
+      this._touched = false;
+      this._errors = [];
+    }
+
+    get value() { return this._value; }
+    set value(v) { this._value = v; this.validate(); this.requestUpdate(); }
+
+    validate() {
+      this._errors = [];
+      const req = this.getAttribute('required') === 'true';
+      if (req && !this._value) this._errors.push('Please select an option');
+      return this._errors.length === 0;
+    }
+
+    render() {
+      const label = this.getAttribute('label') || '';
+      let options = [];
+      try { options = JSON.parse(this.getAttribute('options') || '[]'); } catch(e) {}
+      const hasError = this._touched && this._errors.length > 0;
+      const optionsHtml = options.map(o =>
+        `<option value="${o.value}" ${o.value === this._value ? 'selected' : ''}>${o.text}</option>`
+      ).join('');
+
+      this.shadowRoot.innerHTML = `
+        <style>
+          :host { display: block; }
+          label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.9rem; color: #333; }
+          select { width: 100%; padding: 8px 12px; border: 1px solid ${hasError ? '#f87171' : '#c4b5fd'}; border-radius: 4px; font-size: 0.95rem; box-sizing: border-box; background: #fff; }
+          select:focus { outline: none; border-color: ${hasError ? '#ef4444' : '#7c3aed'}; box-shadow: 0 0 0 3px ${hasError ? 'rgba(239,68,68,0.1)' : 'rgba(124,58,237,0.1)'}; }
+          .error { color: #dc2626; font-size: 0.8rem; margin-top: 4px; }
+        </style>
+        <label>${label}</label>
+        <select>${optionsHtml}</select>
+        ${hasError ? this._errors.map(e => `<div class="error">${e}</div>`).join('') : ''}
+      `;
+    }
+
+    _setupListeners() {
+      this.shadowRoot.addEventListener('change', (e) => {
+        if (e.target.tagName === 'SELECT') {
+          this._value = e.target.value;
+          this._touched = true;
+          this.validate();
+          this.requestUpdate();
+          updateDebug();
+        }
+      });
+    }
+  }
+  customElements.define('reactive-select', ReactiveSelect);
+
+  // ---- Debug & Submit ----
+  function getFormValues() {
+    const data = {};
+    document.querySelectorAll('reactive-text, reactive-email, reactive-select').forEach(el => {
+      const testid = el.getAttribute('data-testid');
+      const name = testid ? testid.replace('form-9-', '') : '';
+      data[name] = el.value;
+    });
+    return data;
+  }
+
+  function getValidationErrors() {
+    const errors = [];
+    document.querySelectorAll('reactive-text, reactive-email, reactive-select').forEach(el => {
+      el._touched = true;
+      if (!el.validate()) {
+        const label = el.getAttribute('label');
+        el._errors.forEach(err => errors.push(`${label}: ${err}`));
+      }
+      el.requestUpdate();
+    });
+    return errors;
+  }
+
+  function updateDebug() {
+    document.getElementById('debug-panel').textContent = JSON.stringify(getFormValues(), null, 2);
+  }
+
+  setTimeout(updateDebug, 100);
+
+  document.getElementById('submit-btn').addEventListener('click', () => {
+    const errors = getValidationErrors();
+    const summary = document.getElementById('validation-summary');
+
+    if (errors.length > 0) {
+      summary.innerHTML = '<strong>Validation Errors:</strong><br>' + errors.map(e => '- ' + e).join('<br>');
+      summary.classList.add('visible');
+      return;
+    }
+
+    summary.classList.remove('visible');
+    document.getElementById('results').textContent = JSON.stringify(getFormValues(), null, 2);
+  });
+
+  // Click log
+  const clickLog = document.getElementById('click-log');
+  document.addEventListener('click', function(e) {
+    const testid = e.target.getAttribute('data-testid') || '';
+    const tag = e.target.tagName.toLowerCase();
+    const info = testid ? `[${testid}]` : `<${tag}>`;
+    const entry = document.createElement('div');
+    entry.textContent = new Date().toISOString().substr(11,12) + ' click ' + info;
+    clickLog.appendChild(entry);
+  });
+</script>
+</body>
+</html>

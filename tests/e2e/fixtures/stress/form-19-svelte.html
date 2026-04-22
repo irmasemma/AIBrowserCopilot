@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form 19 — Svelte-Style Reactive (Vanilla JS)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; padding: 24px; background: #f5f5f5; }
+  .form-card { background: #fff; padding: 24px; border-radius: 8px; max-width: 520px; border: 1px solid #ddd; margin-bottom: 16px; }
+  h1 { margin-bottom: 16px; font-size: 20px; color: #ff3e00; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 13px; }
+  .field input, .field select, .field textarea { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+  .field textarea { height: 80px; resize: vertical; }
+  .conditional { overflow: hidden; max-height: 0; opacity: 0; transition: max-height 0.4s ease, opacity 0.3s ease, margin 0.3s ease; margin-bottom: 0; }
+  .conditional.show { max-height: 200px; opacity: 1; margin-bottom: 14px; }
+  .summary { background: #fff4e6; padding: 16px; border-radius: 8px; border: 1px solid #fed7aa; margin-bottom: 16px; font-size: 14px; line-height: 1.6; }
+  .summary strong { color: #ea580c; }
+  .computed { background: #f0fdf4; padding: 12px; border-radius: 6px; border: 1px solid #bbf7d0; margin-bottom: 14px; font-size: 14px; }
+  .submit-btn { padding: 10px 24px; background: #ff3e00; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; width: 100%; }
+  #results, #click-log { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-top: 12px; min-height: 40px; font-family: monospace; font-size: 13px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div class="form-card">
+  <h1>Svelte-Style Reactive Form</h1>
+
+  <div class="field">
+    <label for="svelte-firstName">First Name</label>
+    <input type="text" id="svelte-firstName" data-testid="svelte-firstName" data-bind="firstName">
+  </div>
+  <div class="field">
+    <label for="svelte-lastName">Last Name</label>
+    <input type="text" id="svelte-lastName" data-testid="svelte-lastName" data-bind="lastName">
+  </div>
+
+  <!-- Computed: fullName = firstName + " " + lastName -->
+  <div class="computed" id="full-name-display" data-testid="svelte-fullName-display">
+    Full name: <strong id="full-name-value"></strong>
+  </div>
+
+  <div class="field">
+    <label for="svelte-email">Email</label>
+    <input type="email" id="svelte-email" data-testid="svelte-email" data-bind="email">
+  </div>
+
+  <div class="field">
+    <label for="svelte-role">Role</label>
+    <select id="svelte-role" data-testid="svelte-role" data-bind="role">
+      <option value="">Select...</option>
+      <option value="developer">Developer</option>
+      <option value="designer">Designer</option>
+      <option value="manager">Manager</option>
+      <option value="other">Other</option>
+    </select>
+  </div>
+
+  <!-- Conditional: only shows when role === "other" -->
+  <div class="conditional" id="other-role-wrap">
+    <div class="field">
+      <label for="svelte-otherRole">Specify Role</label>
+      <input type="text" id="svelte-otherRole" data-testid="svelte-otherRole" data-bind="otherRole">
+    </div>
+  </div>
+
+  <div class="field">
+    <label for="svelte-bio">Bio</label>
+    <textarea id="svelte-bio" data-testid="svelte-bio" data-bind="bio"></textarea>
+  </div>
+
+  <!-- Computed summary -->
+  <div class="summary" id="summary" data-testid="svelte-summary">
+    Fill in the form to see a live summary...
+  </div>
+
+  <button type="button" class="submit-btn" id="submit-btn" data-testid="svelte-submit">Submit</button>
+</div>
+
+<h3>Results</h3>
+<div id="results">Waiting for submission...</div>
+<div id="click-log"></div>
+
+<script>
+  // === Svelte-style reactivity system ===
+  const state = {};
+  const subscribers = [];
+
+  function reactive(key, initial) {
+    state[key] = initial;
+  }
+
+  function get(key) { return state[key]; }
+
+  function set(key, value) {
+    if (state[key] === value) return;
+    state[key] = value;
+    runReactive();
+  }
+
+  function subscribe(fn) { subscribers.push(fn); }
+
+  function runReactive() {
+    for (const fn of subscribers) fn();
+  }
+
+  // === Two-way binding ===
+  function bind(el, key) {
+    const tag = el.tagName.toLowerCase();
+    const eventName = (tag === 'select') ? 'change' : 'input';
+    el.addEventListener(eventName, () => { set(key, el.value); });
+    // Sync from state to input
+    subscribe(() => {
+      if (el.value !== get(key)) el.value = get(key);
+    });
+  }
+
+  // === Declare reactive variables ===
+  reactive('firstName', '');
+  reactive('lastName', '');
+  reactive('email', '');
+  reactive('role', '');
+  reactive('otherRole', '');
+  reactive('bio', '');
+
+  // === Bind all [data-bind] elements ===
+  document.querySelectorAll('[data-bind]').forEach(el => {
+    bind(el, el.getAttribute('data-bind'));
+  });
+
+  // === Reactive declarations (like $: in Svelte) ===
+
+  // $: fullName = firstName + " " + lastName
+  subscribe(() => {
+    const fn = (get('firstName') + ' ' + get('lastName')).trim();
+    document.getElementById('full-name-value').textContent = fn || '(empty)';
+  });
+
+  // $: show/hide "other role" field
+  subscribe(() => {
+    const wrap = document.getElementById('other-role-wrap');
+    if (get('role') === 'other') {
+      wrap.classList.add('show');
+    } else {
+      wrap.classList.remove('show');
+    }
+  });
+
+  // $: computed summary
+  subscribe(() => {
+    const fn = (get('firstName') + ' ' + get('lastName')).trim();
+    const email = get('email');
+    const role = get('role') === 'other' ? get('otherRole') : get('role');
+    const bio = get('bio');
+
+    let html = '';
+    if (fn) html += '<strong>' + fn + '</strong>';
+    if (email) html += ' &lt;' + email + '&gt;';
+    if (role) html += ' — ' + role;
+    if (bio) html += '<br>' + bio.slice(0, 100) + (bio.length > 100 ? '...' : '');
+    document.getElementById('summary').innerHTML = html || 'Fill in the form to see a live summary...';
+  });
+
+  // Initial render
+  runReactive();
+
+  // === Submit ===
+  document.getElementById('submit-btn').addEventListener('click', () => {
+    const data = { ...state };
+    if (data.role !== 'other') delete data.otherRole;
+    data.fullName = (data.firstName + ' ' + data.lastName).trim();
+    document.getElementById('results').textContent = JSON.stringify(data, null, 2);
+    document.getElementById('click-log').textContent = 'Form submitted';
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form 02 - React 18 Controlled</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f4f8; padding: 20px; color: #333; }
+  h1 { margin-bottom: 20px; font-size: 1.5rem; }
+  .container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1000px; }
+  .form-panel, .preview-panel { background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .preview-panel { background: #f8fafc; }
+  .preview-panel h2 { font-size: 1.1rem; margin-bottom: 12px; color: #475569; }
+  .field { margin-bottom: 14px; }
+  label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.9rem; }
+  input, textarea, select { width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.95rem; }
+  input[type="radio"] { width: auto; margin-right: 6px; }
+  textarea { resize: vertical; min-height: 70px; }
+  .radio-opt { display: inline-flex; align-items: center; margin-right: 14px; font-weight: 400; }
+  .radio-opt label { display: inline; margin-bottom: 0; font-weight: 400; }
+  button[type="submit"] { background: #7c3aed; color: #fff; border: none; padding: 10px 24px; border-radius: 4px; font-size: 1rem; cursor: pointer; }
+  button[type="submit"]:hover { background: #6d28d9; }
+  .preview-item { padding: 6px 0; border-bottom: 1px solid #e2e8f0; font-size: 0.85rem; }
+  .preview-item strong { color: #64748b; }
+  .conditional { background: #fef3c7; padding: 12px; border-radius: 4px; margin-top: 8px; border: 1px solid #fbbf24; }
+  #results, #click-log { background: #fff; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 1000px; margin-top: 16px; white-space: pre-wrap; font-family: monospace; font-size: 0.85rem; min-height: 40px; }
+  #results::before { content: "Results:"; display: block; font-weight: 600; margin-bottom: 8px; font-family: sans-serif; }
+  #click-log::before { content: "Click Log:"; display: block; font-weight: 600; margin-bottom: 8px; font-family: sans-serif; }
+</style>
+</head>
+<body>
+<h1>Form 02 - React 18 Controlled Form</h1>
+<div id="root"></div>
+<div id="results"></div>
+<div id="click-log"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script type="text/babel">
+const { useState } = React;
+
+function App() {
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
+  const [bio, setBio] = useState('');
+  const [role, setRole] = useState('');
+  const [experience, setExperience] = useState('junior');
+  const [contactPref, setContactPref] = useState('');
+  const [otherContact, setOtherContact] = useState('');
+  const [newsletter, setNewsletter] = useState(false);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const data = {
+      firstName, lastName, email, bio, role, experience,
+      contactPref, otherContact: contactPref === 'other' ? otherContact : '',
+      newsletter
+    };
+    document.getElementById('results').textContent = JSON.stringify(data, null, 2);
+  };
+
+  return (
+    <div className="container">
+      <form className="form-panel" onSubmit={handleSubmit}>
+        <div className="field">
+          <label htmlFor="r-fname">First Name (auto-uppercase)</label>
+          <input
+            type="text" id="r-fname" data-testid="form-2-firstname"
+            value={firstName}
+            onChange={e => setFirstName(e.target.value.toUpperCase())}
+            placeholder="JOHN"
+          />
+        </div>
+
+        <div className="field">
+          <label htmlFor="r-lname">Last Name (auto-uppercase)</label>
+          <input
+            type="text" id="r-lname" data-testid="form-2-lastname"
+            value={lastName}
+            onChange={e => setLastName(e.target.value.toUpperCase())}
+            placeholder="DOE"
+          />
+        </div>
+
+        <div className="field">
+          <label htmlFor="r-email">Email</label>
+          <input
+            type="email" id="r-email" data-testid="form-2-email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            placeholder="john@example.com"
+          />
+        </div>
+
+        <div className="field">
+          <label htmlFor="r-bio">Bio</label>
+          <textarea
+            id="r-bio" data-testid="form-2-bio"
+            value={bio}
+            onChange={e => setBio(e.target.value)}
+            placeholder="Tell us about yourself..."
+          />
+        </div>
+
+        <div className="field">
+          <label htmlFor="r-role">Role</label>
+          <select id="r-role" data-testid="form-2-role" value={role} onChange={e => setRole(e.target.value)}>
+            <option value="">-- Select Role --</option>
+            <option value="developer">Developer</option>
+            <option value="designer">Designer</option>
+            <option value="manager">Manager</option>
+            <option value="analyst">Analyst</option>
+          </select>
+        </div>
+
+        <div className="field">
+          <label htmlFor="r-exp">Experience Level</label>
+          <select id="r-exp" data-testid="form-2-experience" value={experience} onChange={e => setExperience(e.target.value)}>
+            <option value="junior">Junior (0-2 years)</option>
+            <option value="mid">Mid (3-5 years)</option>
+            <option value="senior">Senior (6-10 years)</option>
+            <option value="lead">Lead (10+ years)</option>
+          </select>
+        </div>
+
+        <div className="field">
+          <label>Preferred Contact Method</label>
+          <div>
+            <span className="radio-opt">
+              <input type="radio" name="contactPref" value="email" data-testid="form-2-contact-email"
+                checked={contactPref === 'email'} onChange={() => setContactPref('email')} />
+              <label>Email</label>
+            </span>
+            <span className="radio-opt">
+              <input type="radio" name="contactPref" value="phone" data-testid="form-2-contact-phone"
+                checked={contactPref === 'phone'} onChange={() => setContactPref('phone')} />
+              <label>Phone</label>
+            </span>
+            <span className="radio-opt">
+              <input type="radio" name="contactPref" value="slack" data-testid="form-2-contact-slack"
+                checked={contactPref === 'slack'} onChange={() => setContactPref('slack')} />
+              <label>Slack</label>
+            </span>
+            <span className="radio-opt">
+              <input type="radio" name="contactPref" value="other" data-testid="form-2-contact-other"
+                checked={contactPref === 'other'} onChange={() => setContactPref('other')} />
+              <label>Other</label>
+            </span>
+          </div>
+          {contactPref === 'other' && (
+            <div className="conditional">
+              <label htmlFor="r-other">Please specify:</label>
+              <input
+                type="text" id="r-other" data-testid="form-2-other-input"
+                value={otherContact}
+                onChange={e => setOtherContact(e.target.value)}
+                placeholder="e.g., Discord, Signal..."
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="field">
+          <label style={{display:'inline-flex', alignItems:'center', gap:'8px'}}>
+            <input type="checkbox" data-testid="form-2-newsletter"
+              checked={newsletter} onChange={e => setNewsletter(e.target.checked)}
+              style={{width:'auto'}} />
+            Subscribe to newsletter
+          </label>
+        </div>
+
+        <button type="submit" data-testid="form-2-submit">Submit</button>
+      </form>
+
+      <div className="preview-panel">
+        <h2>Live Preview (React State)</h2>
+        <div className="preview-item"><strong>firstName:</strong> {firstName || '(empty)'}</div>
+        <div className="preview-item"><strong>lastName:</strong> {lastName || '(empty)'}</div>
+        <div className="preview-item"><strong>email:</strong> {email || '(empty)'}</div>
+        <div className="preview-item"><strong>bio:</strong> {bio || '(empty)'}</div>
+        <div className="preview-item"><strong>role:</strong> {role || '(empty)'}</div>
+        <div className="preview-item"><strong>experience:</strong> {experience}</div>
+        <div className="preview-item"><strong>contactPref:</strong> {contactPref || '(empty)'}</div>
+        {contactPref === 'other' && <div className="preview-item"><strong>otherContact:</strong> {otherContact || '(empty)'}</div>}
+        <div className="preview-item"><strong>newsletter:</strong> {newsletter ? 'true' : 'false'}</div>
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+
+<script>
+  const clickLog = document.getElementById('click-log');
+  document.addEventListener('click', function(e) {
+    const testid = e.target.getAttribute('data-testid') || '';
+    const tag = e.target.tagName.toLowerCase();
+    const info = testid ? `[${testid}]` : `<${tag}>`;
+    const entry = document.createElement('div');
+    entry.textContent = new Date().toISOString().substr(11,12) + ' click ' + info;
+    clickLog.appendChild(entry);
+  });
+</script>
+</body>
+</html>

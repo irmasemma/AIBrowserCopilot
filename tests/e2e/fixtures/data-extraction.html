@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Data Extraction Test Fixture</title>
+  <style>
+    body { font-family: sans-serif; max-width: 1000px; margin: 20px auto; }
+    h2 { border-bottom: 2px solid #333; padding-bottom: 8px; margin-top: 40px; }
+
+    /* Table styles */
+    table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #f5f5f5; font-weight: bold; }
+
+    /* Card grid styles */
+    .card-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 16px 0; }
+    .product-card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; }
+    .product-card .name { font-size: 18px; font-weight: bold; margin-bottom: 4px; }
+    .product-card .price { color: #e63946; font-size: 16px; font-weight: bold; }
+    .product-card .rating { color: #f4a261; }
+    .product-card .description { color: #666; font-size: 14px; margin: 8px 0; }
+    .product-card a { color: #4F46E5; text-decoration: none; }
+
+    /* List styles */
+    .job-list { list-style: none; padding: 0; }
+    .job-list li { border: 1px solid #eee; padding: 16px; margin: 8px 0; border-radius: 4px; }
+    .job-list .job-title { font-size: 16px; font-weight: bold; }
+    .job-list .company { color: #666; }
+    .job-list .salary { color: #2a9d8f; font-weight: bold; }
+    .job-list .location { color: #888; }
+
+    /* Pagination */
+    .pagination { margin: 20px 0; display: flex; gap: 8px; }
+    .pagination a { padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; text-decoration: none; color: #333; }
+    .pagination a.active { background: #4F46E5; color: white; border-color: #4F46E5; }
+    .pagination a.next { font-weight: bold; }
+
+    /* Article/blog pattern */
+    .articles { margin: 16px 0; }
+    .articles article { border-bottom: 1px solid #eee; padding: 16px 0; }
+    .articles article h3 { margin: 0 0 4px; }
+    .articles article .meta { color: #888; font-size: 13px; }
+    .articles article .excerpt { color: #444; margin-top: 8px; }
+
+    /* Nested table */
+    .nested-section table td table { margin: 0; }
+  </style>
+</head>
+<body>
+
+  <h1>Data Extraction Test Page</h1>
+
+  <!-- ======================== -->
+  <!-- SECTION 1: HTML Table    -->
+  <!-- ======================== -->
+  <h2>1. Standard HTML Table</h2>
+  <table id="employees-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Department</th>
+        <th>Salary</th>
+        <th>Start Date</th>
+        <th>Email</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Alice Johnson</td>
+        <td>Engineering</td>
+        <td>$125,000</td>
+        <td>2023-01-15</td>
+        <td>alice@example.com</td>
+      </tr>
+      <tr>
+        <td>Bob Smith</td>
+        <td>Marketing</td>
+        <td>$95,000</td>
+        <td>2022-06-01</td>
+        <td>bob@example.com</td>
+      </tr>
+      <tr>
+        <td>Charlie Brown</td>
+        <td>Engineering</td>
+        <td>$140,000</td>
+        <td>2021-03-20</td>
+        <td>charlie@example.com</td>
+      </tr>
+      <tr>
+        <td>Diana Prince</td>
+        <td>Design</td>
+        <td>$110,000</td>
+        <td>2023-08-10</td>
+        <td>diana@example.com</td>
+      </tr>
+      <tr>
+        <td>Eve Wilson</td>
+        <td>Engineering</td>
+        <td>$135,000</td>
+        <td>2022-11-05</td>
+        <td>eve@example.com</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ======================== -->
+  <!-- SECTION 2: Card Grid     -->
+  <!-- ======================== -->
+  <h2>2. Product Card Grid</h2>
+  <div id="product-grid" class="card-grid">
+    <div class="product-card">
+      <div class="name">Widget Pro X</div>
+      <div class="price">$29.99</div>
+      <div class="rating">4.5 out of 5</div>
+      <div class="description">The ultimate widget for professionals</div>
+      <a href="https://example.com/products/widget-pro-x">View Details</a>
+    </div>
+    <div class="product-card">
+      <div class="name">Widget Basic</div>
+      <div class="price">$9.99</div>
+      <div class="rating">4.2 out of 5</div>
+      <div class="description">Perfect for beginners</div>
+      <a href="https://example.com/products/widget-basic">View Details</a>
+    </div>
+    <div class="product-card">
+      <div class="name">Widget Enterprise</div>
+      <div class="price">$99.99</div>
+      <div class="rating">4.8 out of 5</div>
+      <div class="description">Built for teams and organizations</div>
+      <a href="https://example.com/products/widget-enterprise">View Details</a>
+    </div>
+    <div class="product-card">
+      <div class="name">Widget Lite</div>
+      <div class="price">$4.99</div>
+      <div class="rating">3.9 out of 5</div>
+      <div class="description">Lightweight and fast</div>
+      <a href="https://example.com/products/widget-lite">View Details</a>
+    </div>
+    <div class="product-card">
+      <div class="name">Widget Max</div>
+      <div class="price">$49.99</div>
+      <div class="rating">4.7 out of 5</div>
+      <div class="description">Maximum power and features</div>
+      <a href="https://example.com/products/widget-max">View Details</a>
+    </div>
+    <div class="product-card">
+      <div class="name">Widget Mini</div>
+      <div class="price">$2.99</div>
+      <div class="rating">4.0 out of 5</div>
+      <div class="description">Small but mighty</div>
+      <a href="https://example.com/products/widget-mini">View Details</a>
+    </div>
+  </div>
+
+  <!-- ======================== -->
+  <!-- SECTION 3: List Layout   -->
+  <!-- ======================== -->
+  <h2>3. Job Listings (ul/li pattern)</h2>
+  <ul id="job-listings" class="job-list">
+    <li>
+      <div class="job-title">Senior Frontend Engineer</div>
+      <div class="company">Acme Corp</div>
+      <div class="salary">$150,000 - $180,000</div>
+      <div class="location">San Francisco, CA (Remote)</div>
+    </li>
+    <li>
+      <div class="job-title">Product Designer</div>
+      <div class="company">Widget Inc</div>
+      <div class="salary">$120,000 - $140,000</div>
+      <div class="location">New York, NY</div>
+    </li>
+    <li>
+      <div class="job-title">Backend Developer</div>
+      <div class="company">Tech Startup</div>
+      <div class="salary">$130,000 - $160,000</div>
+      <div class="location">Austin, TX (Hybrid)</div>
+    </li>
+    <li>
+      <div class="job-title">Data Scientist</div>
+      <div class="company">DataFlow</div>
+      <div class="salary">$140,000 - $170,000</div>
+      <div class="location">Seattle, WA (Remote)</div>
+    </li>
+    <li>
+      <div class="job-title">DevOps Engineer</div>
+      <div class="company">CloudNine</div>
+      <div class="salary">$135,000 - $165,000</div>
+      <div class="location">Denver, CO</div>
+    </li>
+  </ul>
+
+  <!-- ======================== -->
+  <!-- SECTION 4: Articles      -->
+  <!-- ======================== -->
+  <h2>4. Blog Articles (article pattern)</h2>
+  <div id="articles-section" class="articles">
+    <article>
+      <h3><a href="https://example.com/blog/ai-2026">The State of AI in 2026</a></h3>
+      <div class="meta">By John Doe | April 1, 2026 | 5 min read</div>
+      <div class="excerpt">AI continues to transform every industry. Here's what changed this year...</div>
+    </article>
+    <article>
+      <h3><a href="https://example.com/blog/chrome-extensions">Building Chrome Extensions with MCP</a></h3>
+      <div class="meta">By Jane Smith | March 28, 2026 | 8 min read</div>
+      <div class="excerpt">MCP (Model Context Protocol) is changing how AI tools interact with browsers...</div>
+    </article>
+    <article>
+      <h3><a href="https://example.com/blog/playwright-testing">E2E Testing with Playwright</a></h3>
+      <div class="meta">By Bob Builder | March 25, 2026 | 6 min read</div>
+      <div class="excerpt">Playwright has become the go-to framework for browser automation testing...</div>
+    </article>
+    <article>
+      <h3><a href="https://example.com/blog/web-scraping">Ethical Web Scraping in 2026</a></h3>
+      <div class="meta">By Eva Extractor | March 20, 2026 | 10 min read</div>
+      <div class="excerpt">How to extract web data responsibly while respecting site policies...</div>
+    </article>
+  </div>
+
+  <!-- ======================== -->
+  <!-- SECTION 5: Pagination    -->
+  <!-- ======================== -->
+  <h2>5. Pagination Controls</h2>
+  <div id="paginated-section">
+    <p>Showing results 1-10 of 47</p>
+    <div class="pagination" id="pagination-controls">
+      <a href="#" class="active">1</a>
+      <a href="#">2</a>
+      <a href="#">3</a>
+      <a href="#">4</a>
+      <a href="#">5</a>
+      <a href="#" class="next" aria-label="Next page">Next &raquo;</a>
+    </div>
+  </div>
+
+  <!-- ======================== -->
+  <!-- SECTION 6: Nested Table  -->
+  <!-- ======================== -->
+  <h2>6. Table Without thead (header in first row)</h2>
+  <table id="headerless-table">
+    <tr>
+      <td><strong>Product</strong></td>
+      <td><strong>SKU</strong></td>
+      <td><strong>In Stock</strong></td>
+      <td><strong>Price</strong></td>
+    </tr>
+    <tr>
+      <td>Gadget A</td>
+      <td>GA-001</td>
+      <td>Yes</td>
+      <td>$19.99</td>
+    </tr>
+    <tr>
+      <td>Gadget B</td>
+      <td>GB-002</td>
+      <td>No</td>
+      <td>$34.99</td>
+    </tr>
+    <tr>
+      <td>Gadget C</td>
+      <td>GC-003</td>
+      <td>Yes</td>
+      <td>$12.49</td>
+    </tr>
+  </table>
+
+  <!-- ======================== -->
+  <!-- SECTION 7: Empty table   -->
+  <!-- ======================== -->
+  <h2>7. Table with Links</h2>
+  <table id="links-table">
+    <thead>
+      <tr><th>Tool</th><th>Category</th><th>Website</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Playwright</td>
+        <td>Testing</td>
+        <td><a href="https://playwright.dev">playwright.dev</a></td>
+      </tr>
+      <tr>
+        <td>Vitest</td>
+        <td>Testing</td>
+        <td><a href="https://vitest.dev">vitest.dev</a></td>
+      </tr>
+      <tr>
+        <td>WXT</td>
+        <td>Extensions</td>
+        <td><a href="https://wxt.dev">wxt.dev</a></td>
+      </tr>
+    </tbody>
+  </table>
+
+</body>
+</html>

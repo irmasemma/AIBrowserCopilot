@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form 06 - Inline Edit Table</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #eff6ff; padding: 20px; color: #333; }
+  h1 { margin-bottom: 20px; font-size: 1.5rem; }
+  .table-card { background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 800px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 10px 12px; background: #1e40af; color: #fff; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; }
+  th:first-child { border-radius: 4px 0 0 0; }
+  th:last-child { border-radius: 0 4px 0 0; }
+  td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 0.9rem; vertical-align: middle; }
+  tr:hover td { background: #f0f9ff; }
+  td.editable { cursor: pointer; }
+  td.editable:hover { background: #dbeafe; }
+  td.editing { padding: 6px 8px; }
+  td input, td select { padding: 6px 8px; border: 1px solid #93c5fd; border-radius: 3px; font-size: 0.9rem; width: 100%; }
+  td input[type="checkbox"] { width: auto; }
+  .btn-group { display: flex; gap: 4px; }
+  .btn-sm { padding: 4px 10px; border-radius: 3px; font-size: 0.8rem; cursor: pointer; border: none; }
+  .btn-save { background: #16a34a; color: #fff; }
+  .btn-save:hover { background: #15803d; }
+  .btn-cancel { background: #e5e7eb; color: #374151; }
+  .btn-cancel:hover { background: #d1d5db; }
+  .btn-edit { background: #2563eb; color: #fff; }
+  .btn-edit:hover { background: #1d4ed8; }
+  .btn-submit { background: #1e40af; color: #fff; border: none; padding: 10px 24px; border-radius: 4px; font-size: 1rem; cursor: pointer; margin-top: 16px; }
+  .btn-submit:hover { background: #1e3a8a; }
+  .active-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.8rem; font-weight: 600; }
+  .active-badge.yes { background: #dcfce7; color: #166534; }
+  .active-badge.no { background: #fee2e2; color: #991b1b; }
+  #results, #click-log { background: #fff; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 800px; margin-top: 16px; white-space: pre-wrap; font-family: monospace; font-size: 0.85rem; min-height: 40px; }
+  #results::before { content: "Results:"; display: block; font-weight: 600; margin-bottom: 8px; font-family: sans-serif; }
+  #click-log::before { content: "Click Log:"; display: block; font-weight: 600; margin-bottom: 8px; font-family: sans-serif; }
+</style>
+</head>
+<body>
+<h1>Form 06 - Inline Edit Table</h1>
+
+<div class="table-card">
+  <table id="edit-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Role</th>
+        <th>Active</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="table-body"></tbody>
+  </table>
+  <button class="btn-submit" id="submit-btn" data-testid="form-6-submit">Submit All</button>
+</div>
+
+<div id="results"></div>
+<div id="click-log"></div>
+
+<script>
+  const initialData = [
+    { id: 1, name: 'Alice Johnson', role: 'admin', active: true },
+    { id: 2, name: 'Bob Smith', role: 'editor', active: true },
+    { id: 3, name: 'Charlie Brown', role: 'viewer', active: false }
+  ];
+
+  let tableData = JSON.parse(JSON.stringify(initialData));
+  let editingRow = null;
+
+  function renderTable() {
+    const tbody = document.getElementById('table-body');
+    tbody.innerHTML = '';
+
+    tableData.forEach((row, idx) => {
+      const tr = document.createElement('tr');
+      const n = row.id;
+      const isEditing = editingRow === n;
+
+      if (isEditing) {
+        tr.innerHTML = `
+          <td class="editing">
+            <input type="text" value="${row.name}" data-testid="form-6-name-${n}" id="edit-name-${n}">
+          </td>
+          <td class="editing">
+            <select data-testid="form-6-role-${n}" id="edit-role-${n}">
+              <option value="admin" ${row.role === 'admin' ? 'selected' : ''}>Admin</option>
+              <option value="editor" ${row.role === 'editor' ? 'selected' : ''}>Editor</option>
+              <option value="viewer" ${row.role === 'viewer' ? 'selected' : ''}>Viewer</option>
+            </select>
+          </td>
+          <td class="editing" style="text-align:center">
+            <input type="checkbox" ${row.active ? 'checked' : ''} data-testid="form-6-active-${n}" id="edit-active-${n}">
+          </td>
+          <td>
+            <div class="btn-group">
+              <button class="btn-sm btn-save" data-testid="form-6-save-${n}" onclick="saveRow(${n})">Save</button>
+              <button class="btn-sm btn-cancel" data-testid="form-6-cancel-${n}" onclick="cancelEdit()">Cancel</button>
+            </div>
+          </td>
+        `;
+      } else {
+        tr.innerHTML = `
+          <td class="editable" data-testid="form-6-cell-name-${n}" onclick="startEdit(${n})">${row.name}</td>
+          <td class="editable" data-testid="form-6-cell-role-${n}" onclick="startEdit(${n})">${row.role.charAt(0).toUpperCase() + row.role.slice(1)}</td>
+          <td class="editable" data-testid="form-6-cell-active-${n}" onclick="startEdit(${n})" style="text-align:center">
+            <span class="active-badge ${row.active ? 'yes' : 'no'}">${row.active ? 'Yes' : 'No'}</span>
+          </td>
+          <td>
+            <button class="btn-sm btn-edit" data-testid="form-6-edit-${n}" onclick="startEdit(${n})">Edit</button>
+          </td>
+        `;
+      }
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  function startEdit(n) {
+    editingRow = n;
+    renderTable();
+  }
+
+  function cancelEdit() {
+    editingRow = null;
+    renderTable();
+  }
+
+  function saveRow(n) {
+    const row = tableData.find(r => r.id === n);
+    if (row) {
+      row.name = document.getElementById('edit-name-' + n).value;
+      row.role = document.getElementById('edit-role-' + n).value;
+      row.active = document.getElementById('edit-active-' + n).checked;
+    }
+    editingRow = null;
+    renderTable();
+  }
+
+  document.getElementById('submit-btn').addEventListener('click', () => {
+    document.getElementById('results').textContent = JSON.stringify({ rows: tableData }, null, 2);
+  });
+
+  renderTable();
+
+  // Click log
+  const clickLog = document.getElementById('click-log');
+  document.addEventListener('click', function(e) {
+    const testid = e.target.getAttribute('data-testid') || '';
+    const tag = e.target.tagName.toLowerCase();
+    const info = testid ? `[${testid}]` : `<${tag}>`;
+    const entry = document.createElement('div');
+    entry.textContent = new Date().toISOString().substr(11,12) + ' click ' + info;
+    clickLog.appendChild(entry);
+  });
+</script>
+</body>
+</html>

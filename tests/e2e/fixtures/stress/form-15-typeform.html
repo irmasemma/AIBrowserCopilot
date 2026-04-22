@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form 15 — Typeform-Style One-at-a-Time</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; overflow: hidden; height: 100vh; }
+  .slide-container { position: relative; width: 100%; height: 100vh; overflow: hidden; }
+  .slide {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 40px; transition: transform 0.5s ease, opacity 0.5s ease;
+    opacity: 0; transform: translateY(60px); pointer-events: none;
+  }
+  .slide.active { opacity: 1; transform: translateY(0); pointer-events: all; }
+  .slide.done { opacity: 0; transform: translateY(-60px); }
+  .question-num { font-size: 13px; color: #888; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 2px; }
+  .question { font-size: 28px; font-weight: 300; margin-bottom: 32px; text-align: center; }
+  .custom-input {
+    background: transparent; border: none; border-bottom: 2px solid #444; color: #fff;
+    font-size: 22px; padding: 12px 0; width: 400px; max-width: 90vw; outline: none; text-align: center;
+  }
+  .custom-input:focus { border-color: #8b5cf6; }
+  .custom-input::placeholder { color: #555; }
+  .option-cards { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+  .option-card {
+    background: #16213e; border: 2px solid #333; border-radius: 12px; padding: 24px 32px;
+    cursor: pointer; transition: all 0.2s; font-size: 16px; min-width: 140px; text-align: center;
+  }
+  .option-card:hover { border-color: #8b5cf6; background: #1a1a3e; }
+  .option-card.selected { border-color: #8b5cf6; background: #2d1b69; }
+  .option-card .icon { font-size: 28px; margin-bottom: 8px; }
+  .continue-btn {
+    margin-top: 32px; padding: 14px 48px; background: #8b5cf6; color: #fff; border: none;
+    border-radius: 30px; font-size: 16px; cursor: pointer; transition: all 0.2s; opacity: 0.5;
+  }
+  .continue-btn.enabled { opacity: 1; }
+  .continue-btn.enabled:hover { background: #7c3aed; transform: scale(1.05); }
+  textarea.custom-input { resize: none; height: 120px; border: 2px solid #444; border-radius: 8px; padding: 16px; text-align: left; }
+  .progress { position: fixed; top: 0; left: 0; height: 3px; background: #8b5cf6; transition: width 0.5s; }
+  .final-slide { text-align: center; }
+  .final-slide h2 { font-size: 32px; margin-bottom: 16px; }
+  #results, #click-log { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.8); color: #0f0; font-family: monospace; font-size: 12px; padding: 8px 16px; max-height: 120px; overflow: auto; white-space: pre-wrap; }
+  #click-log { bottom: auto; top: 40px; max-height: 30px; color: #ff0; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="progress" id="progress" style="width: 0%"></div>
+<div class="slide-container">
+  <!-- Q1 -->
+  <div class="slide active" id="slide-1" data-testid="q1-slide">
+    <div class="question-num">Question 1 of 4</div>
+    <div class="question">What's your name?</div>
+    <input type="text" class="custom-input" placeholder="Type your name..." data-testid="q1-input">
+    <button class="continue-btn" data-testid="q1-continue">Continue</button>
+  </div>
+
+  <!-- Q2 -->
+  <div class="slide" id="slide-2" data-testid="q2-slide">
+    <div class="question-num">Question 2 of 4</div>
+    <div class="question">What's your email?</div>
+    <input type="email" class="custom-input" placeholder="name@example.com" data-testid="q2-input">
+    <button class="continue-btn" data-testid="q2-continue">Continue</button>
+  </div>
+
+  <!-- Q3 -->
+  <div class="slide" id="slide-3" data-testid="q3-slide">
+    <div class="question-num">Question 3 of 4</div>
+    <div class="question">Pick a plan</div>
+    <div class="option-cards">
+      <div class="option-card" data-value="starter" data-testid="q3-option-starter">
+        <div class="icon">&#9733;</div>
+        Starter
+      </div>
+      <div class="option-card" data-value="pro" data-testid="q3-option-pro">
+        <div class="icon">&#9733;&#9733;</div>
+        Pro
+      </div>
+      <div class="option-card" data-value="enterprise" data-testid="q3-option-enterprise">
+        <div class="icon">&#9733;&#9733;&#9733;</div>
+        Enterprise
+      </div>
+    </div>
+    <button class="continue-btn" data-testid="q3-continue">Continue</button>
+  </div>
+
+  <!-- Q4 -->
+  <div class="slide" id="slide-4" data-testid="q4-slide">
+    <div class="question-num">Question 4 of 4</div>
+    <div class="question">Any comments?</div>
+    <textarea class="custom-input" placeholder="Share your thoughts..." data-testid="q4-input"></textarea>
+    <button class="continue-btn" data-testid="q4-continue">Submit</button>
+  </div>
+
+  <!-- Final -->
+  <div class="slide final-slide" id="slide-final">
+    <h2>Thank you!</h2>
+    <p>Your responses have been recorded.</p>
+  </div>
+</div>
+
+<div id="click-log"></div>
+<div id="results">Waiting for completion...</div>
+
+<script>
+  const answers = {};
+  let currentSlide = 1;
+
+  function goTo(n) {
+    const prev = document.getElementById('slide-' + currentSlide);
+    if (prev) { prev.classList.remove('active'); prev.classList.add('done'); }
+    currentSlide = n;
+    const target = n === 5 ? 'slide-final' : 'slide-' + n;
+    const next = document.getElementById(target);
+    if (next) { next.classList.add('active'); next.classList.remove('done'); }
+    document.getElementById('progress').style.width = ((n - 1) / 4 * 100) + '%';
+  }
+
+  // Q3 option cards
+  let selectedPlan = '';
+  document.querySelectorAll('.option-card').forEach(card => {
+    card.addEventListener('click', function() {
+      document.querySelectorAll('.option-card').forEach(c => c.classList.remove('selected'));
+      this.classList.add('selected');
+      selectedPlan = this.getAttribute('data-value');
+      document.querySelector('[data-testid="q3-continue"]').classList.add('enabled');
+      document.getElementById('click-log').textContent = 'Selected plan: ' + selectedPlan;
+    });
+  });
+
+  // Enable continue buttons on input
+  document.querySelectorAll('.custom-input').forEach(input => {
+    input.addEventListener('input', function() {
+      const slide = this.closest('.slide');
+      const btn = slide.querySelector('.continue-btn');
+      if (this.value.trim()) btn.classList.add('enabled');
+      else btn.classList.remove('enabled');
+    });
+  });
+
+  // Continue buttons
+  document.querySelector('[data-testid="q1-continue"]').addEventListener('click', function() {
+    const val = document.querySelector('[data-testid="q1-input"]').value;
+    if (!val.trim()) return;
+    answers.name = val;
+    goTo(2);
+  });
+
+  document.querySelector('[data-testid="q2-continue"]').addEventListener('click', function() {
+    const val = document.querySelector('[data-testid="q2-input"]').value;
+    if (!val.trim()) return;
+    answers.email = val;
+    goTo(3);
+  });
+
+  document.querySelector('[data-testid="q3-continue"]').addEventListener('click', function() {
+    if (!selectedPlan) return;
+    answers.plan = selectedPlan;
+    goTo(4);
+  });
+
+  document.querySelector('[data-testid="q4-continue"]').addEventListener('click', function() {
+    answers.comments = document.querySelector('[data-testid="q4-input"]').value;
+    document.getElementById('results').textContent = JSON.stringify(answers, null, 2);
+    goTo(5);
+  });
+</script>
+</body>
+</html>

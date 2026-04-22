@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form 08 - Shadow DOM Web Components</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0fdfa; padding: 20px; color: #333; }
+  h1 { margin-bottom: 20px; font-size: 1.5rem; }
+  .form-card { background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 550px; }
+  .form-card h2 { margin-bottom: 16px; font-size: 1.1rem; }
+  custom-input, custom-select, custom-checkbox { display: block; margin-bottom: 16px; }
+  .btn-submit { background: #0d9488; color: #fff; border: none; padding: 10px 24px; border-radius: 4px; font-size: 1rem; cursor: pointer; margin-top: 8px; }
+  .btn-submit:hover { background: #0f766e; }
+  #shadow-debug { background: #f0fdfa; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 550px; margin-top: 16px; font-family: monospace; font-size: 0.85rem; white-space: pre-wrap; }
+  #shadow-debug::before { content: "Shadow Debug:"; display: block; font-weight: 600; margin-bottom: 8px; font-family: sans-serif; }
+  #results, #click-log { background: #fff; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 550px; margin-top: 16px; white-space: pre-wrap; font-family: monospace; font-size: 0.85rem; min-height: 40px; }
+  #results::before { content: "Results:"; display: block; font-weight: 600; margin-bottom: 8px; font-family: sans-serif; }
+  #click-log::before { content: "Click Log:"; display: block; font-weight: 600; margin-bottom: 8px; font-family: sans-serif; }
+</style>
+</head>
+<body>
+<h1>Form 08 - Shadow DOM Web Components</h1>
+
+<div class="form-card">
+  <h2>Registration</h2>
+  <custom-input label="Full Name" placeholder="Jane Doe" data-testid="shadow-name" name="name"></custom-input>
+  <custom-input label="Email" placeholder="jane@example.com" type="email" data-testid="shadow-email" name="email"></custom-input>
+  <custom-input label="Phone" placeholder="555-123-4567" type="tel" data-testid="shadow-phone" name="phone"></custom-input>
+  <custom-select label="Country" data-testid="shadow-country" name="country"
+    options='[{"value":"","text":"-- Select --"},{"value":"us","text":"United States"},{"value":"uk","text":"United Kingdom"},{"value":"ca","text":"Canada"},{"value":"au","text":"Australia"},{"value":"jp","text":"Japan"}]'>
+  </custom-select>
+  <custom-select label="Plan" data-testid="shadow-plan" name="plan"
+    options='[{"value":"free","text":"Free"},{"value":"pro","text":"Pro ($9/mo)"},{"value":"enterprise","text":"Enterprise ($29/mo)"}]'>
+  </custom-select>
+  <custom-checkbox label="I agree to the Terms of Service" data-testid="shadow-agree" name="agree"></custom-checkbox>
+  <custom-checkbox label="Subscribe to newsletter" data-testid="shadow-newsletter" name="newsletter"></custom-checkbox>
+  <button class="btn-submit" id="submit-btn" data-testid="form-8-submit">Submit</button>
+</div>
+
+<div id="shadow-debug"></div>
+<div id="results"></div>
+<div id="click-log"></div>
+
+<script>
+  // ---- custom-input ----
+  class CustomInput extends HTMLElement {
+    constructor() {
+      super();
+      this.attachShadow({ mode: 'open' });
+    }
+
+    connectedCallback() {
+      const label = this.getAttribute('label') || '';
+      const placeholder = this.getAttribute('placeholder') || '';
+      const type = this.getAttribute('type') || 'text';
+
+      this.shadowRoot.innerHTML = `
+        <style>
+          :host { display: block; }
+          label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.9rem; color: #333; }
+          input { width: 100%; padding: 8px 12px; border: 1px solid #99f6e4; border-radius: 4px; font-size: 0.95rem; box-sizing: border-box; }
+          input:focus { outline: none; border-color: #14b8a6; box-shadow: 0 0 0 3px rgba(20,184,166,0.1); }
+        </style>
+        <label>${label}</label>
+        <input type="${type}" placeholder="${placeholder}">
+      `;
+
+      this._input = this.shadowRoot.querySelector('input');
+      this._input.addEventListener('input', () => {
+        this.dispatchEvent(new CustomEvent('value-change', { detail: this._input.value }));
+        updateDebug();
+      });
+    }
+
+    get value() { return this._input ? this._input.value : ''; }
+    set value(v) { if (this._input) this._input.value = v; }
+  }
+  customElements.define('custom-input', CustomInput);
+
+  // ---- custom-select ----
+  class CustomSelect extends HTMLElement {
+    constructor() {
+      super();
+      this.attachShadow({ mode: 'open' });
+    }
+
+    connectedCallback() {
+      const label = this.getAttribute('label') || '';
+      let options = [];
+      try { options = JSON.parse(this.getAttribute('options') || '[]'); } catch(e) {}
+
+      const optionsHtml = options.map(o => `<option value="${o.value}">${o.text}</option>`).join('');
+
+      this.shadowRoot.innerHTML = `
+        <style>
+          :host { display: block; }
+          label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.9rem; color: #333; }
+          select { width: 100%; padding: 8px 12px; border: 1px solid #99f6e4; border-radius: 4px; font-size: 0.95rem; box-sizing: border-box; background: #fff; }
+          select:focus { outline: none; border-color: #14b8a6; box-shadow: 0 0 0 3px rgba(20,184,166,0.1); }
+        </style>
+        <label>${label}</label>
+        <select>${optionsHtml}</select>
+      `;
+
+      this._select = this.shadowRoot.querySelector('select');
+      this._select.addEventListener('change', () => {
+        this.dispatchEvent(new CustomEvent('value-change', { detail: this._select.value }));
+        updateDebug();
+      });
+    }
+
+    get value() { return this._select ? this._select.value : ''; }
+    set value(v) { if (this._select) this._select.value = v; }
+  }
+  customElements.define('custom-select', CustomSelect);
+
+  // ---- custom-checkbox ----
+  class CustomCheckbox extends HTMLElement {
+    constructor() {
+      super();
+      this.attachShadow({ mode: 'open' });
+    }
+
+    connectedCallback() {
+      const label = this.getAttribute('label') || '';
+      const id = 'cb-' + Math.random().toString(36).substr(2, 6);
+
+      this.shadowRoot.innerHTML = `
+        <style>
+          :host { display: block; }
+          .wrapper { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+          input { width: auto; cursor: pointer; }
+          label { font-weight: 400; font-size: 0.9rem; color: #333; cursor: pointer; }
+        </style>
+        <div class="wrapper">
+          <input type="checkbox" id="${id}">
+          <label for="${id}">${label}</label>
+        </div>
+      `;
+
+      this._checkbox = this.shadowRoot.querySelector('input');
+      this._checkbox.addEventListener('change', () => {
+        this.dispatchEvent(new CustomEvent('value-change', { detail: this._checkbox.checked }));
+        updateDebug();
+      });
+    }
+
+    get value() { return this._checkbox ? this._checkbox.checked : false; }
+    set value(v) { if (this._checkbox) this._checkbox.checked = !!v; }
+  }
+  customElements.define('custom-checkbox', CustomCheckbox);
+
+  // ---- Debug & Submit ----
+  function getFormValues() {
+    const data = {};
+    document.querySelectorAll('custom-input, custom-select, custom-checkbox').forEach(el => {
+      const name = el.getAttribute('name') || el.getAttribute('data-testid');
+      data[name] = el.value;
+    });
+    return data;
+  }
+
+  function updateDebug() {
+    document.getElementById('shadow-debug').textContent = JSON.stringify(getFormValues(), null, 2);
+  }
+
+  // Initial debug
+  setTimeout(updateDebug, 100);
+
+  document.getElementById('submit-btn').addEventListener('click', () => {
+    document.getElementById('results').textContent = JSON.stringify(getFormValues(), null, 2);
+  });
+
+  // Click log
+  const clickLog = document.getElementById('click-log');
+  document.addEventListener('click', function(e) {
+    const testid = e.target.getAttribute('data-testid') || '';
+    const tag = e.target.tagName.toLowerCase();
+    const info = testid ? `[${testid}]` : `<${tag}>`;
+    const entry = document.createElement('div');
+    entry.textContent = new Date().toISOString().substr(11,12) + ' click ' + info;
+    clickLog.appendChild(entry);
+  });
+</script>
+</body>
+</html>

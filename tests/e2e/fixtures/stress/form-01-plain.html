@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form 01 - Plain HTML5</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 20px; color: #333; }
+  h1 { margin-bottom: 20px; font-size: 1.5rem; }
+  form { background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 700px; }
+  .field { margin-bottom: 16px; }
+  label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.9rem; }
+  input, textarea, select { width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.95rem; }
+  input[type="checkbox"], input[type="radio"] { width: auto; margin-right: 6px; }
+  input[type="color"] { width: 60px; height: 36px; padding: 2px; }
+  input[type="range"] { padding: 0; }
+  input[type="file"] { padding: 4px; }
+  textarea { resize: vertical; min-height: 80px; }
+  select[multiple] { min-height: 100px; }
+  .radio-group label, .checkbox-group label { display: inline-flex; align-items: center; margin-right: 16px; font-weight: 400; }
+  button[type="submit"] { background: #2563eb; color: #fff; border: none; padding: 10px 24px; border-radius: 4px; font-size: 1rem; cursor: pointer; margin-top: 8px; }
+  button[type="submit"]:hover { background: #1d4ed8; }
+  fieldset { border: 1px solid #ddd; padding: 12px; border-radius: 4px; margin-bottom: 16px; }
+  legend { font-weight: 600; padding: 0 6px; font-size: 0.9rem; }
+  .disabled-field input { background: #eee; }
+  #results, #click-log { background: #fff; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 700px; margin-top: 16px; white-space: pre-wrap; font-family: monospace; font-size: 0.85rem; min-height: 40px; }
+  #results::before { content: "Results:"; display: block; font-weight: 600; margin-bottom: 8px; font-family: sans-serif; }
+  #click-log::before { content: "Click Log:"; display: block; font-weight: 600; margin-bottom: 8px; font-family: sans-serif; }
+</style>
+</head>
+<body>
+<h1>Form 01 - Plain HTML5 Inputs</h1>
+<form id="plain-form" novalidate>
+
+  <div class="field">
+    <label for="f1-text">Full Name *</label>
+    <input type="text" id="f1-text" name="fullName" data-testid="form-1-fullname" required placeholder="John Doe">
+  </div>
+
+  <div class="field">
+    <label for="f1-email">Email *</label>
+    <input type="email" id="f1-email" name="email" data-testid="form-1-email" required placeholder="john@example.com">
+  </div>
+
+  <div class="field">
+    <label for="f1-password">Password *</label>
+    <input type="password" id="f1-password" name="password" data-testid="form-1-password" required minlength="8">
+  </div>
+
+  <div class="field">
+    <label for="f1-url">Website</label>
+    <input type="url" id="f1-url" name="website" data-testid="form-1-url" placeholder="https://example.com">
+  </div>
+
+  <div class="field">
+    <label for="f1-tel">Phone *</label>
+    <input type="tel" id="f1-tel" name="phone" data-testid="form-1-phone" required placeholder="555-123-4567">
+  </div>
+
+  <div class="field">
+    <label for="f1-textarea">Bio</label>
+    <textarea id="f1-textarea" name="bio" data-testid="form-1-bio" placeholder="Tell us about yourself..."></textarea>
+  </div>
+
+  <div class="field">
+    <label for="f1-select">Country *</label>
+    <select id="f1-select" name="country" data-testid="form-1-country" required>
+      <option value="">-- Select --</option>
+      <option value="us">United States</option>
+      <option value="uk">United Kingdom</option>
+      <option value="ca">Canada</option>
+      <option value="au">Australia</option>
+      <option value="de">Germany</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label for="f1-select-multi">Skills (multiple)</label>
+    <select id="f1-select-multi" name="skills" data-testid="form-1-skills" multiple>
+      <option value="js">JavaScript</option>
+      <option value="py">Python</option>
+      <option value="go">Go</option>
+      <option value="rs">Rust</option>
+      <option value="ts">TypeScript</option>
+    </select>
+  </div>
+
+  <fieldset>
+    <legend>Preferred Contact *</legend>
+    <div class="radio-group">
+      <label><input type="radio" name="contact" value="email" data-testid="form-1-contact-email" required> Email</label>
+      <label><input type="radio" name="contact" value="phone" data-testid="form-1-contact-phone"> Phone</label>
+      <label><input type="radio" name="contact" value="mail" data-testid="form-1-contact-mail"> Mail</label>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Interests</legend>
+    <div class="checkbox-group">
+      <label><input type="checkbox" name="interests" value="sports" data-testid="form-1-interest-sports"> Sports</label>
+      <label><input type="checkbox" name="interests" value="music" data-testid="form-1-interest-music"> Music</label>
+      <label><input type="checkbox" name="interests" value="travel" data-testid="form-1-interest-travel"> Travel</label>
+      <label><input type="checkbox" name="interests" value="tech" data-testid="form-1-interest-tech"> Technology</label>
+    </div>
+  </fieldset>
+
+  <div class="field">
+    <label for="f1-date">Birth Date</label>
+    <input type="date" id="f1-date" name="birthDate" data-testid="form-1-date">
+  </div>
+
+  <div class="field">
+    <label for="f1-time">Preferred Time</label>
+    <input type="time" id="f1-time" name="preferredTime" data-testid="form-1-time">
+  </div>
+
+  <div class="field">
+    <label for="f1-datetime">Appointment</label>
+    <input type="datetime-local" id="f1-datetime" name="appointment" data-testid="form-1-datetime">
+  </div>
+
+  <div class="field">
+    <label for="f1-number">Age (0-100) *</label>
+    <input type="number" id="f1-number" name="age" data-testid="form-1-age" min="0" max="100" required>
+  </div>
+
+  <div class="field">
+    <label for="f1-range">Satisfaction: <span id="range-val">50</span></label>
+    <input type="range" id="f1-range" name="satisfaction" data-testid="form-1-range" min="0" max="100" value="50">
+  </div>
+
+  <div class="field">
+    <label for="f1-color">Favorite Color</label>
+    <input type="color" id="f1-color" name="favColor" data-testid="form-1-color" value="#2563eb">
+  </div>
+
+  <div class="field">
+    <label for="f1-file">Upload File</label>
+    <input type="file" id="f1-file" name="file" data-testid="form-1-file">
+  </div>
+
+  <div class="field disabled-field">
+    <label for="f1-disabled">Account ID (read-only)</label>
+    <input type="text" id="f1-disabled" name="accountId" data-testid="form-1-disabled" value="ACC-00482" disabled>
+  </div>
+
+  <input type="hidden" name="formVersion" value="1.0" data-testid="form-1-hidden">
+
+  <button type="submit" data-testid="form-1-submit">Submit</button>
+</form>
+
+<div id="results"></div>
+<div id="click-log"></div>
+
+<script>
+  const clickLog = document.getElementById('click-log');
+  document.addEventListener('click', function(e) {
+    const tag = e.target.tagName;
+    const testid = e.target.getAttribute('data-testid') || '';
+    const info = testid ? `[${testid}]` : `<${tag.toLowerCase()}>`;
+    const entry = document.createElement('div');
+    entry.textContent = new Date().toISOString().substr(11,12) + ' click ' + info;
+    clickLog.appendChild(entry);
+  });
+
+  document.getElementById('f1-range').addEventListener('input', function() {
+    document.getElementById('range-val').textContent = this.value;
+  });
+
+  document.getElementById('plain-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const fd = new FormData(this);
+    const data = {};
+    for (const [key, value] of fd.entries()) {
+      if (data[key]) {
+        if (!Array.isArray(data[key])) data[key] = [data[key]];
+        data[key].push(value);
+      } else {
+        data[key] = value;
+      }
+    }
+    // Include disabled field
+    data.accountId = document.getElementById('f1-disabled').value;
+    // File just gets name
+    const fileInput = document.getElementById('f1-file');
+    if (fileInput.files.length > 0) {
+      data.file = fileInput.files[0].name;
+    }
+    document.getElementById('results').textContent = JSON.stringify(data, null, 2);
+  });
+</script>
+</body>
+</html>

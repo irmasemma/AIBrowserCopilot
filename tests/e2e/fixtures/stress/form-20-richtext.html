@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form 20 — Contenteditable Rich Text Editor</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; padding: 24px; background: #f5f5f5; }
+  h1 { margin-bottom: 16px; font-size: 20px; }
+  .editor-card { background: #fff; border: 1px solid #ddd; border-radius: 8px; max-width: 640px; overflow: hidden; margin-bottom: 16px; }
+  .toolbar { display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid #e5e7eb; background: #fafafa; flex-wrap: wrap; }
+  .toolbar button { padding: 6px 12px; background: #fff; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.15s; }
+  .toolbar button:hover { background: #f3f4f6; }
+  .toolbar button.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+  .editor {
+    min-height: 200px; padding: 16px; font-size: 15px; line-height: 1.6; outline: none;
+    overflow-y: auto; max-height: 400px;
+  }
+  .editor:empty::before { content: 'Start typing your content...'; color: #9ca3af; }
+  .editor a { color: #2563eb; text-decoration: underline; }
+  .char-count { padding: 8px 16px; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280; text-align: right; background: #fafafa; }
+  .hidden-sync { display: none; }
+  h3 { margin-top: 16px; margin-bottom: 8px; font-size: 15px; }
+  .preview { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; max-width: 640px; min-height: 60px; font-size: 15px; line-height: 1.6; margin-bottom: 16px; }
+  .preview:empty::before { content: 'Preview will appear here...'; color: #9ca3af; font-style: italic; }
+  .preview a { color: #2563eb; text-decoration: underline; }
+  .submit-btn { padding: 10px 24px; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+  #results, #click-log { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-top: 12px; min-height: 40px; font-family: monospace; font-size: 13px; white-space: pre-wrap; max-width: 640px; }
+  .link-dialog { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; border: 1px solid #ccc; border-radius: 8px; padding: 24px; box-shadow: 0 8px 30px rgba(0,0,0,0.15); z-index: 100; }
+  .link-dialog.open { display: block; }
+  .link-dialog label { display: block; margin-bottom: 4px; font-size: 13px; font-weight: 600; }
+  .link-dialog input { width: 300px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; margin-bottom: 12px; display: block; }
+  .link-dialog .btn-row { display: flex; gap: 8px; }
+  .link-dialog button { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .link-dialog .ok { background: #2563eb; color: #fff; }
+  .link-dialog .cancel { background: #e5e7eb; }
+  .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 99; }
+  .overlay.open { display: block; }
+</style>
+</head>
+<body>
+<h1>Form 20 — Contenteditable Rich Text Editor</h1>
+
+<div class="editor-card">
+  <div class="toolbar">
+    <button type="button" data-testid="editor-bold" id="btn-bold" title="Bold"><b>B</b></button>
+    <button type="button" data-testid="editor-italic" id="btn-italic" title="Italic"><i>I</i></button>
+    <button type="button" data-testid="editor-underline" id="btn-underline" title="Underline"><u>U</u></button>
+    <button type="button" data-testid="editor-link" id="btn-link" title="Insert Link">Link</button>
+    <button type="button" data-testid="editor-ul" id="btn-ul" title="Bullet List">&#8226; List</button>
+    <button type="button" data-testid="editor-ol" id="btn-ol" title="Numbered List">1. List</button>
+    <button type="button" data-testid="editor-clear" id="btn-clear" title="Clear Formatting">Clear</button>
+  </div>
+  <div contenteditable="true" class="editor" id="editor" data-testid="editor-content" role="textbox" aria-multiline="true"></div>
+  <div class="char-count" data-testid="editor-char-count" id="char-count">0 characters</div>
+</div>
+
+<!-- Hidden textarea that syncs HTML content -->
+<textarea class="hidden-sync" id="hidden-textarea" data-testid="editor-hidden-textarea"></textarea>
+
+<h3>Preview</h3>
+<div class="preview" id="preview" data-testid="editor-preview"></div>
+
+<button type="button" class="submit-btn" data-testid="editor-submit" id="submit-btn">Submit</button>
+
+<h3>Results</h3>
+<div id="results">Waiting for submission...</div>
+<div id="click-log"></div>
+
+<!-- Link dialog -->
+<div class="overlay" id="overlay"></div>
+<div class="link-dialog" id="link-dialog">
+  <label for="link-url">URL</label>
+  <input type="url" id="link-url" data-testid="editor-link-url" placeholder="https://example.com">
+  <label for="link-text">Text (optional)</label>
+  <input type="text" id="link-text" data-testid="editor-link-text" placeholder="Link text">
+  <div class="btn-row">
+    <button class="ok" id="link-ok" data-testid="editor-link-ok">Insert Link</button>
+    <button class="cancel" id="link-cancel" data-testid="editor-link-cancel">Cancel</button>
+  </div>
+</div>
+
+<script>
+  const editor = document.getElementById('editor');
+  const preview = document.getElementById('preview');
+  const hiddenTextarea = document.getElementById('hidden-textarea');
+  const charCount = document.getElementById('char-count');
+
+  // Sanitize HTML: strip dangerous tags but keep formatting
+  function sanitizeHTML(html) {
+    const allowed = ['b', 'strong', 'i', 'em', 'u', 'a', 'br', 'p', 'ul', 'ol', 'li', 'span', 'div'];
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    // Remove script, style, iframe, object, embed
+    tmp.querySelectorAll('script, style, iframe, object, embed, form, input').forEach(el => el.remove());
+    // Remove event handler attributes
+    tmp.querySelectorAll('*').forEach(el => {
+      for (const attr of Array.from(el.attributes)) {
+        if (attr.name.startsWith('on')) el.removeAttribute(attr.name);
+      }
+    });
+    return tmp.innerHTML;
+  }
+
+  function syncContent() {
+    const html = editor.innerHTML;
+    const clean = sanitizeHTML(html);
+    hiddenTextarea.value = clean;
+    preview.innerHTML = clean;
+    const textLen = editor.textContent.length;
+    charCount.textContent = textLen + ' character' + (textLen !== 1 ? 's' : '');
+  }
+
+  editor.addEventListener('input', syncContent);
+
+  // Handle paste — sanitize
+  editor.addEventListener('paste', function(e) {
+    e.preventDefault();
+    const html = e.clipboardData.getData('text/html');
+    const text = e.clipboardData.getData('text/plain');
+    if (html) {
+      const clean = sanitizeHTML(html);
+      document.execCommand('insertHTML', false, clean);
+    } else {
+      document.execCommand('insertText', false, text);
+    }
+    syncContent();
+  });
+
+  // Toolbar commands
+  function execCmd(cmd, val) {
+    editor.focus();
+    document.execCommand(cmd, false, val || null);
+    syncContent();
+    updateToolbarState();
+  }
+
+  document.getElementById('btn-bold').addEventListener('click', () => {
+    execCmd('bold');
+    document.getElementById('click-log').textContent = 'Bold toggled';
+  });
+  document.getElementById('btn-italic').addEventListener('click', () => {
+    execCmd('italic');
+    document.getElementById('click-log').textContent = 'Italic toggled';
+  });
+  document.getElementById('btn-underline').addEventListener('click', () => {
+    execCmd('underline');
+    document.getElementById('click-log').textContent = 'Underline toggled';
+  });
+  document.getElementById('btn-ul').addEventListener('click', () => {
+    execCmd('insertUnorderedList');
+    document.getElementById('click-log').textContent = 'Bullet list toggled';
+  });
+  document.getElementById('btn-ol').addEventListener('click', () => {
+    execCmd('insertOrderedList');
+    document.getElementById('click-log').textContent = 'Numbered list toggled';
+  });
+  document.getElementById('btn-clear').addEventListener('click', () => {
+    execCmd('removeFormat');
+    document.getElementById('click-log').textContent = 'Formatting cleared';
+  });
+
+  // Link dialog
+  let savedSelection = null;
+  function saveSelection() {
+    const sel = window.getSelection();
+    if (sel.rangeCount > 0) savedSelection = sel.getRangeAt(0);
+  }
+  function restoreSelection() {
+    if (savedSelection) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(savedSelection);
+    }
+  }
+
+  document.getElementById('btn-link').addEventListener('click', () => {
+    saveSelection();
+    const sel = window.getSelection();
+    document.getElementById('link-text').value = sel.toString() || '';
+    document.getElementById('link-url').value = '';
+    document.getElementById('link-dialog').classList.add('open');
+    document.getElementById('overlay').classList.add('open');
+    document.getElementById('link-url').focus();
+  });
+
+  document.getElementById('link-cancel').addEventListener('click', closeDialog);
+  document.getElementById('overlay').addEventListener('click', closeDialog);
+
+  function closeDialog() {
+    document.getElementById('link-dialog').classList.remove('open');
+    document.getElementById('overlay').classList.remove('open');
+  }
+
+  document.getElementById('link-ok').addEventListener('click', () => {
+    const url = document.getElementById('link-url').value;
+    const text = document.getElementById('link-text').value || url;
+    if (!url) { closeDialog(); return; }
+    closeDialog();
+    editor.focus();
+    restoreSelection();
+    const a = '<a href="' + url.replace(/"/g, '&quot;') + '">' + text.replace(/</g, '&lt;') + '</a>';
+    document.execCommand('insertHTML', false, a);
+    syncContent();
+    document.getElementById('click-log').textContent = 'Link inserted: ' + url;
+  });
+
+  // Track active toolbar state
+  function updateToolbarState() {
+    document.getElementById('btn-bold').classList.toggle('active', document.queryCommandState('bold'));
+    document.getElementById('btn-italic').classList.toggle('active', document.queryCommandState('italic'));
+    document.getElementById('btn-underline').classList.toggle('active', document.queryCommandState('underline'));
+  }
+
+  editor.addEventListener('keyup', updateToolbarState);
+  editor.addEventListener('mouseup', updateToolbarState);
+
+  // Submit
+  document.getElementById('submit-btn').addEventListener('click', () => {
+    const clean = sanitizeHTML(editor.innerHTML);
+    document.getElementById('results').textContent = JSON.stringify({ html: clean, text: editor.textContent, length: editor.textContent.length }, null, 2);
+    document.getElementById('click-log').textContent = 'Form submitted';
+  });
+</script>
+</body>
+</html>

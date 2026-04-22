@@ -8,6 +8,7 @@ export const takeScreenshot: ToolPlugin = {
   inputSchema: {
     format: z.enum(['png', 'jpeg']).default('png').describe('Image format'),
     quality: z.number().min(0).max(100).default(80).describe('JPEG quality (0-100)'),
+    tab_id: z.number().optional().describe('Specific tab ID to target (defaults to active tab). The tab will be activated automatically.'),
   },
   async execute() {
     return { content: [{ type: 'text' as const, text: '[Stub] take_screenshot: Not connected to browser.' }] };

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form 13 — Rapid DOM Mutations</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; padding: 24px; background: #f5f5f5; }
+  h1 { margin-bottom: 8px; }
+  .status { font-size: 13px; color: #666; margin-bottom: 16px; }
+  .status .live { color: #ef4444; font-weight: 700; }
+  .status .paused { color: #16a34a; font-weight: 700; }
+  form { background: #fff; padding: 24px; border-radius: 8px; max-width: 500px; border: 1px solid #ddd; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 14px; }
+  .field input, .field textarea { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+  .field textarea { height: 80px; resize: vertical; }
+  button { padding: 8px 20px; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin-right: 8px; }
+  button.warn { background: #f59e0b; }
+  button.success { background: #16a34a; }
+  #results, #click-log { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-top: 12px; min-height: 40px; font-family: monospace; font-size: 13px; white-space: pre-wrap; }
+  #mutation-counter { font-size: 12px; color: #999; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>Form 13 — Rapid DOM Mutations</h1>
+<div class="status" id="status">Mutations: <span class="live">LIVE</span> — IDs and names rotate every 2s, data-testid stays stable</div>
+
+<form id="mutating-form">
+  <div class="field" id="field-container-1">
+    <label id="label-name">Name</label>
+    <input type="text" id="input-name" name="name" placeholder="Enter name" data-testid="mutate-name">
+  </div>
+  <div class="field" id="field-container-2">
+    <label id="label-email">Email</label>
+    <input type="email" id="input-email" name="email" placeholder="Enter email" data-testid="mutate-email">
+  </div>
+  <div class="field" id="field-container-3">
+    <label id="label-phone">Phone</label>
+    <input type="tel" id="input-phone" name="phone" placeholder="Enter phone" data-testid="mutate-phone">
+  </div>
+  <div class="field" id="field-container-4">
+    <label id="label-notes">Notes</label>
+    <textarea id="input-notes" name="notes" placeholder="Enter notes" data-testid="mutate-notes"></textarea>
+  </div>
+
+  <button type="button" id="pause-btn" data-testid="mutate-pause" class="warn">Pause Mutations</button>
+  <button type="submit" data-testid="mutate-submit">Submit</button>
+</form>
+
+<div id="mutation-counter">Mutations: 0</div>
+<h3>Results</h3>
+<div id="results">Waiting for submission...</div>
+<div id="click-log"></div>
+
+<script>
+  let mutationCount = 0;
+  let paused = false;
+  const suffixes = ['alpha', 'beta', 'gamma', 'delta', 'epsilon'];
+  const placeholders = [
+    ['Your name', 'Full name', 'Enter name', 'Name here', 'Type name'],
+    ['Your email', 'Email address', 'Enter email', 'Email here', 'Type email'],
+    ['Your phone', 'Phone number', 'Enter phone', 'Phone here', 'Type phone'],
+    ['Your notes', 'Add notes', 'Enter notes', 'Notes here', 'Type notes'],
+  ];
+  const fieldKeys = ['name', 'email', 'phone', 'notes'];
+
+  function mutate() {
+    if (paused) return;
+    mutationCount++;
+    const idx = mutationCount % suffixes.length;
+    const ts = new Date().toLocaleTimeString();
+
+    fieldKeys.forEach((key, i) => {
+      const input = document.querySelector('[data-testid="mutate-' + key + '"]');
+      const label = document.getElementById('label-' + key);
+      if (input) {
+        // Rotate id and name (but NOT data-testid)
+        input.id = 'input-' + key + '-' + suffixes[idx];
+        input.name = key + '_' + suffixes[idx];
+        input.placeholder = placeholders[i][idx];
+      }
+      if (label) {
+        label.textContent = key.charAt(0).toUpperCase() + key.slice(1) + ' [' + ts + ']';
+        label.id = 'label-' + key + '-' + suffixes[idx];
+      }
+    });
+
+    // Swap order of fields 2 and 3 on even mutations
+    if (mutationCount % 2 === 0) {
+      const form = document.getElementById('mutating-form');
+      const c2 = document.getElementById('field-container-2');
+      const c3 = document.getElementById('field-container-3');
+      if (c2 && c3) {
+        form.insertBefore(c3, c2);
+      }
+    }
+
+    document.getElementById('mutation-counter').textContent = 'Mutations: ' + mutationCount;
+  }
+
+  const interval = setInterval(mutate, 2000);
+
+  document.getElementById('pause-btn').addEventListener('click', function() {
+    paused = !paused;
+    this.textContent = paused ? 'Resume Mutations' : 'Pause Mutations';
+    this.className = paused ? 'success' : 'warn';
+    const statusSpan = document.querySelector('#status span');
+    statusSpan.textContent = paused ? 'PAUSED' : 'LIVE';
+    statusSpan.className = paused ? 'paused' : 'live';
+    document.getElementById('click-log').textContent = paused ? 'Mutations paused' : 'Mutations resumed';
+  });
+
+  document.getElementById('mutating-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    // Collect by data-testid since name/id rotate
+    const data = {};
+    fieldKeys.forEach(key => {
+      const el = document.querySelector('[data-testid="mutate-' + key + '"]');
+      data[key] = el ? el.value : '';
+    });
+    document.getElementById('results').textContent = JSON.stringify(data, null, 2);
+  });
+</script>
+</body>
+</html>

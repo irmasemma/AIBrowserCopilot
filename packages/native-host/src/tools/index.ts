@@ -7,6 +7,8 @@ import { navigate } from './navigate.js';
 import { fillForm } from './fill-form.js';
 import { clickElement } from './click-element.js';
 import { extractTable } from './extract-table.js';
+import { readForm } from './read-form.js';
+import { extractData } from './extract-data.js';
 
 export const toolRegistry: ToolPlugin[] = [
   getPageContent,
@@ -17,4 +19,6 @@ export const toolRegistry: ToolPlugin[] = [
   fillForm,
   clickElement,
   extractTable,
+  readForm,
+  extractData,
 ];

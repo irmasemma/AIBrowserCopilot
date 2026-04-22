@@ -7,7 +7,9 @@ export const clickElement: ToolPlugin = {
   tier: 'pro',
   inputSchema: {
     selector: z.string().optional().describe('CSS selector for the element'),
-    text: z.string().optional().describe('Visible text content to match'),
+    text: z.string().optional().describe('Visible text of the button or link to click. Prefers clickable elements (buttons, links) over plain text.'),
+    index: z.number().optional().default(0).describe('Which match to click when multiple elements match (0 = first). Use when there are duplicate buttons.'),
+    tab_id: z.number().optional().describe('Specific tab ID to target (defaults to active tab). The tab will be activated automatically.'),
   },
   async execute() {
     return { content: [{ type: 'text' as const, text: '[Stub] click_element: Not connected to browser.' }] };

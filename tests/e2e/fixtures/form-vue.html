@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vue Forms Test Fixture</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #f8f9fa; color: #333; }
+    h1 { color: #1a1a2e; border-bottom: 2px solid #42b883; padding-bottom: 8px; }
+    h2 { color: #42b883; margin-top: 32px; }
+    .form-card { background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 24px; }
+    .field { margin-bottom: 16px; }
+    .field label { display: block; margin-bottom: 4px; font-weight: 600; font-size: 14px; }
+    .field input, .field textarea, .field select {
+      width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px;
+    }
+    .field input:focus, .field textarea:focus { outline: none; border-color: #42b883; box-shadow: 0 0 0 2px rgba(66,184,131,0.3); }
+    .btn { padding: 10px 20px; border: none; border-radius: 4px; font-size: 14px; cursor: pointer; margin-right: 8px; }
+    .btn-primary { background: #42b883; color: #fff; font-weight: 600; }
+    .btn-primary:hover { background: #38a373; }
+    .btn-secondary { background: #e5e7eb; color: #333; }
+    .btn-small { padding: 4px 10px; font-size: 12px; }
+
+    /* Autocomplete */
+    .autocomplete { position: relative; }
+    .autocomplete-list { position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #ccc; border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 10; max-height: 180px; overflow-y: auto; }
+    .autocomplete-item { padding: 8px 12px; cursor: pointer; }
+    .autocomplete-item:hover, .autocomplete-item.highlighted { background: #e6f7ef; }
+
+    /* Tags */
+    .tags-container { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; min-height: 42px; cursor: text; }
+    .tags-container:focus-within { border-color: #42b883; box-shadow: 0 0 0 2px rgba(66,184,131,0.3); }
+    .tag { display: inline-flex; align-items: center; gap: 4px; background: #42b883; color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 13px; }
+    .tag .tag-remove { cursor: pointer; font-weight: bold; margin-left: 2px; }
+    .tags-input { border: none; outline: none; flex: 1; min-width: 80px; font-size: 14px; padding: 4px; }
+
+    /* Star rating */
+    .star-rating { display: flex; gap: 4px; font-size: 28px; cursor: pointer; }
+    .star { color: #ddd; transition: color 0.15s; user-select: none; }
+    .star.filled { color: #f59e0b; }
+    .star:hover { color: #fbbf24; }
+
+    #results { margin-top: 24px; padding: 16px; background: #e8f5e9; border: 1px solid #a5d6a7; border-radius: 8px; font-family: monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; min-height: 40px; }
+    #click-log { margin-top: 16px; padding: 16px; background: #fff3e0; border: 1px solid #ffcc80; border-radius: 8px; font-family: monospace; font-size: 13px; white-space: pre-wrap; min-height: 40px; }
+    #vue-fallback { display: none; padding: 16px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+
+  <h1>Vue Forms Test Fixture</h1>
+  <p>Reactive forms with v-model, conditional fields, autocomplete, tags, and star rating.</p>
+
+  <div id="vue-fallback">
+    <strong>Note:</strong> Vue CDN failed to load. This page requires an internet connection for Vue 3.
+  </div>
+
+  <div id="app">
+    <!-- Section 1: Basic v-model bound form with conditional fields -->
+    <h2>Form 1: Profile with Conditional Fields</h2>
+    <div class="form-card">
+      <div class="field">
+        <label for="vue-name">Full Name</label>
+        <input type="text" id="vue-name" v-model="profile.name" placeholder="Your name">
+      </div>
+
+      <div class="field">
+        <label for="vue-email">Email</label>
+        <input type="email" id="vue-email" v-model="profile.email" placeholder="you@example.com">
+      </div>
+
+      <div class="field">
+        <label for="vue-account-type">Account Type</label>
+        <select id="vue-account-type" v-model="profile.accountType">
+          <option value="">-- Select --</option>
+          <option value="personal">Personal</option>
+          <option value="business">Business</option>
+          <option value="enterprise">Enterprise</option>
+        </select>
+      </div>
+
+      <!-- Conditional: show company fields when business or enterprise -->
+      <template v-if="profile.accountType === 'business' || profile.accountType === 'enterprise'">
+        <div class="field">
+          <label for="vue-company">Company Name</label>
+          <input type="text" id="vue-company" v-model="profile.company" placeholder="Company name">
+        </div>
+        <div class="field">
+          <label for="vue-employees">Number of Employees</label>
+          <select id="vue-employees" v-model="profile.employees">
+            <option value="">-- Select --</option>
+            <option value="1-10">1-10</option>
+            <option value="11-50">11-50</option>
+            <option value="51-200">51-200</option>
+            <option value="200+">200+</option>
+          </select>
+        </div>
+      </template>
+
+      <!-- Conditional: show enterprise-only field -->
+      <div class="field" v-if="profile.accountType === 'enterprise'">
+        <label for="vue-contract-id">Enterprise Contract ID</label>
+        <input type="text" id="vue-contract-id" v-model="profile.contractId" placeholder="ENT-XXXX-XXXX">
+      </div>
+
+      <div class="field">
+        <label for="vue-bio">Bio</label>
+        <textarea id="vue-bio" v-model="profile.bio" placeholder="About you..." rows="3"></textarea>
+      </div>
+    </div>
+
+    <!-- Section 2: Autocomplete search -->
+    <h2>Form 2: Autocomplete Search</h2>
+    <div class="form-card">
+      <div class="field autocomplete">
+        <label for="vue-city">City (type to search)</label>
+        <input type="text" id="vue-city" v-model="cityQuery" @input="onCityInput" @blur="closeCityDropdownDelayed"
+          @keydown.down.prevent="highlightNext" @keydown.up.prevent="highlightPrev"
+          @keydown.enter.prevent="selectHighlighted"
+          placeholder="Start typing a city..." autocomplete="off">
+        <div class="autocomplete-list" v-if="showCityDropdown && filteredCities.length">
+          <div v-for="(city, idx) in filteredCities" :key="city"
+            class="autocomplete-item" :class="{ highlighted: idx === highlightedIndex }"
+            @mousedown.prevent="selectCity(city)"
+            @click="logClickVue('Selected city: ' + city)">
+            {{ city }}
+          </div>
+        </div>
+      </div>
+      <div v-if="selectedCity" style="color: #42b883; font-weight: 600;">Selected: {{ selectedCity }}</div>
+    </div>
+
+    <!-- Section 3: Tags input -->
+    <h2>Form 3: Tags Input</h2>
+    <div class="form-card">
+      <div class="field">
+        <label>Skills (press Enter to add)</label>
+        <div class="tags-container" @click="$refs.tagInput.focus()">
+          <span class="tag" v-for="(tag, idx) in tags" :key="idx">
+            {{ tag }}
+            <span class="tag-remove" @click="removeTag(idx); logClickVue('Remove tag: ' + tag)">&times;</span>
+          </span>
+          <input type="text" class="tags-input" ref="tagInput" v-model="tagInput"
+            @keydown.enter.prevent="addTag" @keydown.backspace="removeLastTagIfEmpty"
+            placeholder="Type and press Enter..." id="vue-tags-input">
+        </div>
+      </div>
+      <div v-if="tags.length" style="margin-top: 8px; color: #666; font-size: 13px;">
+        Tags: {{ tags.join(', ') }}
+      </div>
+    </div>
+
+    <!-- Section 4: Star rating -->
+    <h2>Form 4: Star Rating &amp; Feedback</h2>
+    <div class="form-card">
+      <div class="field">
+        <label>How would you rate your experience?</label>
+        <div class="star-rating" id="star-rating">
+          <span v-for="star in 5" :key="star"
+            class="star" :class="{ filled: star <= rating }"
+            @click="setRating(star)"
+            @mouseenter="hoverRating = star"
+            @mouseleave="hoverRating = 0"
+            :style="{ color: (star <= (hoverRating || rating)) ? '#f59e0b' : '#ddd' }">
+            &#9733;
+          </span>
+        </div>
+        <div style="margin-top: 4px; color: #666;">{{ rating ? rating + ' / 5' : 'No rating yet' }}</div>
+      </div>
+
+      <div class="field">
+        <label for="vue-feedback">Feedback</label>
+        <textarea id="vue-feedback" v-model="feedback" placeholder="Additional comments..." rows="3"></textarea>
+      </div>
+
+      <button type="button" class="btn btn-primary" @click="submitAll">Submit All Forms</button>
+      <button type="button" class="btn btn-secondary" @click="resetAll">Reset All</button>
+    </div>
+
+    <!-- Section 5: Nested object form -->
+    <h2>Form 5: Nested Address Object</h2>
+    <div class="form-card">
+      <div class="field">
+        <label for="vue-street">Street Address</label>
+        <input type="text" id="vue-street" v-model="address.street" placeholder="123 Main St">
+      </div>
+      <div class="field">
+        <label for="vue-apt">Apt / Suite</label>
+        <input type="text" id="vue-apt" v-model="address.apt" placeholder="Apt 4B">
+      </div>
+      <div style="display: flex; gap: 12px;">
+        <div class="field" style="flex: 2;">
+          <label for="vue-addr-city">City</label>
+          <input type="text" id="vue-addr-city" v-model="address.city" placeholder="City">
+        </div>
+        <div class="field" style="flex: 1;">
+          <label for="vue-state">State</label>
+          <input type="text" id="vue-state" v-model="address.state" placeholder="CA">
+        </div>
+        <div class="field" style="flex: 1;">
+          <label for="vue-zip">ZIP</label>
+          <input type="text" id="vue-zip" v-model="address.zip" placeholder="90210">
+        </div>
+      </div>
+      <div class="field">
+        <label for="vue-addr-country">Country</label>
+        <select id="vue-addr-country" v-model="address.country">
+          <option value="">-- Select --</option>
+          <option value="US">United States</option>
+          <option value="CA">Canada</option>
+          <option value="UK">United Kingdom</option>
+          <option value="DE">Germany</option>
+          <option value="AU">Australia</option>
+        </select>
+      </div>
+      <button type="button" class="btn btn-primary" @click="submitAddress">Submit Address</button>
+    </div>
+  </div>
+
+  <h2>Results</h2>
+  <div id="results">No submissions yet.</div>
+
+  <h2>Click Log</h2>
+  <div id="click-log">No clicks recorded.</div>
+
+  <script>
+    // Global click logger
+    var clickCount = 0;
+    function logClick(label) {
+      clickCount++;
+      var log = document.getElementById('click-log');
+      var entry = '[' + clickCount + '] Clicked: ' + label + ' at ' + new Date().toLocaleTimeString();
+      log.textContent = (clickCount === 1) ? entry : log.textContent + '\n' + entry;
+    }
+  </script>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+
+  <script>
+    window.addEventListener('load', function() {
+      if (typeof Vue === 'undefined') {
+        document.getElementById('vue-fallback').style.display = 'block';
+        document.getElementById('app').textContent = 'Vue failed to load. Please check your internet connection.';
+        return;
+      }
+
+      var cities = [
+        'New York', 'Los Angeles', 'Chicago', 'Houston', 'Phoenix',
+        'Philadelphia', 'San Antonio', 'San Diego', 'Dallas', 'San Jose',
+        'Austin', 'Jacksonville', 'Fort Worth', 'Columbus', 'Charlotte',
+        'Indianapolis', 'San Francisco', 'Seattle', 'Denver', 'Nashville',
+        'London', 'Paris', 'Berlin', 'Tokyo', 'Sydney',
+        'Toronto', 'Vancouver', 'Mumbai', 'Singapore', 'Dubai'
+      ];
+
+      var app = Vue.createApp({
+        data: function() {
+          return {
+            // Profile form
+            profile: {
+              name: '',
+              email: '',
+              accountType: '',
+              company: '',
+              employees: '',
+              contractId: '',
+              bio: ''
+            },
+
+            // Nested address
+            address: {
+              street: '',
+              apt: '',
+              city: '',
+              state: '',
+              zip: '',
+              country: ''
+            },
+
+            // Autocomplete
+            cityQuery: '',
+            selectedCity: '',
+            showCityDropdown: false,
+            highlightedIndex: -1,
+
+            // Tags
+            tags: [],
+            tagInput: '',
+
+            // Rating
+            rating: 0,
+            hoverRating: 0,
+            feedback: ''
+          };
+        },
+        computed: {
+          filteredCities: function() {
+            if (!this.cityQuery.trim()) return [];
+            var q = this.cityQuery.toLowerCase();
+            return cities.filter(function(c) { return c.toLowerCase().includes(q); }).slice(0, 8);
+          }
+        },
+        methods: {
+          logClickVue: function(label) {
+            logClick(label);
+          },
+
+          // Autocomplete
+          onCityInput: function() {
+            this.showCityDropdown = true;
+            this.highlightedIndex = -1;
+            this.selectedCity = '';
+          },
+          closeCityDropdownDelayed: function() {
+            var self = this;
+            setTimeout(function() { self.showCityDropdown = false; }, 200);
+          },
+          selectCity: function(city) {
+            this.cityQuery = city;
+            this.selectedCity = city;
+            this.showCityDropdown = false;
+          },
+          highlightNext: function() {
+            if (this.highlightedIndex < this.filteredCities.length - 1) this.highlightedIndex++;
+          },
+          highlightPrev: function() {
+            if (this.highlightedIndex > 0) this.highlightedIndex--;
+          },
+          selectHighlighted: function() {
+            if (this.highlightedIndex >= 0 && this.filteredCities[this.highlightedIndex]) {
+              this.selectCity(this.filteredCities[this.highlightedIndex]);
+              logClick('Selected city via keyboard: ' + this.selectedCity);
+            }
+          },
+
+          // Tags
+          addTag: function() {
+            var tag = this.tagInput.trim();
+            if (tag && !this.tags.includes(tag)) {
+              this.tags.push(tag);
+              logClick('Added tag: ' + tag);
+            }
+            this.tagInput = '';
+          },
+          removeTag: function(idx) {
+            this.tags.splice(idx, 1);
+          },
+          removeLastTagIfEmpty: function() {
+            if (!this.tagInput && this.tags.length) {
+              var removed = this.tags.pop();
+              logClick('Removed last tag via backspace: ' + removed);
+            }
+          },
+
+          // Rating
+          setRating: function(star) {
+            this.rating = star;
+            logClick('Set rating: ' + star + ' stars');
+          },
+
+          // Submit all
+          submitAll: function() {
+            logClick('Submit All Forms');
+            var data = {
+              profile: Object.assign({}, this.profile),
+              city: this.selectedCity,
+              tags: this.tags.slice(),
+              rating: this.rating,
+              feedback: this.feedback
+            };
+            // Clean conditional fields
+            if (data.profile.accountType !== 'business' && data.profile.accountType !== 'enterprise') {
+              delete data.profile.company;
+              delete data.profile.employees;
+            }
+            if (data.profile.accountType !== 'enterprise') {
+              delete data.profile.contractId;
+            }
+            document.getElementById('results').textContent =
+              'Submitted at: ' + new Date().toLocaleTimeString() + '\n\n' + JSON.stringify(data, null, 2);
+          },
+
+          // Submit address separately
+          submitAddress: function() {
+            logClick('Submit Address');
+            var data = { address: Object.assign({}, this.address) };
+            document.getElementById('results').textContent =
+              'Address submitted at: ' + new Date().toLocaleTimeString() + '\n\n' + JSON.stringify(data, null, 2);
+          },
+
+          // Reset
+          resetAll: function() {
+            logClick('Reset All');
+            this.profile = { name: '', email: '', accountType: '', company: '', employees: '', contractId: '', bio: '' };
+            this.address = { street: '', apt: '', city: '', state: '', zip: '', country: '' };
+            this.cityQuery = '';
+            this.selectedCity = '';
+            this.tags = [];
+            this.tagInput = '';
+            this.rating = 0;
+            this.feedback = '';
+            document.getElementById('results').textContent = 'No submissions yet.';
+          }
+        }
+      });
+
+      app.mount('#app');
+    });
+  </script>
+
+</body>
+</html>

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form 11 — Forms Inside Iframes</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; padding: 24px; background: #f5f5f5; }
+  h1 { margin-bottom: 16px; }
+  .iframe-container { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 24px; }
+  .iframe-wrap { flex: 1; min-width: 320px; }
+  .iframe-wrap h2 { margin-bottom: 8px; font-size: 14px; color: #555; }
+  iframe { width: 100%; height: 320px; border: 2px solid #ccc; border-radius: 8px; background: #fff; }
+  #results, #click-log { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-top: 12px; min-height: 40px; font-family: monospace; font-size: 13px; white-space: pre-wrap; }
+  label { display: block; font-weight: 600; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<h1>Form 11 — Forms Inside Iframes</h1>
+
+<div class="iframe-container">
+  <div class="iframe-wrap">
+    <h2>Iframe 1 (srcdoc)</h2>
+    <iframe id="iframe-1" data-testid="iframe-1" srcdoc='
+      <!DOCTYPE html>
+      <html><head>
+      <style>
+        body { font-family: system-ui, sans-serif; padding: 16px; }
+        label { display: block; margin-bottom: 12px; font-size: 14px; }
+        input, select { display: block; width: 100%; padding: 8px; margin-top: 4px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+        button { margin-top: 12px; padding: 8px 20px; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+      </style>
+      </head><body>
+        <form id="form1">
+          <label>Name
+            <input type="text" name="name" data-testid="iframe-1-name">
+          </label>
+          <label>Email
+            <input type="email" name="email" data-testid="iframe-1-email">
+          </label>
+          <label>Role
+            <select name="role" data-testid="iframe-1-role">
+              <option value="">Select...</option>
+              <option value="dev">Developer</option>
+              <option value="design">Designer</option>
+              <option value="pm">Product Manager</option>
+            </select>
+          </label>
+          <button type="submit" data-testid="iframe-1-submit">Submit</button>
+        </form>
+        <script>
+          document.getElementById("form1").addEventListener("submit", function(e) {
+            e.preventDefault();
+            var fd = new FormData(this);
+            var data = {};
+            fd.forEach(function(v, k) { data[k] = v; });
+            window.parent.postMessage({ source: "iframe-1", data: data }, "*");
+          });
+        </script>
+      </body></html>
+    '></iframe>
+  </div>
+
+  <div class="iframe-wrap">
+    <h2>Iframe 2 (injected via JS)</h2>
+    <iframe id="iframe-2" data-testid="iframe-2" src="about:blank"></iframe>
+  </div>
+</div>
+
+<h3>Results</h3>
+<div id="results">Waiting for form submissions...</div>
+<div id="click-log"></div>
+
+<script>
+  // Inject content into iframe-2
+  const iframe2 = document.getElementById('iframe-2');
+  iframe2.addEventListener('load', function() {
+    const doc = iframe2.contentDocument;
+    doc.open();
+    doc.write(`<!DOCTYPE html>
+      <html><head>
+      <style>
+        body { font-family: system-ui, sans-serif; padding: 16px; }
+        label { display: block; margin-bottom: 12px; font-size: 14px; }
+        input { display: block; width: 100%; padding: 8px; margin-top: 4px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+        button { margin-top: 12px; padding: 8px 20px; background: #16a34a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+      </style>
+      </head><body>
+        <form id="form2">
+          <label>Company
+            <input type="text" name="company" data-testid="iframe-2-company">
+          </label>
+          <label>Phone
+            <input type="tel" name="phone" data-testid="iframe-2-phone">
+          </label>
+          <label>Website
+            <input type="url" name="website" data-testid="iframe-2-website">
+          </label>
+          <button type="submit" data-testid="iframe-2-submit">Submit</button>
+        </form>
+        <script>
+          document.getElementById("form2").addEventListener("submit", function(e) {
+            e.preventDefault();
+            var fd = new FormData(this);
+            var data = {};
+            fd.forEach(function(v, k) { data[k] = v; });
+            window.parent.postMessage({ source: "iframe-2", data: data }, "*");
+          });
+        <\/script>
+      </body></html>`);
+    doc.close();
+  });
+
+  // Listen for postMessage from iframes
+  const allResults = {};
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.source) {
+      allResults[e.data.source] = e.data.data;
+      document.getElementById('results').textContent = JSON.stringify(allResults, null, 2);
+    }
+  });
+</script>
+</body>
+</html>

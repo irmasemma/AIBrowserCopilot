@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form 18 — Angular-Style Reactive Forms (Vanilla JS)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; padding: 24px; background: #f5f5f5; }
+  .form-card { background: #fff; padding: 24px; border-radius: 8px; max-width: 560px; border: 1px solid #ddd; margin-bottom: 16px; }
+  h1 { margin-bottom: 16px; font-size: 20px; }
+  h2 { margin: 20px 0 8px; font-size: 15px; color: #4b5563; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 13px; }
+  .field input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+  .field input.ng-invalid.ng-touched { border-color: #ef4444; }
+  .field input.ng-valid.ng-touched { border-color: #22c55e; }
+  .error-msg { color: #ef4444; font-size: 12px; margin-top: 2px; display: none; }
+  .error-msg.visible { display: block; }
+  .address-block { background: #f9fafb; padding: 16px; border-radius: 6px; margin-bottom: 12px; position: relative; }
+  .address-block .remove-btn { position: absolute; top: 8px; right: 8px; background: #ef4444; color: #fff; border: none; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
+  .add-btn { padding: 8px 16px; background: #6366f1; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; margin-bottom: 16px; }
+  .submit-btn { padding: 10px 24px; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; width: 100%; }
+  .submit-btn:disabled { background: #93c5fd; cursor: not-allowed; }
+  .async-spinner { font-size: 12px; color: #6366f1; margin-top: 2px; display: none; }
+  .async-spinner.visible { display: block; }
+  #results, #click-log { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-top: 12px; min-height: 40px; font-family: monospace; font-size: 13px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Form 18 — Angular-Style Reactive Forms</h1>
+
+<div class="form-card">
+  <form id="ng-form" novalidate>
+    <h2>Account</h2>
+    <div class="field">
+      <label for="ng-name">Name</label>
+      <input type="text" id="ng-name" data-testid="ng-name" data-control="name">
+      <div class="error-msg" id="err-name">Name is required</div>
+    </div>
+    <div class="field">
+      <label for="ng-email">Email</label>
+      <input type="email" id="ng-email" data-testid="ng-email" data-control="email">
+      <div class="error-msg" id="err-email">Must be a valid email</div>
+      <div class="async-spinner" id="async-email">Checking availability...</div>
+    </div>
+    <div class="field">
+      <label for="ng-password">Password</label>
+      <input type="password" id="ng-password" data-testid="ng-password" data-control="password">
+      <div class="error-msg" id="err-password">Minimum 6 characters</div>
+    </div>
+
+    <h2>Addresses (FormArray)</h2>
+    <div id="addresses-container"></div>
+    <button type="button" class="add-btn" id="add-address-btn" data-testid="ng-add-address">+ Add Address</button>
+
+    <button type="submit" class="submit-btn" id="submit-btn" data-testid="ng-submit" disabled>Submit</button>
+  </form>
+</div>
+
+<h3>Results</h3>
+<div id="results">Waiting for submission...</div>
+<div id="click-log"></div>
+
+<script>
+  // === FormControl class ===
+  class FormControl {
+    constructor(initialValue, validators = [], asyncValidators = []) {
+      this.value = initialValue;
+      this.validators = validators;
+      this.asyncValidators = asyncValidators;
+      this.touched = false;
+      this.dirty = false;
+      this.valid = true;
+      this.errors = {};
+      this._asyncTimer = null;
+    }
+    setValue(val) {
+      this.value = val;
+      this.dirty = true;
+      this.validate();
+    }
+    markTouched() {
+      this.touched = true;
+      this.validate();
+    }
+    validate() {
+      this.errors = {};
+      for (const v of this.validators) {
+        const err = v(this.value);
+        if (err) Object.assign(this.errors, err);
+      }
+      this.valid = Object.keys(this.errors).length === 0;
+      // Run async validators if sync passes
+      if (this.valid && this.asyncValidators.length > 0) {
+        this.runAsyncValidators();
+      }
+    }
+    runAsyncValidators() {
+      if (this._asyncTimer) clearTimeout(this._asyncTimer);
+      this._asyncTimer = setTimeout(() => {
+        for (const av of this.asyncValidators) {
+          const err = av(this.value);
+          if (err) { Object.assign(this.errors, err); this.valid = false; }
+        }
+        updateUI();
+      }, 500);
+    }
+  }
+
+  // === Validators ===
+  const Validators = {
+    required: (val) => (!val || !val.trim()) ? { required: true } : null,
+    minLength: (min) => (val) => (val && val.length < min) ? { minLength: true } : null,
+    email: (val) => (val && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) ? { email: true } : null,
+  };
+
+  // Simulated async validator (e.g., check email uniqueness)
+  const asyncEmailValidator = (val) => {
+    // Simulate: "taken@example.com" is always taken
+    if (val === 'taken@example.com') return { emailTaken: true };
+    return null;
+  };
+
+  // === FormGroup ===
+  class FormGroup {
+    constructor(controls) { this.controls = controls; }
+    get valid() { return Object.values(this.controls).every(c => c instanceof FormControl ? c.valid : c.valid); }
+    get value() {
+      const v = {};
+      for (const [k, c] of Object.entries(this.controls)) {
+        v[k] = c instanceof FormControl ? c.value : c.value;
+      }
+      return v;
+    }
+  }
+
+  // === FormArray ===
+  class FormArray {
+    constructor() { this.groups = []; }
+    get valid() { return this.groups.every(g => g.valid); }
+    get value() { return this.groups.map(g => g.value); }
+    push(group) { this.groups.push(group); }
+    removeAt(i) { this.groups.splice(i, 1); }
+  }
+
+  // === Create Form ===
+  const form = new FormGroup({
+    name: new FormControl('', [Validators.required, Validators.minLength(2)]),
+    email: new FormControl('', [Validators.required, Validators.email], [asyncEmailValidator]),
+    password: new FormControl('', [Validators.required, Validators.minLength(6)]),
+  });
+  const addressArray = new FormArray();
+
+  function createAddressGroup(index) {
+    return new FormGroup({
+      street: new FormControl('', [Validators.required]),
+      city: new FormControl('', [Validators.required]),
+      zip: new FormControl('', [Validators.required, Validators.minLength(5)]),
+    });
+  }
+
+  // === DOM Binding ===
+  function bindControl(input, control) {
+    input.addEventListener('input', () => { control.setValue(input.value); updateUI(); });
+    input.addEventListener('blur', () => { control.markTouched(); updateUI(); });
+  }
+
+  // Bind main fields
+  ['name', 'email', 'password'].forEach(key => {
+    const input = document.querySelector(`[data-control="${key}"]`);
+    bindControl(input, form.controls[key]);
+  });
+
+  function renderAddresses() {
+    const container = document.getElementById('addresses-container');
+    container.innerHTML = '';
+    addressArray.groups.forEach((group, i) => {
+      const block = document.createElement('div');
+      block.className = 'address-block';
+      block.innerHTML = `
+        <button type="button" class="remove-btn" data-testid="ng-remove-address-${i}">Remove</button>
+        <div class="field">
+          <label>Street</label>
+          <input type="text" data-testid="ng-address-${i}-street" data-addr="${i}" data-field="street">
+          <div class="error-msg" data-err="address-${i}-street">Street is required</div>
+        </div>
+        <div class="field">
+          <label>City</label>
+          <input type="text" data-testid="ng-address-${i}-city" data-addr="${i}" data-field="city">
+          <div class="error-msg" data-err="address-${i}-city">City is required</div>
+        </div>
+        <div class="field">
+          <label>ZIP</label>
+          <input type="text" data-testid="ng-address-${i}-zip" data-addr="${i}" data-field="zip">
+          <div class="error-msg" data-err="address-${i}-zip">ZIP must be at least 5 chars</div>
+        </div>
+      `;
+      container.appendChild(block);
+
+      // Bind controls
+      ['street', 'city', 'zip'].forEach(field => {
+        const input = block.querySelector(`[data-field="${field}"]`);
+        bindControl(input, group.controls[field]);
+      });
+
+      // Remove button
+      block.querySelector('.remove-btn').addEventListener('click', () => {
+        addressArray.removeAt(i);
+        renderAddresses();
+        updateUI();
+        document.getElementById('click-log').textContent = 'Address ' + i + ' removed';
+      });
+    });
+  }
+
+  document.getElementById('add-address-btn').addEventListener('click', () => {
+    addressArray.push(createAddressGroup(addressArray.groups.length));
+    renderAddresses();
+    updateUI();
+    document.getElementById('click-log').textContent = 'Address added (' + addressArray.groups.length + ' total)';
+  });
+
+  function updateUI() {
+    // Main fields
+    ['name', 'email', 'password'].forEach(key => {
+      const control = form.controls[key];
+      const input = document.querySelector(`[data-control="${key}"]`);
+      const errEl = document.getElementById('err-' + key);
+      input.className = '';
+      if (control.touched) {
+        input.classList.add(control.valid ? 'ng-valid' : 'ng-invalid');
+        input.classList.add('ng-touched');
+      }
+      if (errEl) errEl.className = 'error-msg' + (control.touched && !control.valid ? ' visible' : '');
+    });
+
+    // Async spinner for email
+    const emailCtrl = form.controls.email;
+    const asyncEl = document.getElementById('async-email');
+    asyncEl.className = 'async-spinner' + (emailCtrl.dirty && emailCtrl.valid && emailCtrl._asyncTimer ? ' visible' : '');
+
+    // Address fields
+    addressArray.groups.forEach((group, i) => {
+      ['street', 'city', 'zip'].forEach(field => {
+        const control = group.controls[field];
+        const input = document.querySelector(`[data-addr="${i}"][data-field="${field}"]`);
+        const errEl = document.querySelector(`[data-err="address-${i}-${field}"]`);
+        if (input) {
+          input.className = '';
+          if (control.touched) {
+            input.classList.add(control.valid ? 'ng-valid' : 'ng-invalid');
+            input.classList.add('ng-touched');
+          }
+        }
+        if (errEl) errEl.className = 'error-msg' + (control.touched && !control.valid ? ' visible' : '');
+      });
+    });
+
+    // Submit button
+    const allValid = form.valid && addressArray.valid;
+    document.getElementById('submit-btn').disabled = !allValid;
+  }
+
+  document.getElementById('ng-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    // Touch all
+    Object.values(form.controls).forEach(c => c.markTouched());
+    addressArray.groups.forEach(g => Object.values(g.controls).forEach(c => c.markTouched()));
+    updateUI();
+
+    if (!form.valid || !addressArray.valid) return;
+
+    const data = { ...form.value, addresses: addressArray.value };
+    document.getElementById('results').textContent = JSON.stringify(data, null, 2);
+  });
+</script>
+</body>
+</html>

@@ -8,6 +8,7 @@ export const getPageContent: ToolPlugin = {
   inputSchema: {
     url: z.string().optional().describe('Target URL (defaults to active tab)'),
     format: z.enum(['text', 'html']).default('text').describe('Output format'),
+    tab_id: z.number().optional().describe('Specific tab ID to target (defaults to active tab). The tab will be activated automatically.'),
   },
   async execute() {
     return { content: [{ type: 'text' as const, text: '[Stub] get_page_content: Not connected to browser. Browser bridge will be added in Story 1.3.' }] };

@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>React Forms Test Fixture</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #f8f9fa; color: #333; }
+    h1 { color: #1a1a2e; border-bottom: 2px solid #61dafb; padding-bottom: 8px; }
+    .step-indicator { display: flex; gap: 8px; margin-bottom: 24px; }
+    .step-dot { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; border: 2px solid #ccc; color: #999; background: #fff; }
+    .step-dot.active { border-color: #61dafb; color: #61dafb; background: #e3f7fd; }
+    .step-dot.done { border-color: #22c55e; color: #fff; background: #22c55e; }
+    .form-card { background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 16px; }
+    .field { margin-bottom: 16px; }
+    .field label { display: block; margin-bottom: 4px; font-weight: 600; font-size: 14px; }
+    .field input, .field textarea, .field select { width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+    .field input:focus, .field textarea:focus { outline: none; border-color: #61dafb; box-shadow: 0 0 0 2px rgba(97,218,251,0.3); }
+    .field .error { color: #ef4444; font-size: 12px; margin-top: 4px; }
+    .field input.invalid { border-color: #ef4444; }
+    .btn { padding: 10px 20px; border: none; border-radius: 4px; font-size: 14px; cursor: pointer; margin-right: 8px; }
+    .btn-primary { background: #61dafb; color: #1a1a2e; font-weight: 600; }
+    .btn-primary:hover { background: #4fc3f7; }
+    .btn-secondary { background: #e5e7eb; color: #333; }
+    .btn-add { background: #22c55e; color: #fff; font-size: 12px; padding: 6px 12px; }
+    .btn-remove { background: #ef4444; color: #fff; font-size: 12px; padding: 4px 10px; border: none; border-radius: 4px; cursor: pointer; margin-left: 8px; }
+
+    /* Custom dropdown */
+    .custom-dropdown { position: relative; }
+    .custom-dropdown .dropdown-trigger { width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; background: #fff; text-align: left; font-size: 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+    .custom-dropdown .dropdown-trigger:after { content: '\25BC'; font-size: 10px; color: #999; }
+    .custom-dropdown .dropdown-menu { position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #ccc; border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 10; max-height: 200px; overflow-y: auto; display: none; }
+    .custom-dropdown .dropdown-menu.open { display: block; }
+    .custom-dropdown .dropdown-item { padding: 8px 12px; cursor: pointer; }
+    .custom-dropdown .dropdown-item:hover { background: #e3f7fd; }
+    .custom-dropdown .dropdown-item.selected { background: #61dafb; color: #1a1a2e; }
+
+    /* Toggle switch */
+    .toggle-wrap { display: flex; align-items: center; gap: 8px; }
+    .toggle { position: relative; width: 48px; height: 26px; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle .slider { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: #ccc; border-radius: 26px; cursor: pointer; transition: 0.2s; }
+    .toggle .slider:before { content: ''; position: absolute; width: 20px; height: 20px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: 0.2s; }
+    .toggle input:checked + .slider { background: #22c55e; }
+    .toggle input:checked + .slider:before { transform: translateX(22px); }
+
+    /* Dynamic fields */
+    .dynamic-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .dynamic-row input { flex: 1; }
+
+    .review-section { background: #f0f9ff; padding: 16px; border-radius: 8px; }
+    .review-section dt { font-weight: 600; margin-top: 8px; }
+    .review-section dd { margin-left: 0; color: #555; }
+
+    #results { margin-top: 24px; padding: 16px; background: #e8f5e9; border: 1px solid #a5d6a7; border-radius: 8px; font-family: monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; min-height: 40px; }
+    #click-log { margin-top: 16px; padding: 16px; background: #fff3e0; border: 1px solid #ffcc80; border-radius: 8px; font-family: monospace; font-size: 13px; white-space: pre-wrap; min-height: 40px; }
+    #react-fallback { display: none; padding: 16px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+
+  <h1>React Forms Test Fixture</h1>
+  <p>Multi-step form with controlled inputs, custom dropdown, toggles, validation, and dynamic fields.</p>
+
+  <div id="react-fallback">
+    <strong>Note:</strong> React CDN failed to load. This page requires an internet connection for React 18.
+  </div>
+
+  <div id="root">Loading React app...</div>
+
+  <h2 style="margin-top: 32px;">Results</h2>
+  <div id="results">No submissions yet.</div>
+
+  <h2>Click Log</h2>
+  <div id="click-log">No clicks recorded.</div>
+
+  <script>
+    // Global click logger
+    var clickCount = 0;
+    function logClick(label) {
+      clickCount++;
+      var log = document.getElementById('click-log');
+      var entry = '[' + clickCount + '] Clicked: ' + label + ' at ' + new Date().toLocaleTimeString();
+      log.textContent = (clickCount === 1) ? entry : log.textContent + '\n' + entry;
+    }
+    function showResults(data) {
+      document.getElementById('results').textContent = 'Submitted at: ' + new Date().toLocaleTimeString() + '\n\n' + JSON.stringify(data, null, 2);
+    }
+  </script>
+
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script>
+    // Check if React loaded
+    window.addEventListener('load', function() {
+      if (typeof React === 'undefined' || typeof ReactDOM === 'undefined') {
+        document.getElementById('react-fallback').style.display = 'block';
+        document.getElementById('root').textContent = 'React failed to load. Please check your internet connection.';
+      }
+    });
+  </script>
+
+  <script type="text/babel">
+    const { useState, useCallback } = React;
+
+    // --- Custom Dropdown Component ---
+    function CustomDropdown({ label, options, value, onChange, id }) {
+      const [open, setOpen] = useState(false);
+      const selected = options.find(o => o.value === value);
+      return (
+        <div className="field">
+          <label>{label}</label>
+          <div className="custom-dropdown" id={id}>
+            <button type="button" className="dropdown-trigger"
+              onClick={() => { setOpen(!open); logClick('Toggle dropdown: ' + label); }}
+              aria-haspopup="listbox" aria-expanded={open}
+              data-testid={id + '-trigger'}>
+              {selected ? selected.label : '-- Select --'}
+            </button>
+            <div className={'dropdown-menu' + (open ? ' open' : '')} role="listbox">
+              {options.map(opt => (
+                <div key={opt.value}
+                  className={'dropdown-item' + (opt.value === value ? ' selected' : '')}
+                  role="option" aria-selected={opt.value === value}
+                  onClick={() => { onChange(opt.value); setOpen(false); logClick('Selected: ' + opt.label); }}>
+                  {opt.label}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- Toggle Switch Component ---
+    function Toggle({ label, checked, onChange, id }) {
+      return (
+        <div className="field">
+          <div className="toggle-wrap">
+            <label className="toggle">
+              <input type="checkbox" id={id} checked={checked}
+                onChange={e => { onChange(e.target.checked); logClick('Toggle: ' + label + ' -> ' + !checked); }} />
+              <span className="slider"></span>
+            </label>
+            <span>{label}</span>
+          </div>
+        </div>
+      );
+    }
+
+    // --- Main Multi-Step Form ---
+    function MultiStepForm() {
+      const [step, setStep] = useState(1);
+      const [errors, setErrors] = useState({});
+      const [submitted, setSubmitted] = useState(false);
+
+      // Step 1: Personal Info
+      const [firstName, setFirstName] = useState('');
+      const [lastName, setLastName] = useState('');
+      const [email, setEmail] = useState('');
+      const [role, setRole] = useState('');
+
+      // Step 2: Preferences
+      const [theme, setTheme] = useState('light');
+      const [notifications, setNotifications] = useState(true);
+      const [marketing, setMarketing] = useState(false);
+      const [interests, setInterests] = useState(['']);
+
+      // Dynamic fields: additional skills
+      const addInterest = () => { setInterests([...interests, '']); logClick('Add another interest'); };
+      const removeInterest = (idx) => { setInterests(interests.filter((_, i) => i !== idx)); logClick('Remove interest ' + idx); };
+      const updateInterest = (idx, val) => { const copy = [...interests]; copy[idx] = val; setInterests(copy); };
+
+      const roleOptions = [
+        { value: 'developer', label: 'Developer' },
+        { value: 'designer', label: 'Designer' },
+        { value: 'pm', label: 'Product Manager' },
+        { value: 'qa', label: 'QA Engineer' },
+        { value: 'devops', label: 'DevOps' },
+      ];
+
+      const validate = (stepNum) => {
+        const errs = {};
+        if (stepNum === 1) {
+          if (!firstName.trim()) errs.firstName = 'First name is required';
+          if (!lastName.trim()) errs.lastName = 'Last name is required';
+          if (!email.trim()) errs.email = 'Email is required';
+          else if (!/\S+@\S+\.\S+/.test(email)) errs.email = 'Invalid email format';
+          if (!role) errs.role = 'Please select a role';
+        }
+        setErrors(errs);
+        return Object.keys(errs).length === 0;
+      };
+
+      const nextStep = () => {
+        logClick('Next step from ' + step);
+        if (validate(step)) setStep(step + 1);
+      };
+      const prevStep = () => { logClick('Previous step from ' + step); setStep(step - 1); };
+
+      const handleSubmit = () => {
+        logClick('Submit form');
+        const data = {
+          personal: { firstName, lastName, email, role },
+          preferences: {
+            theme,
+            notifications,
+            marketing,
+            interests: interests.filter(i => i.trim()),
+          }
+        };
+        setSubmitted(true);
+        showResults(data);
+      };
+
+      return (
+        <div>
+          {/* Step indicator */}
+          <div className="step-indicator">
+            {[1, 2, 3].map(s => (
+              <div key={s} className={'step-dot' + (s === step ? ' active' : '') + (s < step ? ' done' : '')}>
+                {s < step ? '\u2713' : s}
+              </div>
+            ))}
+          </div>
+
+          {/* Step 1: Personal Info */}
+          {step === 1 && (
+            <div className="form-card" data-testid="step-1">
+              <h3>Step 1: Personal Information</h3>
+
+              <div className="field">
+                <label htmlFor="firstName">First Name</label>
+                <input type="text" id="firstName" value={firstName}
+                  className={errors.firstName ? 'invalid' : ''}
+                  onChange={e => setFirstName(e.target.value)}
+                  placeholder="Enter first name" />
+                {errors.firstName && <div className="error">{errors.firstName}</div>}
+              </div>
+
+              <div className="field">
+                <label htmlFor="lastName">Last Name</label>
+                <input type="text" id="lastName" value={lastName}
+                  className={errors.lastName ? 'invalid' : ''}
+                  onChange={e => setLastName(e.target.value)}
+                  placeholder="Enter last name" />
+                {errors.lastName && <div className="error">{errors.lastName}</div>}
+              </div>
+
+              <div className="field">
+                <label htmlFor="react-email">Email</label>
+                <input type="email" id="react-email" value={email}
+                  className={errors.email ? 'invalid' : ''}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="you@example.com" />
+                {errors.email && <div className="error">{errors.email}</div>}
+              </div>
+
+              <CustomDropdown label="Role" id="role-dropdown" options={roleOptions}
+                value={role} onChange={setRole} />
+              {errors.role && <div className="error" style={{marginTop: '-12px', marginBottom: '12px'}}>{errors.role}</div>}
+
+              <button type="button" className="btn btn-primary" onClick={nextStep}>Next</button>
+            </div>
+          )}
+
+          {/* Step 2: Preferences */}
+          {step === 2 && (
+            <div className="form-card" data-testid="step-2">
+              <h3>Step 2: Preferences</h3>
+
+              <CustomDropdown label="Theme" id="theme-dropdown"
+                options={[{value:'light',label:'Light'},{value:'dark',label:'Dark'},{value:'auto',label:'Auto'}]}
+                value={theme} onChange={setTheme} />
+
+              <Toggle label="Email Notifications" id="toggle-notifications" checked={notifications} onChange={setNotifications} />
+              <Toggle label="Marketing Emails" id="toggle-marketing" checked={marketing} onChange={setMarketing} />
+
+              <div className="field">
+                <label>Interests <button type="button" className="btn btn-add" onClick={addInterest}>+ Add another</button></label>
+                {interests.map((val, idx) => (
+                  <div key={idx} className="dynamic-row">
+                    <input type="text" value={val}
+                      onChange={e => updateInterest(idx, e.target.value)}
+                      placeholder={'Interest ' + (idx + 1)}
+                      data-testid={'interest-' + idx} />
+                    {interests.length > 1 && (
+                      <button type="button" className="btn-remove" onClick={() => removeInterest(idx)}>✕</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <button type="button" className="btn btn-secondary" onClick={prevStep}>Back</button>
+              <button type="button" className="btn btn-primary" onClick={nextStep}>Next</button>
+            </div>
+          )}
+
+          {/* Step 3: Review */}
+          {step === 3 && (
+            <div className="form-card" data-testid="step-3">
+              <h3>Step 3: Review & Submit</h3>
+              {submitted ? (
+                <div style={{color: '#22c55e', fontWeight: 'bold', fontSize: 18}}>Form submitted successfully!</div>
+              ) : (
+                <>
+                  <div className="review-section">
+                    <h4>Personal Info</h4>
+                    <dl>
+                      <dt>Name</dt><dd>{firstName} {lastName}</dd>
+                      <dt>Email</dt><dd>{email}</dd>
+                      <dt>Role</dt><dd>{role || '(not selected)'}</dd>
+                    </dl>
+                    <h4>Preferences</h4>
+                    <dl>
+                      <dt>Theme</dt><dd>{theme}</dd>
+                      <dt>Notifications</dt><dd>{notifications ? 'On' : 'Off'}</dd>
+                      <dt>Marketing</dt><dd>{marketing ? 'On' : 'Off'}</dd>
+                      <dt>Interests</dt><dd>{interests.filter(i => i.trim()).join(', ') || '(none)'}</dd>
+                    </dl>
+                  </div>
+                  <div style={{marginTop: 16}}>
+                    <button type="button" className="btn btn-secondary" onClick={prevStep}>Back</button>
+                    <button type="button" className="btn btn-primary" onClick={handleSubmit}>Submit</button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Render
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<MultiStepForm />);
+  </script>
+
+</body>
+</html>

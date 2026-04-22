@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Complex Form Test Fixture</title>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 20px auto; }
+    .field { margin: 12px 0; }
+    label { display: block; margin-bottom: 4px; font-weight: bold; }
+    input, select, textarea { padding: 6px; width: 300px; }
+    .outside-form { border: 2px dashed #999; padding: 16px; margin-top: 30px; }
+    .outside-form h3 { margin-top: 0; }
+    .hidden-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+  </style>
+</head>
+<body>
+
+  <h1>Complex Form Test Page</h1>
+
+  <!-- Standard form with various input types -->
+  <form id="main-form" action="/submit" method="POST">
+    <div class="field">
+      <label for="first-name">First Name</label>
+      <input type="text" id="first-name" name="firstName" placeholder="Enter your first name" required />
+    </div>
+
+    <div class="field">
+      <label for="last-name">Last Name</label>
+      <input type="text" id="last-name" name="lastName" placeholder="Enter your last name" required />
+    </div>
+
+    <div class="field">
+      <label for="email">Email Address</label>
+      <input type="email" id="email" name="email" placeholder="you@example.com" required />
+    </div>
+
+    <div class="field">
+      <label for="phone">Phone Number</label>
+      <input type="tel" id="phone" name="phone" placeholder="+1 (555) 000-0000" />
+    </div>
+
+    <div class="field">
+      <label for="dob">Date of Birth</label>
+      <input type="date" id="dob" name="dob" />
+    </div>
+
+    <div class="field">
+      <label for="country">Country</label>
+      <select id="country" name="country" required>
+        <option value="">-- Select Country --</option>
+        <option value="us">United States</option>
+        <option value="uk">United Kingdom</option>
+        <option value="ca">Canada</option>
+        <option value="au">Australia</option>
+        <option value="de">Germany</option>
+        <option value="jp">Japan</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="bio">Biography</label>
+      <textarea id="bio" name="bio" rows="4" placeholder="Tell us about yourself"></textarea>
+    </div>
+
+    <div class="field">
+      <label for="resume">Upload Resume</label>
+      <input type="file" id="resume" name="resume" accept=".pdf,.doc,.docx" />
+    </div>
+
+    <div class="field">
+      <label>Gender</label>
+      <label><input type="radio" name="gender" value="male" /> Male</label>
+      <label><input type="radio" name="gender" value="female" /> Female</label>
+      <label><input type="radio" name="gender" value="other" /> Other</label>
+    </div>
+
+    <div class="field">
+      <label>Interests</label>
+      <label><input type="checkbox" name="interests" value="tech" /> Technology</label>
+      <label><input type="checkbox" name="interests" value="sports" /> Sports</label>
+      <label><input type="checkbox" name="interests" value="music" /> Music</label>
+      <label><input type="checkbox" name="interests" value="travel" /> Travel</label>
+    </div>
+
+    <div class="field">
+      <label for="newsletter">
+        <input type="checkbox" id="newsletter" name="newsletter" value="yes" />
+        Subscribe to newsletter
+      </label>
+    </div>
+
+    <div class="field">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" placeholder="Min 8 characters" required />
+    </div>
+
+    <div class="field">
+      <label for="color-pref">Favorite Color</label>
+      <input type="color" id="color-pref" name="colorPref" value="#3366cc" />
+    </div>
+
+    <div class="field">
+      <label for="experience">Experience Level (1-10)</label>
+      <input type="range" id="experience" name="experience" min="1" max="10" value="5" />
+    </div>
+
+    <div class="field">
+      <label for="website">Website URL</label>
+      <input type="url" id="website" name="website" placeholder="https://yoursite.com" />
+    </div>
+
+    <div class="field">
+      <label for="quantity">Quantity</label>
+      <input type="number" id="quantity" name="quantity" min="1" max="100" value="1" />
+    </div>
+
+    <button type="submit">Submit Application</button>
+  </form>
+
+  <!-- Fields NOT inside a <form> tag (SPA pattern) -->
+  <div class="outside-form">
+    <h3>Additional Profile (No &lt;form&gt; tag)</h3>
+
+    <div class="field">
+      <label for="nickname">Nickname</label>
+      <input type="text" id="nickname" name="nickname" placeholder="Your nickname" />
+    </div>
+
+    <div class="field">
+      <!-- aria-label instead of <label> -->
+      <input type="text" id="company" name="company" aria-label="Company Name" placeholder="Company Name" />
+    </div>
+
+    <div class="field">
+      <!-- No label, no aria-label, just placeholder -->
+      <input type="text" id="title-field" name="jobTitle" placeholder="Job Title" />
+    </div>
+
+    <div class="field">
+      <!-- Hidden visual label, screen reader only -->
+      <label for="secret-field" class="hidden-label">Secret Code</label>
+      <input type="text" id="secret-field" name="secretCode" />
+    </div>
+
+    <div class="field">
+      <label for="notes">Additional Notes</label>
+      <textarea id="notes" name="notes" placeholder="Anything else?"></textarea>
+    </div>
+
+    <div class="field">
+      <label for="priority">Priority</label>
+      <select id="priority" name="priority">
+        <option value="low">Low</option>
+        <option value="medium" selected>Medium</option>
+        <option value="high">High</option>
+        <option value="critical">Critical</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Contenteditable field (rich text editor pattern) -->
+  <div class="field" style="margin-top: 30px;">
+    <label>Rich Text Editor</label>
+    <div id="rich-editor" contenteditable="true" style="border: 1px solid #ccc; padding: 10px; min-height: 80px;">
+      Click here to type...
+    </div>
+  </div>
+
+  <div id="form-result" style="margin-top: 20px; display: none;"></div>
+
+  <script>
+    // Track change events to verify they fire correctly
+    window.__changeEvents = [];
+    window.__inputEvents = [];
+
+    document.querySelectorAll('input, select, textarea').forEach(el => {
+      el.addEventListener('change', (e) => {
+        window.__changeEvents.push({
+          id: e.target.id || e.target.name,
+          value: e.target.value,
+          type: 'change'
+        });
+      });
+      el.addEventListener('input', (e) => {
+        window.__inputEvents.push({
+          id: e.target.id || e.target.name,
+          value: e.target.value,
+          type: 'input'
+        });
+      });
+    });
+
+    document.getElementById('main-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const data = new FormData(e.target);
+      const result = {};
+      for (const [key, val] of data.entries()) {
+        if (result[key]) {
+          if (!Array.isArray(result[key])) result[key] = [result[key]];
+          result[key].push(val);
+        } else {
+          result[key] = val;
+        }
+      }
+      document.getElementById('form-result').style.display = 'block';
+      document.getElementById('form-result').textContent = JSON.stringify(result, null, 2);
+    });
+  </script>
+
+</body>
+</html>

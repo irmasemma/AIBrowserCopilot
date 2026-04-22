@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form 16 — React Hook Form Pattern</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; padding: 24px; background: #f5f5f5; }
+  #root { max-width: 560px; }
+  .form-card { background: #fff; padding: 24px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 16px; }
+  h1 { margin-bottom: 16px; font-size: 20px; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 14px; }
+  .field input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+  .field input.error { border-color: #ef4444; }
+  .error-msg { color: #ef4444; font-size: 12px; margin-top: 4px; }
+  .skill-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .skill-row input { flex: 1; }
+  .skill-row button { padding: 4px 12px; background: #ef4444; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .add-btn { padding: 6px 16px; background: #6366f1; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; margin-bottom: 16px; }
+  .submit-btn { padding: 10px 24px; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; width: 100%; }
+  #results, #click-log { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-top: 12px; min-height: 40px; font-family: monospace; font-size: 13px; white-space: pre-wrap; }
+</style>
+<script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<h3>Results</h3>
+<div id="results">Waiting for submission...</div>
+<div id="click-log"></div>
+
+<script type="text/babel">
+const { useState, useRef, useCallback } = React;
+
+function App() {
+  const nameRef = useRef(null);
+  const emailRef = useRef(null);
+  const phoneRef = useRef(null);
+
+  const [errors, setErrors] = useState({});
+  const [touched, setTouched] = useState({});
+  const [skills, setSkills] = useState(['']);
+  const skillRefs = useRef([]);
+
+  const validate = useCallback((field, value) => {
+    const newErrors = { ...errors };
+    if (field === 'name') {
+      if (!value || value.length < 2) newErrors.name = 'Name must be at least 2 characters';
+      else delete newErrors.name;
+    }
+    if (field === 'email') {
+      if (!value || !value.includes('@')) newErrors.email = 'Must be a valid email';
+      else delete newErrors.email;
+    }
+    if (field === 'phone') {
+      if (value && !/^\d*$/.test(value)) newErrors.phone = 'Must contain only digits';
+      else delete newErrors.phone;
+    }
+    setErrors(newErrors);
+    return newErrors;
+  }, [errors]);
+
+  const handleBlur = (field) => {
+    setTouched(prev => ({ ...prev, [field]: true }));
+    const ref = field === 'name' ? nameRef : field === 'email' ? emailRef : phoneRef;
+    validate(field, ref.current?.value || '');
+  };
+
+  const addSkill = () => {
+    setSkills(prev => [...prev, '']);
+    document.getElementById('click-log').textContent = 'Skill field added (' + (skills.length + 1) + ' total)';
+  };
+
+  const removeSkill = (index) => {
+    setSkills(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const name = nameRef.current?.value || '';
+    const email = emailRef.current?.value || '';
+    const phone = phoneRef.current?.value || '';
+    const skillValues = skillRefs.current.map(r => r?.value || '').filter(Boolean);
+
+    // Validate all
+    setTouched({ name: true, email: true, phone: true });
+    let errs = {};
+    if (!name || name.length < 2) errs.name = 'Name must be at least 2 characters';
+    if (!email || !email.includes('@')) errs.email = 'Must be a valid email';
+    if (phone && !/^\d*$/.test(phone)) errs.phone = 'Must contain only digits';
+    setErrors(errs);
+
+    if (Object.keys(errs).length > 0) return;
+
+    const data = { name, email, phone, skills: skillValues };
+    document.getElementById('results').textContent = JSON.stringify(data, null, 2);
+  };
+
+  return (
+    <div className="form-card">
+      <h1>React Hook Form Pattern (Uncontrolled)</h1>
+      <form onSubmit={handleSubmit} noValidate>
+        <div className="field">
+          <label htmlFor="rhf-name">Name</label>
+          <input
+            id="rhf-name"
+            ref={nameRef}
+            type="text"
+            data-testid="rhf-name"
+            className={touched.name && errors.name ? 'error' : ''}
+            onBlur={() => handleBlur('name')}
+          />
+          {touched.name && errors.name && <span className="error-msg" role="alert">{errors.name}</span>}
+        </div>
+
+        <div className="field">
+          <label htmlFor="rhf-email">Email</label>
+          <input
+            id="rhf-email"
+            ref={emailRef}
+            type="email"
+            data-testid="rhf-email"
+            className={touched.email && errors.email ? 'error' : ''}
+            onBlur={() => handleBlur('email')}
+          />
+          {touched.email && errors.email && <span className="error-msg" role="alert">{errors.email}</span>}
+        </div>
+
+        <div className="field">
+          <label htmlFor="rhf-phone">Phone</label>
+          <input
+            id="rhf-phone"
+            ref={phoneRef}
+            type="tel"
+            data-testid="rhf-phone"
+            className={touched.phone && errors.phone ? 'error' : ''}
+            onBlur={() => handleBlur('phone')}
+          />
+          {touched.phone && errors.phone && <span className="error-msg" role="alert">{errors.phone}</span>}
+        </div>
+
+        <div className="field">
+          <label>Skills (dynamic field array)</label>
+          {skills.map((_, i) => (
+            <div className="skill-row" key={i}>
+              <input
+                ref={el => { skillRefs.current[i] = el; }}
+                type="text"
+                data-testid={`rhf-skill-${i}`}
+                placeholder={`Skill ${i + 1}`}
+              />
+              {skills.length > 1 && (
+                <button type="button" onClick={() => removeSkill(i)} data-testid={`rhf-remove-skill-${i}`}>
+                  Remove
+                </button>
+              )}
+            </div>
+          ))}
+          <button type="button" className="add-btn" onClick={addSkill} data-testid="rhf-add-skill">
+            + Add Skill
+          </button>
+        </div>
+
+        <button type="submit" className="submit-btn" data-testid="rhf-submit">Submit</button>
+      </form>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

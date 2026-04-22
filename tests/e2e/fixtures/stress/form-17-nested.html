@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form 17 — Deeply Nested Field Names</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; padding: 24px; background: #f5f5f5; }
+  #root { max-width: 640px; }
+  .form-card { background: #fff; padding: 24px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 16px; }
+  h1 { margin-bottom: 16px; font-size: 20px; }
+  h2 { margin: 16px 0 8px; font-size: 16px; color: #4b5563; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }
+  .row { display: flex; gap: 12px; }
+  .row .field { flex: 1; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 13px; color: #555; }
+  .field input, .field select { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+  .checkbox-field { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .checkbox-field input[type="checkbox"] { width: auto; }
+  .submit-btn { padding: 10px 24px; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; width: 100%; margin-top: 8px; }
+  #debug { background: #1e1e1e; color: #4ec9b0; padding: 16px; border-radius: 8px; font-family: monospace; font-size: 12px; white-space: pre-wrap; margin-top: 12px; max-height: 300px; overflow: auto; }
+  #results, #click-log { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-top: 12px; min-height: 40px; font-family: monospace; font-size: 13px; white-space: pre-wrap; }
+</style>
+<script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<h3>State Debug</h3>
+<div id="debug"></div>
+<h3>Results</h3>
+<div id="results">Waiting for submission...</div>
+<div id="click-log"></div>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+function App() {
+  const [state, setState] = useState({
+    personal: { firstName: '', lastName: '' },
+    address: {
+      shipping: { street: '', city: '', state: '', zip: '' },
+      billing: { same: true, street: '', city: '' }
+    },
+    preferences: { newsletter: false, frequency: 'weekly' }
+  });
+
+  useEffect(() => {
+    document.getElementById('debug').textContent = JSON.stringify(state, null, 2);
+  }, [state]);
+
+  const set = (path, value) => {
+    setState(prev => {
+      const next = JSON.parse(JSON.stringify(prev));
+      const keys = path.split('.');
+      let obj = next;
+      for (let i = 0; i < keys.length - 1; i++) obj = obj[keys[i]];
+      obj[keys[keys.length - 1]] = value;
+      return next;
+    });
+  };
+
+  const handleSameAsShipping = (checked) => {
+    set('address.billing.same', checked);
+    if (checked) {
+      setState(prev => {
+        const next = JSON.parse(JSON.stringify(prev));
+        next.address.billing.street = next.address.shipping.street;
+        next.address.billing.city = next.address.shipping.city;
+        next.address.billing.same = true;
+        return next;
+      });
+      document.getElementById('click-log').textContent = 'Same as shipping toggled ON';
+    } else {
+      document.getElementById('click-log').textContent = 'Same as shipping toggled OFF';
+    }
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    document.getElementById('results').textContent = JSON.stringify(state, null, 2);
+  };
+
+  return (
+    <div className="form-card">
+      <h1>Deeply Nested Field Names</h1>
+      <form onSubmit={handleSubmit}>
+        <h2>Personal</h2>
+        <div className="row">
+          <div className="field">
+            <label>First Name</label>
+            <input type="text" data-testid="nested-personal-firstName" value={state.personal.firstName}
+              onChange={e => set('personal.firstName', e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Last Name</label>
+            <input type="text" data-testid="nested-personal-lastName" value={state.personal.lastName}
+              onChange={e => set('personal.lastName', e.target.value)} />
+          </div>
+        </div>
+
+        <h2>Shipping Address</h2>
+        <div className="field">
+          <label>Street</label>
+          <input type="text" data-testid="nested-address-shipping-street" value={state.address.shipping.street}
+            onChange={e => set('address.shipping.street', e.target.value)} />
+        </div>
+        <div className="row">
+          <div className="field">
+            <label>City</label>
+            <input type="text" data-testid="nested-address-shipping-city" value={state.address.shipping.city}
+              onChange={e => set('address.shipping.city', e.target.value)} />
+          </div>
+          <div className="field">
+            <label>State</label>
+            <input type="text" data-testid="nested-address-shipping-state" value={state.address.shipping.state}
+              onChange={e => set('address.shipping.state', e.target.value)} />
+          </div>
+          <div className="field">
+            <label>ZIP</label>
+            <input type="text" data-testid="nested-address-shipping-zip" value={state.address.shipping.zip}
+              onChange={e => set('address.shipping.zip', e.target.value)} />
+          </div>
+        </div>
+
+        <h2>Billing Address</h2>
+        <div className="checkbox-field">
+          <input type="checkbox" data-testid="nested-address-billing-same" checked={state.address.billing.same}
+            onChange={e => handleSameAsShipping(e.target.checked)} />
+          <label>Same as shipping</label>
+        </div>
+        {!state.address.billing.same && (
+          <>
+            <div className="field">
+              <label>Street</label>
+              <input type="text" data-testid="nested-address-billing-street" value={state.address.billing.street}
+                onChange={e => set('address.billing.street', e.target.value)} />
+            </div>
+            <div className="field">
+              <label>City</label>
+              <input type="text" data-testid="nested-address-billing-city" value={state.address.billing.city}
+                onChange={e => set('address.billing.city', e.target.value)} />
+            </div>
+          </>
+        )}
+
+        <h2>Preferences</h2>
+        <div className="checkbox-field">
+          <input type="checkbox" data-testid="nested-preferences-newsletter" checked={state.preferences.newsletter}
+            onChange={e => set('preferences.newsletter', e.target.checked)} />
+          <label>Subscribe to newsletter</label>
+        </div>
+        <div className="field">
+          <label>Frequency</label>
+          <select data-testid="nested-preferences-frequency" value={state.preferences.frequency}
+            onChange={e => set('preferences.frequency', e.target.value)}>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </div>
+
+        <button type="submit" className="submit-btn" data-testid="nested-submit">Submit</button>
+      </form>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

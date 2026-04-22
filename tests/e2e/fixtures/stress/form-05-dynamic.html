@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form 05 - Dynamic Repeatable Fields</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #fdf4ff; padding: 20px; color: #333; }
+  h1 { margin-bottom: 20px; font-size: 1.5rem; }
+  .form-card { background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 600px; }
+  .form-card h2 { font-size: 1.1rem; margin-bottom: 16px; }
+  .phone-row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; padding: 10px; background: #faf5ff; border-radius: 4px; border: 1px solid #e9d5ff; }
+  .phone-row select { width: 140px; padding: 8px; border: 1px solid #d8b4fe; border-radius: 4px; font-size: 0.9rem; }
+  .phone-row input { flex: 1; padding: 8px 12px; border: 1px solid #d8b4fe; border-radius: 4px; font-size: 0.9rem; }
+  .phone-row input:focus, .phone-row select:focus { outline: none; border-color: #a855f7; box-shadow: 0 0 0 3px rgba(168,85,247,0.1); }
+  .btn-remove { background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85rem; }
+  .btn-remove:hover { background: #fecaca; }
+  .btn-add { background: #a855f7; color: #fff; border: none; padding: 8px 18px; border-radius: 4px; cursor: pointer; font-size: 0.9rem; margin-top: 10px; }
+  .btn-add:hover:not(:disabled) { background: #9333ea; }
+  .btn-add:disabled { opacity: 0.5; cursor: not-allowed; }
+  .count { font-size: 0.85rem; color: #7c3aed; margin-top: 8px; font-weight: 600; }
+  .btn-submit { background: #7c3aed; color: #fff; border: none; padding: 10px 24px; border-radius: 4px; font-size: 1rem; cursor: pointer; margin-top: 16px; display: block; }
+  .btn-submit:hover { background: #6d28d9; }
+  #results, #click-log { background: #fff; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 600px; margin-top: 16px; white-space: pre-wrap; font-family: monospace; font-size: 0.85rem; min-height: 40px; }
+  #results::before { content: "Results:"; display: block; font-weight: 600; margin-bottom: 8px; font-family: sans-serif; }
+  #click-log::before { content: "Click Log:"; display: block; font-weight: 600; margin-bottom: 8px; font-family: sans-serif; }
+</style>
+</head>
+<body>
+<h1>Form 05 - Dynamic Repeatable Fields</h1>
+
+<div class="form-card">
+  <h2>Phone Numbers</h2>
+  <div id="phone-list"></div>
+  <button class="btn-add" id="add-phone" data-testid="form-5-add-phone">+ Add Phone</button>
+  <div class="count" id="phone-count" data-testid="form-5-count">1 of 5 numbers added</div>
+  <button class="btn-submit" id="submit-btn" data-testid="form-5-submit">Submit</button>
+</div>
+
+<div id="results"></div>
+<div id="click-log"></div>
+
+<script>
+  const MAX_PHONES = 5;
+  let phoneCounter = 0;
+
+  function createRow() {
+    phoneCounter++;
+    const n = phoneCounter;
+    const row = document.createElement('div');
+    row.className = 'phone-row';
+    row.setAttribute('data-testid', 'phone-row-' + n);
+    row.id = 'row-' + n;
+
+    row.innerHTML = `
+      <select data-testid="phone-type-${n}" id="type-${n}">
+        <option value="mobile">Mobile</option>
+        <option value="home">Home</option>
+        <option value="work">Work</option>
+      </select>
+      <input type="tel" data-testid="phone-number-${n}" id="number-${n}" placeholder="555-000-0000">
+      <button class="btn-remove" data-testid="phone-remove-${n}" onclick="removeRow(${n})">Remove</button>
+    `;
+
+    return row;
+  }
+
+  function updateCount() {
+    const count = document.querySelectorAll('.phone-row').length;
+    document.getElementById('phone-count').textContent = count + ' of ' + MAX_PHONES + ' numbers added';
+    document.getElementById('add-phone').disabled = count >= MAX_PHONES;
+  }
+
+  function removeRow(n) {
+    const row = document.getElementById('row-' + n);
+    if (row) {
+      row.remove();
+      updateCount();
+      // Don't allow removing last row
+      if (document.querySelectorAll('.phone-row').length === 0) {
+        document.getElementById('phone-list').appendChild(createRow());
+        updateCount();
+      }
+    }
+  }
+
+  // Initialize with 1 row
+  document.getElementById('phone-list').appendChild(createRow());
+  updateCount();
+
+  document.getElementById('add-phone').addEventListener('click', () => {
+    const count = document.querySelectorAll('.phone-row').length;
+    if (count < MAX_PHONES) {
+      document.getElementById('phone-list').appendChild(createRow());
+      updateCount();
+    }
+  });
+
+  document.getElementById('submit-btn').addEventListener('click', () => {
+    const rows = document.querySelectorAll('.phone-row');
+    const phones = [];
+    rows.forEach(row => {
+      const select = row.querySelector('select');
+      const input = row.querySelector('input');
+      phones.push({
+        type: select.value,
+        number: input.value
+      });
+    });
+    document.getElementById('results').textContent = JSON.stringify({ phones }, null, 2);
+  });
+
+  // Click log
+  const clickLog = document.getElementById('click-log');
+  document.addEventListener('click', function(e) {
+    const testid = e.target.getAttribute('data-testid') || '';
+    const tag = e.target.tagName.toLowerCase();
+    const info = testid ? `[${testid}]` : `<${tag}>`;
+    const entry = document.createElement('div');
+    entry.textContent = new Date().toISOString().substr(11,12) + ' click ' + info;
+    clickLog.appendChild(entry);
+  });
+</script>
+</body>
+</html>

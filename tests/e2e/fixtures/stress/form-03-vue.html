@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form 03 - Vue 3 Reactive</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #ecfdf5; padding: 20px; color: #333; }
+  h1 { margin-bottom: 20px; font-size: 1.5rem; }
+  .container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1000px; }
+  .form-panel { background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .debug-panel { background: #f0fdf4; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .debug-panel h2 { font-size: 1.1rem; margin-bottom: 12px; color: #166534; }
+  .debug-panel pre { background: #dcfce7; padding: 12px; border-radius: 4px; font-size: 0.8rem; overflow-x: auto; white-space: pre-wrap; }
+  .field { margin-bottom: 14px; }
+  label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.9rem; }
+  input, textarea, select { width: 100%; padding: 8px 12px; border: 1px solid #a7f3d0; border-radius: 4px; font-size: 0.95rem; }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,0.1); }
+  input[type="checkbox"] { width: auto; margin-right: 6px; }
+  textarea { resize: vertical; min-height: 80px; }
+  .char-count { font-size: 0.8rem; color: #6b7280; text-align: right; }
+  .extra-fields { background: #fef3c7; padding: 12px; border-radius: 4px; margin-top: 8px; border: 1px solid #fbbf24; }
+  button[type="submit"] { background: #059669; color: #fff; border: none; padding: 10px 24px; border-radius: 4px; font-size: 1rem; cursor: pointer; }
+  button[type="submit"]:hover { background: #047857; }
+  #results, #click-log { background: #fff; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 1000px; margin-top: 16px; white-space: pre-wrap; font-family: monospace; font-size: 0.85rem; min-height: 40px; }
+  #results::before { content: "Results:"; display: block; font-weight: 600; margin-bottom: 8px; font-family: sans-serif; }
+  #click-log::before { content: "Click Log:"; display: block; font-weight: 600; margin-bottom: 8px; font-family: sans-serif; }
+</style>
+</head>
+<body>
+<h1>Form 03 - Vue 3 Reactive Form</h1>
+
+<div id="app">
+  <div class="container">
+    <form class="form-panel" @submit.prevent="handleSubmit">
+      <div class="field">
+        <label for="v-name">Full Name</label>
+        <input type="text" id="v-name" v-model="name" data-testid="form-3-name" placeholder="Jane Smith">
+      </div>
+
+      <div class="field">
+        <label for="v-email">Email</label>
+        <input type="email" id="v-email" v-model="email" data-testid="form-3-email" placeholder="jane@example.com">
+      </div>
+
+      <div class="field">
+        <label for="v-password">Password</label>
+        <input type="password" id="v-password" v-model="password" data-testid="form-3-password">
+      </div>
+
+      <div class="field">
+        <label for="v-role">Role</label>
+        <select id="v-role" v-model="role" data-testid="form-3-role">
+          <option value="">-- Select --</option>
+          <option value="frontend">Frontend Developer</option>
+          <option value="backend">Backend Developer</option>
+          <option value="fullstack">Full Stack Developer</option>
+          <option value="devops">DevOps Engineer</option>
+          <option value="designer">UX Designer</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="v-bio">Bio</label>
+        <textarea id="v-bio" v-model="bio" data-testid="form-3-bio" placeholder="Write something about yourself..." maxlength="300"></textarea>
+        <div class="char-count">{{ charCount }} / 300 characters</div>
+      </div>
+
+      <div class="field">
+        <label for="v-website">Website</label>
+        <input type="url" id="v-website" v-model="website" data-testid="form-3-website" placeholder="https://mysite.com">
+      </div>
+
+      <div class="field">
+        <label for="v-age">Age</label>
+        <input type="number" id="v-age" v-model.number="age" data-testid="form-3-age" min="18" max="120">
+      </div>
+
+      <div class="field">
+        <label style="display:inline-flex; align-items:center; gap:8px;">
+          <input type="checkbox" v-model="showExtra" data-testid="form-3-show-extra" style="width:auto">
+          I have additional details to share
+        </label>
+      </div>
+
+      <div v-if="showExtra" class="extra-fields">
+        <div class="field">
+          <label for="v-company">Company</label>
+          <input type="text" id="v-company" v-model="company" data-testid="form-3-company" placeholder="Acme Corp">
+        </div>
+        <div class="field">
+          <label for="v-title">Job Title</label>
+          <input type="text" id="v-title" v-model="jobTitle" data-testid="form-3-jobtitle" placeholder="Senior Engineer">
+        </div>
+        <div class="field">
+          <label for="v-years">Years of Experience</label>
+          <input type="number" id="v-years" v-model.number="yearsExp" data-testid="form-3-years" min="0" max="50">
+        </div>
+      </div>
+
+      <div class="field">
+        <label style="display:inline-flex; align-items:center; gap:8px;">
+          <input type="checkbox" v-model="agree" data-testid="form-3-agree" style="width:auto">
+          I agree to the terms and conditions
+        </label>
+      </div>
+
+      <button type="submit" data-testid="form-3-submit">Submit</button>
+    </form>
+
+    <div class="debug-panel">
+      <h2>State Debug (Vue Reactive Data)</h2>
+      <pre>{{ stateJson }}</pre>
+    </div>
+  </div>
+</div>
+
+<div id="results"></div>
+<div id="click-log"></div>
+
+<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+<script>
+  const { createApp, computed } = Vue;
+
+  createApp({
+    data() {
+      return {
+        name: '',
+        email: '',
+        password: '',
+        role: '',
+        bio: '',
+        website: '',
+        age: null,
+        showExtra: false,
+        company: '',
+        jobTitle: '',
+        yearsExp: null,
+        agree: false
+      };
+    },
+    computed: {
+      charCount() {
+        return this.bio.length;
+      },
+      stateJson() {
+        return JSON.stringify(this.$data, null, 2);
+      }
+    },
+    methods: {
+      handleSubmit() {
+        const data = { ...this.$data };
+        if (!data.showExtra) {
+          delete data.company;
+          delete data.jobTitle;
+          delete data.yearsExp;
+        }
+        document.getElementById('results').textContent = JSON.stringify(data, null, 2);
+      }
+    }
+  }).mount('#app');
+
+  // Click log
+  const clickLog = document.getElementById('click-log');
+  document.addEventListener('click', function(e) {
+    const testid = e.target.getAttribute('data-testid') || '';
+    const tag = e.target.tagName.toLowerCase();
+    const info = testid ? `[${testid}]` : `<${tag}>`;
+    const entry = document.createElement('div');
+    entry.textContent = new Date().toISOString().substr(11,12) + ' click ' + info;
+    clickLog.appendChild(entry);
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form 12 — CSS-Hidden Fields</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; padding: 24px; background: #f5f5f5; }
+  h1 { margin-bottom: 16px; }
+  form { background: #fff; padding: 24px; border-radius: 8px; max-width: 500px; border: 1px solid #ddd; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 14px; }
+  .field input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+  button { padding: 8px 20px; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin-right: 8px; }
+  button.secondary { background: #6b7280; }
+  .honeypot-display-none { display: none; }
+  .honeypot-visibility-hidden { visibility: hidden; height: 0; overflow: hidden; }
+  .opacity-zero { opacity: 0; }
+  .sr-only { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+  .initially-hidden { display: none; }
+  .initially-hidden.visible { display: block; }
+  #results, #click-log, #honeypot-check { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-top: 12px; min-height: 40px; font-family: monospace; font-size: 13px; white-space: pre-wrap; }
+  #honeypot-check { border-color: #f87171; }
+  #honeypot-check.clean { border-color: #4ade80; }
+</style>
+</head>
+<body>
+<h1>Form 12 — CSS-Hidden Fields</h1>
+
+<form id="hidden-form">
+  <!-- Visible field -->
+  <div class="field">
+    <label for="visible-name">Full Name (visible)</label>
+    <input type="text" id="visible-name" name="visible_name" data-testid="hidden-visible-name">
+  </div>
+
+  <!-- Honeypot: display:none — should NOT be filled -->
+  <div class="field honeypot-display-none">
+    <label for="hp-display">Do not fill (display:none honeypot)</label>
+    <input type="text" id="hp-display" name="hp_display" data-testid="hidden-honeypot-display" tabindex="-1" autocomplete="off">
+  </div>
+
+  <!-- Honeypot: visibility:hidden — should NOT be filled -->
+  <div class="field honeypot-visibility-hidden">
+    <label for="hp-visibility">Do not fill (visibility:hidden honeypot)</label>
+    <input type="text" id="hp-visibility" name="hp_visibility" data-testid="hidden-honeypot-visibility" tabindex="-1" autocomplete="off">
+  </div>
+
+  <!-- Opacity:0 but real field with aria-hidden="false" -->
+  <div class="field">
+    <label for="opacity-field">Security Code (opacity:0, real field)</label>
+    <input type="text" id="opacity-field" name="opacity_field" class="opacity-zero" aria-hidden="false" data-testid="hidden-opacity-field">
+  </div>
+
+  <!-- Screen-reader only field -->
+  <div class="field">
+    <label for="sr-field" class="sr-only">Accessibility Note (screen-reader only)</label>
+    <input type="text" id="sr-field" name="sr_field" class="sr-only" data-testid="hidden-sr-field">
+  </div>
+
+  <!-- Initially hidden, revealed by button -->
+  <div class="field initially-hidden" id="extra-field-wrap">
+    <label for="extra-field">Extra Info (initially hidden)</label>
+    <input type="text" id="extra-field" name="extra_field" data-testid="hidden-extra-field">
+  </div>
+
+  <button type="button" id="show-more-btn" data-testid="hidden-show-more" class="secondary">Show More</button>
+  <button type="submit" data-testid="hidden-submit">Submit</button>
+</form>
+
+<h3>Honeypot Check</h3>
+<div id="honeypot-check">Not checked yet</div>
+
+<h3>Results</h3>
+<div id="results">Waiting for submission...</div>
+<div id="click-log"></div>
+
+<script>
+  document.getElementById('show-more-btn').addEventListener('click', function() {
+    document.getElementById('extra-field-wrap').classList.add('visible');
+    document.getElementById('click-log').textContent = 'Show More clicked — extra field revealed';
+  });
+
+  document.getElementById('hidden-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const fd = new FormData(this);
+    const data = {};
+    fd.forEach((v, k) => { data[k] = v; });
+
+    // Check honeypots
+    const hpDisplay = data.hp_display || '';
+    const hpVisibility = data.hp_visibility || '';
+    const honeypotFilled = hpDisplay.length > 0 || hpVisibility.length > 0;
+
+    const hpEl = document.getElementById('honeypot-check');
+    if (honeypotFilled) {
+      hpEl.textContent = 'HONEYPOT TRIGGERED! hp_display="' + hpDisplay + '", hp_visibility="' + hpVisibility + '"';
+      hpEl.className = '';
+    } else {
+      hpEl.textContent = 'Clean — no honeypots filled';
+      hpEl.className = 'clean';
+    }
+
+    document.getElementById('results').textContent = JSON.stringify(data, null, 2);
+  });
+</script>
+</body>
+</html>
