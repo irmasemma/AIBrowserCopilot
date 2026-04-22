@@ -100,6 +100,9 @@ export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete 
             Requires <a href="https://nodejs.org" target="_blank" rel="noopener" class="text-brand-primary hover:underline">Node.js 18+</a>.
             No need to download anything else.
           </p>
+          <p class="text-xs text-amber-600 font-medium">
+            After the installer finishes, restart Chrome completely (close all windows and reopen) for the registration to take effect.
+          </p>
         </div>
       </div>
 
@@ -133,6 +136,16 @@ export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete 
             Test Connection
           </button>
         </div>
+      </div>
+
+      {/* Already done setup? Skip. */}
+      <div class="mx-3 mb-3 text-center">
+        <button
+          class="text-xs text-neutral-400 hover:text-neutral-600 underline"
+          onClick={onComplete}
+        >
+          I've already completed setup — skip this
+        </button>
       </div>
 
       {/* Error with email capture */}

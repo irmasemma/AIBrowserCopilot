@@ -22,7 +22,16 @@ const App = () => {
   useEffect(() => {
     initStoreFromStorage();
     listenForUpdates();
+    // Check if setup was already completed in a previous session
+    chrome.storage.local.get('setupComplete', (data) => {
+      if (data.setupComplete) setSetupComplete(true);
+    });
   }, []);
+
+  const handleSetupComplete = () => {
+    setSetupComplete(true);
+    chrome.storage.local.set({ setupComplete: true });
+  };
 
   const hasLicense = license.hasLicense;
   const { state, diagnosticReason, lastConnectedAt } = connectionContext;
@@ -45,7 +54,7 @@ const App = () => {
       <div class="flex flex-col h-screen bg-neutral-50">
         <ConnectionHeader />
         <div class="flex-1 overflow-y-auto">
-          <SetupWizard onComplete={() => setSetupComplete(true)} />
+          <SetupWizard onComplete={handleSetupComplete} />
         </div>
       </div>
     );
