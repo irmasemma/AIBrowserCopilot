@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, unlinkSync, mkdirSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { WebSocket } from 'ws';
@@ -28,6 +28,10 @@ function getLockDir(): string {
 
 export function getLockFilePath(): string {
   return join(getLockDir(), 'server.lock');
+}
+
+export function getWakeFilePath(): string {
+  return join(getLockDir(), 'server.wake');
 }
 
 export function generateToken(): string {
@@ -59,6 +63,28 @@ export function deleteLockFile(lockPath?: string): void {
     unlinkSync(filePath);
   } catch {
     // Lock file already gone — that's fine
+  }
+}
+
+// AD-18: Wake file signals extension that a new native host is available
+export function writeWakeFile(port: number): void {
+  const wakePath = getWakeFilePath();
+  const dir = dirname(wakePath);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  writeFileSync(wakePath, JSON.stringify({
+    pid: process.pid,
+    port,
+    timestamp: Date.now(),
+  }), 'utf-8');
+}
+
+export function deleteWakeFile(): void {
+  try {
+    unlinkSync(getWakeFilePath());
+  } catch {
+    // Wake file already gone — fine
   }
 }
 

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { toolRegistry } from './tools/index.js';
-import { sendToExtension, isExtensionConnected } from './extension-relay.js';
+import { sendToExtension, isExtensionConnected, waitForExtensionConnection } from './extension-relay.js';
 import type { ToolPlugin } from './shared/types.js';
 
 export const createMcpServer = (): McpServer => {
@@ -31,8 +31,16 @@ const registerTool = (server: McpServer, tool: ToolPlugin): void => {
       inputSchema: tool.inputSchema,
     },
     async (params): Promise<CallToolResult> => {
+      // AD-17: If extension isn't connected, wait up to 35s for it to reconnect
       if (!isExtensionConnected()) {
-        return textResult('Browser extension is not connected. Please open Chrome and ensure AI Browser CoPilot is running.', true);
+        const connected = await waitForExtensionConnection();
+        if (!connected) {
+          return textResult(
+            'Browser extension did not connect within 35 seconds. '
+            + 'Please check the extension is installed and enabled.',
+            true,
+          );
+        }
       }
 
       try {

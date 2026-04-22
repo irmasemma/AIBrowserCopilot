@@ -1,16 +1,33 @@
 import type { FunctionalComponent } from 'preact';
 import { useState } from 'preact/hooks';
+import { useEffect } from 'preact/hooks';
 import { StatusBadge } from './status-badge.js';
 import { DiagnosticsPanel } from './diagnostics-panel.js';
 import { useStore } from '../store.js';
+import { getDisplayState } from '../../shared/types.js';
 
 export const ConnectionHeader: FunctionalComponent = () => {
   const [showDiag, setShowDiag] = useState(false);
   const connectionContext = useStore((s) => s.connectionContext);
   const { state, serverInfo, failureCount, diagnosticReason } = connectionContext;
+  const displayState = getDisplayState(connectionContext);
+
+  // AD-14: Send verify_connection on mount to wake SW and force reconciliation
+  useEffect(() => {
+    chrome.runtime.sendMessage({ type: 'verify_connection' }).catch(() => {
+      // SW may not be ready — alarm will handle it
+    });
+  }, []);
 
   const subtitleText = (): string | null => {
-    if (state === 'connected' && serverInfo?.startedBy && serverInfo.startedBy !== 'unknown') {
+    if (displayState === 'stale') {
+      const age = Date.now() - (connectionContext.lastVerifiedAt ?? 0);
+      const ago = age < 60_000
+        ? `${Math.round(age / 1000)}s ago`
+        : `${Math.round(age / 60_000)}m ago`;
+      return `Last confirmed ${ago}`;
+    }
+    if (displayState === 'connected' && serverInfo?.startedBy && serverInfo.startedBy !== 'unknown') {
       return `Connected via ${serverInfo.startedBy}`;
     }
     if (state === 'reconnecting') {
@@ -20,6 +37,7 @@ export const ConnectionHeader: FunctionalComponent = () => {
   };
 
   const guidanceText = (): string | null => {
+    if (displayState === 'stale') return null; // Stale has its own UI with Check Now button
     if (state !== 'reconnecting' && state !== 'disconnected') return null;
     switch (diagnosticReason) {
       case 'was_connected': {
@@ -39,6 +57,10 @@ export const ConnectionHeader: FunctionalComponent = () => {
     }
   };
 
+  const handleCheckNow = () => {
+    chrome.runtime.sendMessage({ type: 'verify_connection' }).catch(() => {});
+  };
+
   const subtitle = subtitleText();
   const guidance = guidanceText();
 
@@ -51,8 +73,8 @@ export const ConnectionHeader: FunctionalComponent = () => {
           aria-label="Toggle connection diagnostics"
           title="Click for diagnostics"
         >
-          <StatusBadge state={state} />
-          <span class={`ml-1 text-xs transition-transform ${showDiag ? 'rotate-180' : ''}`} aria-hidden="true">▾</span>
+          <StatusBadge state={displayState} />
+          <span class={`ml-1 text-xs transition-transform ${showDiag ? 'rotate-180' : ''}`} aria-hidden="true">{'\u25BE'}</span>
         </button>
         <span class="text-lg font-semibold text-neutral-900">CoPilot</span>
         <button
@@ -62,12 +84,22 @@ export const ConnectionHeader: FunctionalComponent = () => {
             document.getElementById('support-section')?.scrollIntoView({ behavior: 'smooth' });
           }}
         >
-          ⚙️
+          {'\u2699\uFE0F'}
         </button>
       </div>
       {subtitle && (
         <div class="px-6 pb-2">
           <span class="text-xs text-neutral-500">{subtitle}</span>
+        </div>
+      )}
+      {displayState === 'stale' && (
+        <div class="px-6 pb-2">
+          <button
+            class="text-xs text-blue-600 hover:text-blue-800 underline cursor-pointer"
+            onClick={handleCheckNow}
+          >
+            Check Now
+          </button>
         </div>
       )}
       {guidance && (

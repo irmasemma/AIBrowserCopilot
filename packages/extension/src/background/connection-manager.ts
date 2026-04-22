@@ -25,6 +25,8 @@ export interface ConnectionManager {
   connect(url?: string): Promise<void>;
   disconnect(): void;
   retry(): void;
+  reconcile(): Promise<void>;
+  isRelayAlive(): boolean;
   getContext(): ConnectionContext;
   getRelay(): Relay | null;
   onStateChange(listener: (ctx: ConnectionContext) => void): () => void;
@@ -81,8 +83,6 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
     });
   }
 
-  let isFirstConnect = true;
-
   function setDiagnostic(reason: DiagnosticReason): void {
     // If we previously had a connection, override to 'was_connected'
     const effectiveReason = context.serverInfo !== null && reason !== 'connecting' ? 'was_connected' : reason;
@@ -96,7 +96,7 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
   }
 
   async function refreshUrl(): Promise<void> {
-    if (isFirstConnect || !options.discoverUrl) return;
+    if (!options.discoverUrl) return;
     try {
       const result = await options.discoverUrl();
       const urlChanged = result.url !== currentUrl;
@@ -127,13 +127,14 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
           clearTimeout(serverInfoTimer);
           serverInfoTimer = null;
         }
-        context = { ...context, serverInfo: info, lastConnectedAt: Date.now() };
+        context = { ...context, serverInfo: info, lastConnectedAt: Date.now(), lastVerifiedAt: Date.now() };
         dispatch({ type: 'WS_OPEN' });
         startHeartbeat();
       },
 
       onPong(timestamp: number) {
         heartbeat?.receivePong(timestamp);
+        context = { ...context, lastVerifiedAt: Date.now() };
         dispatch({ type: 'HEARTBEAT_OK' });
       },
 
@@ -163,6 +164,11 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
             setDiagnostic('server_not_responding');
           }
           dispatch({ type: 'WS_ERROR' });
+          // Safety: if onClose doesn't fire after onError, ensure backoff is scheduled.
+          // Some WebSocket implementations may not fire close after error.
+          if (context.state === 'reconnecting') {
+            scheduleBackoff();
+          }
         }
       },
 
@@ -197,10 +203,11 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
   return {
     async connect(url?: string): Promise<void> {
       currentUrl = url ?? DEFAULT_URL;
-      isFirstConnect = true;
       dispatch({ type: 'CONNECT' });
+      // Always try discovery before connecting — the lock file may have
+      // a different port than DEFAULT_URL, and native host may not be running yet
+      await refreshUrl();
       openRelay();
-      isFirstConnect = false;
     },
 
     disconnect(): void {
@@ -217,6 +224,36 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
       stopAll();
       dispatch({ type: 'CONNECT' });
       refreshUrl().then(() => openRelay());
+    },
+
+    async reconcile(): Promise<void> {
+      // Layer 2/3/6: Verify in-memory relay matches persisted state.
+      // Called by alarm, SW init, and verify_connection message.
+      if (relay !== null && relay.isConnected()) {
+        // Relay alive in memory — send a ping to confirm and update lastVerifiedAt
+        relay.sendPing(Date.now());
+        return;
+      }
+
+      // Relay is dead in memory. Check if persisted state claims we're connected.
+      if (context.state === 'connected' || context.state === 'degraded' || context.state === 'reconnecting') {
+        // Persisted state is lying. Attempt rediscovery.
+        stopAll();
+        await refreshUrl();
+
+        // If discovery found a live server (diagnostic === 'connecting'), try to reconnect
+        if (context.diagnosticReason === 'connecting') {
+          dispatch({ type: 'CONNECT' });
+          openRelay();
+        } else {
+          // No server found — transition to disconnected
+          dispatch({ type: 'DISCONNECT' });
+        }
+      }
+    },
+
+    isRelayAlive(): boolean {
+      return relay !== null && relay.isConnected();
     },
 
     getContext(): ConnectionContext {

@@ -1,8 +1,8 @@
 import type { FunctionalComponent } from 'preact';
-import type { ConnectionState } from '../../shared/types.js';
+import type { DisplayState } from '../../shared/types.js';
 
 interface StatusBadgeProps {
-  state: ConnectionState;
+  state: DisplayState;
   compact?: boolean;
 }
 
@@ -14,7 +14,7 @@ export interface StateConfig {
   badge: boolean;
 }
 
-export const getStateConfig = (state: ConnectionState): StateConfig => {
+export const getStateConfig = (state: DisplayState): StateConfig => {
   switch (state) {
     case 'disconnected':
       return { colorClass: 'bg-neutral-400', icon: '○', label: 'Not Connected', pulse: false, badge: false };
@@ -26,6 +26,8 @@ export const getStateConfig = (state: ConnectionState): StateConfig => {
       return { colorClass: 'bg-amber-400', icon: '●', label: 'Unstable', pulse: false, badge: true };
     case 'reconnecting':
       return { colorClass: 'bg-amber-400', icon: '●', label: 'Reconnecting...', pulse: true, badge: false };
+    case 'stale':
+      return { colorClass: 'bg-neutral-400', icon: '◌', label: 'Checking connection...', pulse: true, badge: false };
     default:
       return { colorClass: 'bg-neutral-400', icon: '○', label: 'Unknown', pulse: false, badge: false };
   }

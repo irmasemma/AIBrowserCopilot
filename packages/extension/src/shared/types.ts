@@ -50,6 +50,22 @@ export interface ConnectionContext {
   error: string | null;
   reconnectsThisSession: number;
   diagnosticReason: DiagnosticReason | null;
+  lastVerifiedAt: number;
+}
+
+export type DisplayState = ConnectionState | 'stale';
+
+/** Threshold in ms — if lastVerifiedAt is older than this, state is stale */
+export const STALE_THRESHOLD_MS = 40_000;
+
+export function getDisplayState(ctx: ConnectionContext): DisplayState {
+  if (ctx.state === 'connected' || ctx.state === 'degraded') {
+    const age = Date.now() - (ctx.lastVerifiedAt ?? 0);
+    if (age > STALE_THRESHOLD_MS) {
+      return 'stale';
+    }
+  }
+  return ctx.state;
 }
 
 export interface ToolScanResult {

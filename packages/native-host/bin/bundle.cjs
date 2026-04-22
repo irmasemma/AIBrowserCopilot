@@ -24631,7 +24631,8 @@ var getPageContent = {
   tier: "free",
   inputSchema: {
     url: external_exports.string().optional().describe("Target URL (defaults to active tab)"),
-    format: external_exports.enum(["text", "html"]).default("text").describe("Output format")
+    format: external_exports.enum(["text", "html"]).default("text").describe("Output format"),
+    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
   },
   async execute() {
     return { content: [{ type: "text", text: "[Stub] get_page_content: Not connected to browser. Browser bridge will be added in Story 1.3." }] };
@@ -24644,7 +24645,8 @@ var getPageMetadata = {
   description: "Get metadata (title, URL, description, Open Graph tags, favicon) from the page the user is viewing. Use this when you need a quick summary of what a page is about without reading the full content.",
   tier: "pro",
   inputSchema: {
-    url: external_exports.string().optional().describe("Target URL (defaults to active tab)")
+    url: external_exports.string().optional().describe("Target URL (defaults to active tab)"),
+    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
   },
   async execute() {
     return { content: [{ type: "text", text: "[Stub] get_page_metadata: Not connected to browser." }] };
@@ -24658,7 +24660,8 @@ var takeScreenshot = {
   tier: "free",
   inputSchema: {
     format: external_exports.enum(["png", "jpeg"]).default("png").describe("Image format"),
-    quality: external_exports.number().min(0).max(100).default(80).describe("JPEG quality (0-100)")
+    quality: external_exports.number().min(0).max(100).default(80).describe("JPEG quality (0-100)"),
+    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
   },
   async execute() {
     return { content: [{ type: "text", text: "[Stub] take_screenshot: Not connected to browser." }] };
@@ -24695,13 +24698,19 @@ var navigate = {
 // src/tools/fill-form.ts
 var fillForm = {
   name: "fill_form",
-  description: "Fill in form fields on the page the user is viewing. Use this when the user asks you to fill out a form, enter data into fields, or auto-complete form inputs in their browser.",
+  description: "Fill in form fields on the page the user is viewing. Supports CSS selectors, label text, ARIA roles, and placeholder matching. Handles text inputs, dropdowns, checkboxes, radio buttons, file uploads, and date fields. Can target fields inside iframes. Use this when the user asks you to fill out a form, enter data into fields, or auto-complete form inputs in their browser.",
   tier: "pro",
   inputSchema: {
     fields: external_exports.array(external_exports.object({
-      selector: external_exports.string().describe("CSS selector for the form field"),
-      value: external_exports.string().describe("Value to fill in")
-    })).describe("Array of form fields to fill")
+      selector: external_exports.string().optional().describe("CSS selector for the form field"),
+      label: external_exports.string().optional().describe("Find field by its label text"),
+      role: external_exports.string().optional().describe("Find field by ARIA role"),
+      placeholder: external_exports.string().optional().describe("Find field by placeholder text"),
+      value: external_exports.string().describe("Value to fill in"),
+      type: external_exports.enum(["text", "select", "checkbox", "radio", "file", "date"]).optional().describe("Field type hint for proper handling")
+    })).describe("Array of form fields to fill"),
+    iframe: external_exports.string().optional().describe("CSS selector for iframe to target (for forms inside iframes)"),
+    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
   },
   async execute() {
     return { content: [{ type: "text", text: "[Stub] fill_form: Not connected to browser." }] };
@@ -24715,7 +24724,9 @@ var clickElement = {
   tier: "pro",
   inputSchema: {
     selector: external_exports.string().optional().describe("CSS selector for the element"),
-    text: external_exports.string().optional().describe("Visible text content to match")
+    text: external_exports.string().optional().describe("Visible text of the button or link to click. Prefers clickable elements (buttons, links) over plain text."),
+    index: external_exports.number().optional().default(0).describe("Which match to click when multiple elements match (0 = first). Use when there are duplicate buttons."),
+    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
   },
   async execute() {
     return { content: [{ type: "text", text: "[Stub] click_element: Not connected to browser." }] };
@@ -24729,10 +24740,43 @@ var extractTable = {
   tier: "pro",
   inputSchema: {
     selector: external_exports.string().optional().describe("CSS selector for a specific table"),
-    index: external_exports.number().default(0).describe("Table index if multiple tables exist (default: first)")
+    index: external_exports.number().default(0).describe("Table index if multiple tables exist (default: first)"),
+    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
   },
   async execute() {
     return { content: [{ type: "text", text: "[Stub] extract_table: Not connected to browser." }] };
+  }
+};
+
+// src/tools/read-form.ts
+var readForm = {
+  name: "read_form",
+  description: "Read all form fields on the page the user is viewing. Returns structured metadata about every input, select, textarea, and contenteditable field \u2014 including labels, types, current values, and options. Use this before fill_form to understand what fields exist and how to target them.",
+  tier: "pro",
+  inputSchema: {
+    selector: external_exports.string().optional().describe("Optional CSS selector to target a specific form"),
+    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
+  },
+  async execute() {
+    return { content: [{ type: "text", text: "[Stub] read_form: Not connected to browser." }] };
+  }
+};
+
+// src/tools/extract-data.ts
+var extractData = {
+  name: "extract_data",
+  description: "Extract structured or repeating data from any page \u2014 not just HTML tables. Detects card grids, product listings, search results, flex layouts, and classic tables using heuristic pattern detection. Returns the best-matching data region with headers and rows. Use this when the user asks to scrape data, extract listings, or get structured information from a page.",
+  tier: "pro",
+  inputSchema: {
+    selector: external_exports.string().optional().describe("Optional CSS selector to target a specific container"),
+    columns: external_exports.array(external_exports.string()).optional().describe("Optional column name hints to help match the right data region"),
+    format: external_exports.enum(["table", "json"]).default("table").describe("Output format (default: table)"),
+    max_rows: external_exports.number().default(100).describe("Maximum number of rows to extract (default: 100)"),
+    include_links: external_exports.boolean().default(false).describe("Include href URLs in extracted data"),
+    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
+  },
+  async execute() {
+    return { content: [{ type: "text", text: "[Stub] extract_data: Not connected to browser." }] };
   }
 };
 
@@ -24745,7 +24789,9 @@ var toolRegistry = [
   navigate,
   fillForm,
   clickElement,
-  extractTable
+  extractTable,
+  readForm,
+  extractData
 ];
 
 // ../../node_modules/ws/wrapper.mjs
@@ -24778,6 +24824,9 @@ function getLockDir() {
 function getLockFilePath() {
   return (0, import_node_path.join)(getLockDir(), "server.lock");
 }
+function getWakeFilePath() {
+  return (0, import_node_path.join)(getLockDir(), "server.wake");
+}
 function readLockFile(lockPath) {
   const filePath = lockPath ?? getLockFilePath();
   try {
@@ -24799,6 +24848,24 @@ function deleteLockFile(lockPath) {
   const filePath = lockPath ?? getLockFilePath();
   try {
     (0, import_node_fs.unlinkSync)(filePath);
+  } catch {
+  }
+}
+function writeWakeFile(port) {
+  const wakePath = getWakeFilePath();
+  const dir = (0, import_node_path.dirname)(wakePath);
+  if (!(0, import_node_fs.existsSync)(dir)) {
+    (0, import_node_fs.mkdirSync)(dir, { recursive: true });
+  }
+  (0, import_node_fs.writeFileSync)(wakePath, JSON.stringify({
+    pid: process.pid,
+    port,
+    timestamp: Date.now()
+  }), "utf-8");
+}
+function deleteWakeFile() {
+  try {
+    (0, import_node_fs.unlinkSync)(getWakeFilePath());
   } catch {
   }
 }
@@ -24912,6 +24979,7 @@ function getServerInfo() {
 }
 var handleConnection = (ws, _req) => {
   extensionSocket = ws;
+  deleteWakeFile();
   ws.send(JSON.stringify(getServerInfo()));
   ws.on("message", (data) => {
     try {
@@ -24988,6 +25056,7 @@ var startRelay = async () => {
         version: VERSION,
         startedBy
       }, lockPath);
+      writeWakeFile(port);
       registerCleanupHandlers(lockPath);
       resolve(port);
     });
@@ -25014,6 +25083,24 @@ var sendToExtension = (request) => {
   });
 };
 var isExtensionConnected = () => extensionSocket !== null && extensionSocket.readyState === import_websocket.default.OPEN;
+var EXTENSION_RECONNECT_TIMEOUT_MS = 35e3;
+var POLL_INTERVAL_MS = 500;
+function waitForExtensionConnection(timeoutMs = EXTENSION_RECONNECT_TIMEOUT_MS) {
+  if (isExtensionConnected()) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const interval = setInterval(() => {
+      if (isExtensionConnected()) {
+        clearInterval(interval);
+        clearTimeout(timer);
+        resolve(true);
+      }
+    }, POLL_INTERVAL_MS);
+    const timer = setTimeout(() => {
+      clearInterval(interval);
+      resolve(false);
+    }, timeoutMs);
+  });
+}
 
 // src/mcp-server.ts
 var createMcpServer = () => {
@@ -25039,7 +25126,13 @@ var registerTool = (server, tool) => {
     },
     async (params) => {
       if (!isExtensionConnected()) {
-        return textResult("Browser extension is not connected. Please open Chrome and ensure AI Browser CoPilot is running.", true);
+        const connected = await waitForExtensionConnection();
+        if (!connected) {
+          return textResult(
+            "Browser extension did not connect within 35 seconds. Please check the extension is installed and enabled.",
+            true
+          );
+        }
       }
       try {
         const response = await sendToExtension({

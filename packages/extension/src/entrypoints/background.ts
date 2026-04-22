@@ -7,7 +7,10 @@ import {
   getUnconfiguredTools,
   updateBadge,
 } from '../background/tool-scanner';
-import type { ToolScanResult } from '../shared/types';
+import type { ToolScanResult, ConnectionContext } from '../shared/types';
+
+const ALARM_NAME = 'connection-check';
+const ALARM_PERIOD_MINUTES = 0.5; // 30s — Chrome minimum for periodic alarms
 
 export default defineBackground(() => {
   let scanState = createInitialScanState();
@@ -59,24 +62,55 @@ export default defineBackground(() => {
     // sidePanel API may not be available in all contexts
   }
 
-  // Discover endpoint and connect
-  async function startConnection() {
-    try {
-      const result = await discovery.discoverEndpoint();
-      await manager.connect(result.url);
-    } catch {
-      await manager.connect();
+  // AD-12: Register alarm for periodic reconciliation (survives SW suspension)
+  chrome.alarms.create(ALARM_NAME, { periodInMinutes: ALARM_PERIOD_MINUTES });
+
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === ALARM_NAME) {
+      manager.reconcile().catch(() => {
+        // Reconciliation failed — will retry on next alarm
+      });
     }
-  }
+  });
 
-  startConnection();
+  // AD-16: Reconcile-before-connect on SW startup
+  // When SW restarts after termination, in-memory relay is always null.
+  // If persisted state says "connected", it's stale. Reconcile first.
+  (async () => {
+    try {
+      const stored = await chrome.storage.local.get('connectionContext');
+      const ctx = stored.connectionContext as ConnectionContext | undefined;
 
-  // Listen for retry/reconnect requests from UI
+      if (ctx && (ctx.state === 'connected' || ctx.state === 'degraded')) {
+        // Persisted state claims connected but relay is null (fresh SW start).
+        // Reconcile: validate lock file, reconnect or transition to disconnected.
+        await manager.reconcile();
+      } else {
+        // Normal startup — discover and connect
+        await manager.connect();
+      }
+    } catch {
+      // Connection failed (native host not running yet) — normal.
+      // Alarm-based reconciliation will keep checking.
+    }
+  })();
+
+  // Listen for retry/reconnect/verify requests from UI
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === 'retry_connection' || message?.type === 'reconnect') {
       manager.retry();
       sendResponse({ ok: true });
+      return false;
     }
+
+    // AD-14: Side panel verification — wakes SW and forces immediate reconcile
+    if (message?.type === 'verify_connection') {
+      manager.reconcile()
+        .then(() => sendResponse({ done: true }))
+        .catch(() => sendResponse({ done: false }));
+      return true; // async response
+    }
+
     return false;
   });
 });

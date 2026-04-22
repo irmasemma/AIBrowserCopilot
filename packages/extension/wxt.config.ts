@@ -8,7 +8,7 @@ export default defineConfig({
     name: 'AI Browser CoPilot',
     version: '0.1.0',
     description: 'Connect your browser to your AI assistant. Read pages, fill forms, extract data — no terminal required.',
-    permissions: ['tabs', 'sidePanel', 'nativeMessaging', 'storage', 'scripting'],
+    permissions: ['tabs', 'sidePanel', 'nativeMessaging', 'storage', 'scripting', 'debugger', 'alarms'],
     host_permissions: ['<all_urls>'],
     icons: {
       '16': 'assets/icon-16.png',

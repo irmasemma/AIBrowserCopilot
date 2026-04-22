@@ -13,6 +13,8 @@ import {
   readLockFile,
   killProcess,
   waitForProcessExit,
+  writeWakeFile,
+  deleteWakeFile,
 } from './lock-file-manager.js';
 
 export interface RelayRequest {
@@ -64,6 +66,9 @@ const handleConnection = (ws: WebSocket, _req: { url?: string }): void => {
   // No token auth needed — server binds to 127.0.0.1 only (localhost)
 
   extensionSocket = ws;
+
+  // AD-18: Extension arrived — delete wake signal
+  deleteWakeFile();
 
   // Send server info on connect
   ws.send(JSON.stringify(getServerInfo()));
@@ -163,6 +168,9 @@ export const startRelay = async (): Promise<number> => {
         startedBy,
       }, lockPath);
 
+      // AD-18: Write wake file to signal extension that server is ready
+      writeWakeFile(port);
+
       // Register cleanup handlers
       registerCleanupHandlers(lockPath);
 
@@ -198,6 +206,29 @@ export const sendToExtension = (request: RelayRequest): Promise<RelayResponse> =
 
 export const isExtensionConnected = (): boolean =>
   extensionSocket !== null && extensionSocket.readyState === WebSocket.OPEN;
+
+// AD-17: Wait for extension to connect, with bounded timeout
+const EXTENSION_RECONNECT_TIMEOUT_MS = 35_000;
+const POLL_INTERVAL_MS = 500;
+
+export function waitForExtensionConnection(timeoutMs: number = EXTENSION_RECONNECT_TIMEOUT_MS): Promise<boolean> {
+  if (isExtensionConnected()) return Promise.resolve(true);
+
+  return new Promise((resolve) => {
+    const interval = setInterval(() => {
+      if (isExtensionConnected()) {
+        clearInterval(interval);
+        clearTimeout(timer);
+        resolve(true);
+      }
+    }, POLL_INTERVAL_MS);
+
+    const timer = setTimeout(() => {
+      clearInterval(interval);
+      resolve(false);
+    }, timeoutMs);
+  });
+}
 
 export const stopRelay = (): Promise<void> => {
   return new Promise((resolve) => {

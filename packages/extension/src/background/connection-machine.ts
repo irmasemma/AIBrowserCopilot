@@ -22,6 +22,7 @@ export function createInitialContext(): ConnectionContext {
     error: null,
     reconnectsThisSession: 0,
     diagnosticReason: null,
+    lastVerifiedAt: 0,
   };
 }
 

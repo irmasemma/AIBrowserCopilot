@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { getStateConfig } from './status-badge';
-import type { ConnectionState } from '../../shared/types';
 
 describe('getStateConfig', () => {
   it('disconnected → gray, "Not Connected"', () => {
@@ -47,5 +46,13 @@ describe('getStateConfig', () => {
   it('connected state uses green-500 class', () => {
     const cfg = getStateConfig('connected');
     expect(cfg.colorClass).toBe('bg-green-500');
+  });
+
+  it('stale → gray pulse, "Checking connection..."', () => {
+    const cfg = getStateConfig('stale');
+    expect(cfg.label).toBe('Checking connection...');
+    expect(cfg.colorClass).toContain('neutral');
+    expect(cfg.pulse).toBe(true);
+    expect(cfg.badge).toBe(false);
   });
 });

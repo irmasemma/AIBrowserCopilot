@@ -37,6 +37,8 @@ const DEFAULT_CONNECTION_CONTEXT: ConnectionContext = {
   serverInfo: null,
   error: null,
   reconnectsThisSession: 0,
+  diagnosticReason: null,
+  lastVerifiedAt: 0,
 };
 
 export const useStore = create<AppState>((set) => ({

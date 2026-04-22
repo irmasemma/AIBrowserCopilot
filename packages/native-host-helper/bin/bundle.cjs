@@ -1,9 +1,32 @@
 "use strict";
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
 
 // src/lock-file-reader.ts
 var import_node_fs = require("node:fs");
 var import_node_path = require("node:path");
 var import_node_os = require("node:os");
+var import_node_net = __toESM(require("node:net"), 1);
 function getLockDir() {
   switch ((0, import_node_os.platform)()) {
     case "win32":
@@ -17,17 +40,84 @@ function getLockDir() {
 function getLockFilePath() {
   return (0, import_node_path.join)(getLockDir(), "server.lock");
 }
-function readLockFile(lockPath) {
+function getWakeFilePath() {
+  return (0, import_node_path.join)(getLockDir(), "server.wake");
+}
+function isPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function isPortListening(port, timeoutMs = 2e3) {
+  return new Promise((resolve) => {
+    const socket = new import_node_net.default.Socket();
+    socket.setTimeout(timeoutMs);
+    socket.on("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.on("timeout", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.on("error", () => {
+      resolve(false);
+    });
+    socket.connect(port, "127.0.0.1");
+  });
+}
+function readWakeFile() {
+  const wakePath = getWakeFilePath();
+  if (!(0, import_node_fs.existsSync)(wakePath)) return { hasWake: false };
+  try {
+    const content = (0, import_node_fs.readFileSync)(wakePath, "utf-8");
+    const data = JSON.parse(content);
+    if (typeof data.timestamp === "number" && Date.now() - data.timestamp < 6e4) {
+      return { hasWake: true, wakeTimestamp: data.timestamp };
+    }
+    try {
+      (0, import_node_fs.unlinkSync)(wakePath);
+    } catch {
+    }
+    return { hasWake: false };
+  } catch {
+    return { hasWake: false };
+  }
+}
+async function readLockFile(lockPath) {
   const filePath = lockPath ?? getLockFilePath();
   if (!(0, import_node_fs.existsSync)(filePath)) {
     return { exists: false };
   }
+  let data;
   try {
     const content = (0, import_node_fs.readFileSync)(filePath, "utf-8");
-    const data = JSON.parse(content);
-    return { exists: true, data };
+    data = JSON.parse(content);
   } catch {
     return { exists: false };
+  }
+  if (!isPidAlive(data.pid)) {
+    deleteLockFile(filePath);
+    return { exists: false, stale: true, stalePid: data.pid };
+  }
+  const portOpen = await isPortListening(data.port);
+  if (!portOpen) {
+    deleteLockFile(filePath);
+    return { exists: false, stale: true, stalePid: data.pid };
+  }
+  const wake = readWakeFile();
+  return { exists: true, data, ...wake };
+}
+function deleteLockFile(lockPath) {
+  const filePath = lockPath ?? getLockFilePath();
+  try {
+    (0, import_node_fs.unlinkSync)(filePath);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -239,12 +329,26 @@ async function main() {
     const action = message.action;
     switch (action) {
       case "read_lock_file": {
-        const result = readLockFile();
-        if (result.exists) {
-          writeMessage({ exists: true, ...result.data });
+        const result = await readLockFile();
+        if (result.exists && result.data) {
+          writeMessage({
+            exists: true,
+            ...result.data,
+            hasWake: result.hasWake ?? false,
+            wakeTimestamp: result.wakeTimestamp
+          });
         } else {
-          writeMessage({ exists: false });
+          writeMessage({
+            exists: false,
+            stale: result.stale ?? false,
+            stalePid: result.stalePid
+          });
         }
+        break;
+      }
+      case "delete_lock_file": {
+        const deleted = deleteLockFile();
+        writeMessage({ deleted });
         break;
       }
       case "scan_ai_tools": {

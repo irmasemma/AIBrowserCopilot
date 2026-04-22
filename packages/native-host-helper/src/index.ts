@@ -1,4 +1,4 @@
-import { readLockFile } from './lock-file-reader.js';
+import { readLockFile, deleteLockFile } from './lock-file-reader.js';
 import { scanAITools } from './tool-scanner.js';
 
 // Chrome Native Messaging protocol: 4-byte LE length prefix + JSON
@@ -61,12 +61,29 @@ async function main(): Promise<void> {
 
     switch (action) {
       case 'read_lock_file': {
-        const result = readLockFile();
-        if (result.exists) {
-          writeMessage({ exists: true, ...result.data });
+        // AD-15: Validates PID + port before returning
+        const result = await readLockFile();
+        if (result.exists && result.data) {
+          writeMessage({
+            exists: true,
+            ...result.data,
+            hasWake: result.hasWake ?? false,
+            wakeTimestamp: result.wakeTimestamp,
+          });
         } else {
-          writeMessage({ exists: false });
+          writeMessage({
+            exists: false,
+            stale: result.stale ?? false,
+            stalePid: result.stalePid,
+          });
         }
+        break;
+      }
+
+      case 'delete_lock_file': {
+        // AD-15: Extension-initiated stale lock file cleanup
+        const deleted = deleteLockFile();
+        writeMessage({ deleted });
         break;
       }
 
