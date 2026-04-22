@@ -47,24 +47,6 @@ const executeContentScript = async <T>(tabId: number, func: () => T): Promise<T>
   return results[0].result as T;
 };
 
-const waitForTabLoad = (tabId: number, waitUntil: string = 'domcontentloaded', timeoutMs = 10_000): Promise<void> => {
-  return new Promise((resolve, reject) => {
-    const cleanup = () => {
-      clearTimeout(timer);
-      chrome.tabs.onUpdated.removeListener(onUpdated);
-    };
-    const timer = setTimeout(() => { cleanup(); resolve(); }, timeoutMs); // Resolve on timeout, don't fail
-    const targetStatus = waitUntil === 'load' ? 'complete' : 'loading'; // 'loading' fires on domcontentloaded
-    let seenLoading = false;
-    const onUpdated = (id: number, change: chrome.tabs.TabChangeInfo) => {
-      if (id !== tabId) return;
-      if (change.status === 'loading') seenLoading = true;
-      if (seenLoading && change.status === 'complete') { cleanup(); resolve(); }
-    };
-    chrome.tabs.onUpdated.addListener(onUpdated);
-  });
-};
-
 // Tool implementations
 const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown>> = {
   async get_page_content(params) {
@@ -591,156 +573,91 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
     const selector = (params.selector as string) ?? null;
     const text = (params.text as string) ?? null;
     const waitForContent = (params.wait_for_content as boolean) ?? true;
-    const tabId = tab.id!;
 
-    // Step 1: Get page height before scroll (sync, no args issues)
-    const beforeRes = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => {
-        // Find the main scrollable container (for virtualized lists: Threads, Twitter, Reddit, etc.)
-        function findScrollContainer(): Element | null {
-          const all = document.querySelectorAll('*');
-          let best: Element | null = null;
-          let bestHeight = 0;
-          for (const el of all) {
-            if (el === document.body || el === document.documentElement) continue;
-            const style = window.getComputedStyle(el);
-            if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 50) {
-              // Prefer the tallest scrollable container (the main feed)
-              if (el.scrollHeight > bestHeight) {
-                bestHeight = el.scrollHeight;
-                best = el;
+    const result = await withPlaywrightPage(tab.id!, async (page) => {
+      // Get page height before scroll
+      const beforeHeight = await page.evaluate(() =>
+        Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
+      );
+
+      let scrollError: string | null = null;
+
+      // Priority: selector > text > direction > default (scroll down)
+      if (selector) {
+        const el = page.locator(selector).first();
+        try {
+          await el.scrollIntoViewIfNeeded({ timeout: 5000 });
+        } catch {
+          scrollError = 'Selector not found: ' + selector;
+        }
+      } else if (text) {
+        const el = page.getByText(text, { exact: false }).first();
+        try {
+          await el.scrollIntoViewIfNeeded({ timeout: 5000 });
+        } catch {
+          scrollError = 'Text not found on page: ' + text;
+        }
+      } else {
+        // Direction-based scroll — mouse.wheel at viewport center handles
+        // both window scroll and virtualized containers (Threads, Twitter, etc.)
+        const vh = await page.evaluate(() => window.innerHeight);
+        const delta = amount ?? vh;
+        const centerX = await page.evaluate(() => window.innerWidth / 2);
+        const centerY = vh / 2;
+
+        // Move mouse to center so wheel targets the right scroll container
+        await page.mouse.move(centerX, centerY);
+
+        switch (direction) {
+          case 'up':
+            await page.mouse.wheel(0, -delta);
+            break;
+          case 'top':
+            await page.evaluate(() => window.scrollTo(0, 0));
+            // Also try scrolling any container to top
+            await page.evaluate(() => {
+              const all = document.querySelectorAll('*');
+              for (const el of all) {
+                const s = window.getComputedStyle(el);
+                if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 50) {
+                  el.scrollTop = 0;
+                }
               }
-            }
-          }
-          return best;
-        }
-
-        const container = findScrollContainer();
-        const useContainer = container !== null && document.documentElement.scrollHeight <= window.innerHeight + 10;
-        const target = useContainer ? container! : document.documentElement;
-
-        return {
-          pageHeight: target.scrollHeight,
-          scrollTop: useContainer ? container!.scrollTop : (window.pageYOffset || document.documentElement.scrollTop),
-          useContainer,
-        };
-      },
-    });
-    const before = beforeRes?.[0]?.result as { pageHeight: number; scrollTop: number; useContainer: boolean } | null;
-    if (!before) throw Object.assign(new Error('Cannot read page state'), { code: 'CONTENT_UNAVAILABLE' });
-
-    // Step 2: Perform the scroll (sync — all args are null-safe primitives)
-    const scrollRes = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (dir: string | null, amt: number | null, sel: string | null, txt: string | null) => {
-        // Find scrollable container (same logic as step 1)
-        function findScrollContainer(): Element | null {
-          const all = document.querySelectorAll('*');
-          let best: Element | null = null;
-          let bestHeight = 0;
-          for (const el of all) {
-            if (el === document.body || el === document.documentElement) continue;
-            const style = window.getComputedStyle(el);
-            if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 50) {
-              if (el.scrollHeight > bestHeight) { bestHeight = el.scrollHeight; best = el; }
-            }
-          }
-          return best;
-        }
-
-        const container = findScrollContainer();
-        const useContainer = container !== null && document.documentElement.scrollHeight <= window.innerHeight + 10;
-
-        // Priority: selector > text > direction > default (scroll down)
-        if (sel) {
-          const el = document.querySelector(sel);
-          if (!el) return { scrolled: false, error: 'Selector not found: ' + sel };
-          el.scrollIntoView({ block: 'center', behavior: 'instant' });
-          return { scrolled: true };
-        }
-
-        if (txt) {
-          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-          const target = txt.toLowerCase();
-          while (walker.nextNode()) {
-            const content = walker.currentNode.textContent ?? '';
-            if (content.toLowerCase().includes(target)) {
-              const parent = walker.currentNode.parentElement;
-              if (parent) {
-                parent.scrollIntoView({ block: 'center', behavior: 'instant' });
-                return { scrolled: true };
+            });
+            break;
+          case 'bottom':
+            await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+            await page.evaluate(() => {
+              const all = document.querySelectorAll('*');
+              for (const el of all) {
+                const s = window.getComputedStyle(el);
+                if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 50) {
+                  el.scrollTop = el.scrollHeight;
+                }
               }
-            }
-          }
-          return { scrolled: false, error: 'Text not found on page: ' + txt };
+            });
+            break;
+          default: // 'down' or unspecified
+            await page.mouse.wheel(0, delta);
+            break;
         }
+      }
 
-        // Direction-based scroll — use container if page itself doesn't scroll
-        const vh = window.innerHeight;
-        const scrollTarget = useContainer ? container! : null;
+      // Wait for content to settle
+      if (waitForContent) {
+        // Wait for network idle briefly, then DOM stability
+        await page.waitForTimeout(800);
+      }
 
-        if (scrollTarget) {
-          // Scroll the container element
-          switch (dir) {
-            case 'up': scrollTarget.scrollTop -= (amt ?? vh); break;
-            case 'down': scrollTarget.scrollTop += (amt ?? vh); break;
-            case 'top': scrollTarget.scrollTop = 0; break;
-            case 'bottom': scrollTarget.scrollTop = scrollTarget.scrollHeight; break;
-            default: scrollTarget.scrollTop += (amt ?? vh); break;
-          }
-        } else {
-          // Scroll the window
-          switch (dir) {
-            case 'up': window.scrollBy(0, -(amt ?? vh)); break;
-            case 'down': window.scrollBy(0, amt ?? vh); break;
-            case 'top': window.scrollTo(0, 0); break;
-            case 'bottom': window.scrollTo(0, document.documentElement.scrollHeight); break;
-            default: window.scrollBy(0, amt ?? vh); break;
-          }
-        }
+      // Read final state
+      const state = await page.evaluate((prevHeight: number) => {
+        const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+        const pageHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+        const viewportHeight = window.innerHeight;
+        const pct = pageHeight <= viewportHeight ? 100
+          : Math.round((scrollTop / (pageHeight - viewportHeight)) * 100);
 
-        return { scrolled: true };
-      },
-      args: [direction, amount, selector, text],
-    });
-
-    const scrollAction = scrollRes?.[0]?.result as { scrolled: boolean; error?: string } | null;
-    if (!scrollAction) throw Object.assign(new Error('Scroll execution failed'), { code: 'CONTENT_UNAVAILABLE' });
-
-    // Step 3: Wait for content to settle (in service worker — not in content script)
-    if (waitForContent) {
-      await new Promise(r => setTimeout(r, 800));
-    }
-
-    // Step 4: Read final scroll state + visible text (sync, no args)
-    const stateRes = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (prevHeight: number) => {
-        function findScrollContainer(): Element | null {
-          const all = document.querySelectorAll('*');
-          let best: Element | null = null;
-          let bestHeight = 0;
-          for (const el of all) {
-            if (el === document.body || el === document.documentElement) continue;
-            const style = window.getComputedStyle(el);
-            if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 50) {
-              if (el.scrollHeight > bestHeight) { bestHeight = el.scrollHeight; best = el; }
-            }
-          }
-          return best;
-        }
-
-        const container = findScrollContainer();
-        const useContainer = container !== null && document.documentElement.scrollHeight <= window.innerHeight + 10;
-        const target = useContainer ? container! : document.documentElement;
-
-        const scrollTop = useContainer ? container!.scrollTop : (window.pageYOffset || document.documentElement.scrollTop);
-        const pageHeight = target.scrollHeight;
-        const viewportHeight = useContainer ? container!.clientHeight : window.innerHeight;
-        const pct = pageHeight <= viewportHeight ? 100 : Math.round((scrollTop / (pageHeight - viewportHeight)) * 100);
-
-        // Get visible text
+        // Visible text
         const parts: string[] = [];
         let totalLen = 0;
         const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -754,7 +671,6 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
             if (t) { parts.push(t); totalLen += t.length; if (totalLen >= 2000) break; }
           }
         }
-        const visibleText = parts.join(' ').slice(0, 2000);
 
         return {
           scrolledTo: { x: window.pageXOffset || 0, y: Math.round(scrollTop) },
@@ -764,50 +680,38 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
           isAtBottom: Math.ceil(scrollTop + viewportHeight) >= pageHeight - 2,
           isAtTop: scrollTop <= 1,
           contentChanged: pageHeight > prevHeight,
-          visibleText,
-          scrollContainer: useContainer ? 'element' : 'window',
+          visibleText: parts.join(' ').slice(0, 2000),
         };
-      },
-      args: [before.pageHeight],
+      }, beforeHeight);
+
+      return scrollError ? { ...state, found: false, error: scrollError } : state;
     });
 
-    const finalState = stateRes?.[0]?.result;
-    if (!finalState) throw Object.assign(new Error('Cannot read scroll result'), { code: 'CONTENT_UNAVAILABLE' });
-
-    // Merge scroll action result (may have error for text/selector not found)
-    const output = scrollAction.error
-      ? { ...finalState, found: false, error: scrollAction.error }
-      : finalState;
-
-    return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   },
 
   async go_back(params) {
     const tab = await getTab(params.tab_id as number | undefined, false);
     const waitUntil = (params.wait_until as string) ?? 'domcontentloaded';
 
-    await chrome.tabs.goBack(tab.id!);
-    await waitForTabLoad(tab.id!, waitUntil);
+    const result = await withPlaywrightPage(tab.id!, async (page) => {
+      await page.goBack({ waitUntil: waitUntil as 'load' | 'domcontentloaded' });
+      return { success: true, url: page.url(), title: await page.title() };
+    });
 
-    // Brief DOM stability check for SPAs (wait in service worker, not content script)
-    await new Promise(r => setTimeout(r, 300));
-
-    const updated = await chrome.tabs.get(tab.id!);
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, url: updated.url, title: updated.title }) }] };
+    return { content: [{ type: 'text', text: JSON.stringify(result) }] };
   },
 
   async go_forward(params) {
     const tab = await getTab(params.tab_id as number | undefined, false);
     const waitUntil = (params.wait_until as string) ?? 'domcontentloaded';
 
-    await chrome.tabs.goForward(tab.id!);
-    await waitForTabLoad(tab.id!, waitUntil);
+    const result = await withPlaywrightPage(tab.id!, async (page) => {
+      await page.goForward({ waitUntil: waitUntil as 'load' | 'domcontentloaded' });
+      return { success: true, url: page.url(), title: await page.title() };
+    });
 
-    // Brief DOM stability check for SPAs (wait in service worker, not content script)
-    await new Promise(r => setTimeout(r, 300));
-
-    const updated = await chrome.tabs.get(tab.id!);
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, url: updated.url, title: updated.title }) }] };
+    return { content: [{ type: 'text', text: JSON.stringify(result) }] };
   },
 
   async extract_data(params) {
