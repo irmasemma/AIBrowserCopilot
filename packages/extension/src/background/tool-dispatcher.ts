@@ -586,140 +586,200 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
 
   async scroll_page(params) {
     const tab = await getTab(params.tab_id as number | undefined);
-    const direction = params.direction as string | undefined;
-    const amount = params.amount as number | undefined;
-    const selector = params.selector as string | undefined;
-    const text = params.text as string | undefined;
+    const direction = (params.direction as string) ?? null;
+    const amount = (params.amount as number) ?? null;
+    const selector = (params.selector as string) ?? null;
+    const text = (params.text as string) ?? null;
     const waitForContent = (params.wait_for_content as boolean) ?? true;
+    const tabId = tab.id!;
 
-    const result = await chrome.scripting.executeScript({
-      target: { tabId: tab.id! },
-      func: (dir: string | undefined, amt: number | undefined, sel: string | undefined, txt: string | undefined, doWait: boolean) => {
-        // --- helpers ---
-        function getScrollState() {
-          const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-          const pageHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-          const viewportHeight = window.innerHeight;
-          return {
-            scrolledTo: { x: window.pageXOffset || 0, y: scrollTop },
-            pageHeight,
-            viewportHeight,
-            scrollPercentage: pageHeight <= viewportHeight ? 100 : Math.round((scrollTop / (pageHeight - viewportHeight)) * 100),
-            isAtBottom: Math.ceil(scrollTop + viewportHeight) >= pageHeight - 1,
-            isAtTop: scrollTop <= 0,
-          };
-        }
-
-        function getVisibleText(maxLen = 2000): string {
-          const top = window.pageYOffset || 0;
-          const bottom = top + window.innerHeight;
-          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-          const parts: string[] = [];
-          let totalLen = 0;
-          while (walker.nextNode()) {
-            const node = walker.currentNode;
-            const parent = node.parentElement;
-            if (!parent) continue;
-            const rect = parent.getBoundingClientRect();
-            // Element intersects viewport
-            if (rect.bottom >= 0 && rect.top <= window.innerHeight) {
-              const t = (node.textContent ?? '').trim();
-              if (t) {
-                parts.push(t);
-                totalLen += t.length;
-                if (totalLen >= maxLen) break;
+    // Step 1: Get page height before scroll (sync, no args issues)
+    const beforeRes = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        // Find the main scrollable container (for virtualized lists: Threads, Twitter, Reddit, etc.)
+        function findScrollContainer(): Element | null {
+          const all = document.querySelectorAll('*');
+          let best: Element | null = null;
+          let bestHeight = 0;
+          for (const el of all) {
+            if (el === document.body || el === document.documentElement) continue;
+            const style = window.getComputedStyle(el);
+            if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 50) {
+              // Prefer the tallest scrollable container (the main feed)
+              if (el.scrollHeight > bestHeight) {
+                bestHeight = el.scrollHeight;
+                best = el;
               }
             }
           }
-          return parts.join(' ').slice(0, maxLen);
+          return best;
         }
 
-        function waitForSettle(timeoutMs = 3000): Promise<{ contentChanged: boolean }> {
-          return new Promise((resolve) => {
-            const startHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-            let quietTimer: ReturnType<typeof setTimeout>;
-            const safetyTimer = setTimeout(() => {
-              observer.disconnect();
-              const newHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-              resolve({ contentChanged: newHeight > startHeight });
-            }, timeoutMs);
+        const container = findScrollContainer();
+        const useContainer = container !== null && document.documentElement.scrollHeight <= window.innerHeight + 10;
+        const target = useContainer ? container! : document.documentElement;
 
-            const observer = new MutationObserver(() => {
-              clearTimeout(quietTimer);
-              quietTimer = setTimeout(() => {
-                observer.disconnect();
-                clearTimeout(safetyTimer);
-                const newHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-                resolve({ contentChanged: newHeight > startHeight });
-              }, 500);
-            });
-
-            observer.observe(document.body, { childList: true, subtree: true });
-
-            // If no mutations at all within 600ms, resolve
-            quietTimer = setTimeout(() => {
-              observer.disconnect();
-              clearTimeout(safetyTimer);
-              const newHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-              resolve({ contentChanged: newHeight > startHeight });
-            }, 600);
-          });
-        }
-
-        // --- scroll logic (priority: selector > text > direction > default down) ---
-        async function doScroll() {
-          if (sel) {
-            // Scroll to CSS selector
-            const el = document.querySelector(sel);
-            if (!el) return { ...getScrollState(), contentChanged: false, visibleText: getVisibleText(), found: false, error: 'Selector not found: ' + sel };
-            el.scrollIntoView({ block: 'center', behavior: 'instant' });
-          } else if (txt) {
-            // Scroll to text
-            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-            const target = txt.toLowerCase();
-            let found = false;
-            while (walker.nextNode()) {
-              const content = walker.currentNode.textContent ?? '';
-              if (content.toLowerCase().includes(target)) {
-                const parent = walker.currentNode.parentElement;
-                if (parent) {
-                  parent.scrollIntoView({ block: 'center', behavior: 'instant' });
-                  found = true;
-                }
-                break;
-              }
-            }
-            if (!found) return { ...getScrollState(), contentChanged: false, visibleText: getVisibleText(), found: false, error: 'Text not found on page: ' + txt };
-          } else {
-            // Direction-based scroll
-            const vh = window.innerHeight;
-            switch (dir) {
-              case 'up': window.scrollBy(0, -(amt ?? vh)); break;
-              case 'down': window.scrollBy(0, amt ?? vh); break;
-              case 'top': window.scrollTo(0, 0); break;
-              case 'bottom': window.scrollTo(0, document.documentElement.scrollHeight); break;
-              default: window.scrollBy(0, amt ?? vh); break; // default: scroll down
-            }
-          }
-
-          // Wait for content to settle if requested
-          let contentChanged = false;
-          if (doWait) {
-            const settle = await waitForSettle();
-            contentChanged = settle.contentChanged;
-          }
-
-          return { ...getScrollState(), contentChanged, visibleText: getVisibleText() };
-        }
-
-        return doScroll();
+        return {
+          pageHeight: target.scrollHeight,
+          scrollTop: useContainer ? container!.scrollTop : (window.pageYOffset || document.documentElement.scrollTop),
+          useContainer,
+        };
       },
-      args: [direction, amount, selector, text, waitForContent],
+    });
+    const before = beforeRes?.[0]?.result as { pageHeight: number; scrollTop: number; useContainer: boolean } | null;
+    if (!before) throw Object.assign(new Error('Cannot read page state'), { code: 'CONTENT_UNAVAILABLE' });
+
+    // Step 2: Perform the scroll (sync — all args are null-safe primitives)
+    const scrollRes = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (dir: string | null, amt: number | null, sel: string | null, txt: string | null) => {
+        // Find scrollable container (same logic as step 1)
+        function findScrollContainer(): Element | null {
+          const all = document.querySelectorAll('*');
+          let best: Element | null = null;
+          let bestHeight = 0;
+          for (const el of all) {
+            if (el === document.body || el === document.documentElement) continue;
+            const style = window.getComputedStyle(el);
+            if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 50) {
+              if (el.scrollHeight > bestHeight) { bestHeight = el.scrollHeight; best = el; }
+            }
+          }
+          return best;
+        }
+
+        const container = findScrollContainer();
+        const useContainer = container !== null && document.documentElement.scrollHeight <= window.innerHeight + 10;
+
+        // Priority: selector > text > direction > default (scroll down)
+        if (sel) {
+          const el = document.querySelector(sel);
+          if (!el) return { scrolled: false, error: 'Selector not found: ' + sel };
+          el.scrollIntoView({ block: 'center', behavior: 'instant' });
+          return { scrolled: true };
+        }
+
+        if (txt) {
+          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+          const target = txt.toLowerCase();
+          while (walker.nextNode()) {
+            const content = walker.currentNode.textContent ?? '';
+            if (content.toLowerCase().includes(target)) {
+              const parent = walker.currentNode.parentElement;
+              if (parent) {
+                parent.scrollIntoView({ block: 'center', behavior: 'instant' });
+                return { scrolled: true };
+              }
+            }
+          }
+          return { scrolled: false, error: 'Text not found on page: ' + txt };
+        }
+
+        // Direction-based scroll — use container if page itself doesn't scroll
+        const vh = window.innerHeight;
+        const scrollTarget = useContainer ? container! : null;
+
+        if (scrollTarget) {
+          // Scroll the container element
+          switch (dir) {
+            case 'up': scrollTarget.scrollTop -= (amt ?? vh); break;
+            case 'down': scrollTarget.scrollTop += (amt ?? vh); break;
+            case 'top': scrollTarget.scrollTop = 0; break;
+            case 'bottom': scrollTarget.scrollTop = scrollTarget.scrollHeight; break;
+            default: scrollTarget.scrollTop += (amt ?? vh); break;
+          }
+        } else {
+          // Scroll the window
+          switch (dir) {
+            case 'up': window.scrollBy(0, -(amt ?? vh)); break;
+            case 'down': window.scrollBy(0, amt ?? vh); break;
+            case 'top': window.scrollTo(0, 0); break;
+            case 'bottom': window.scrollTo(0, document.documentElement.scrollHeight); break;
+            default: window.scrollBy(0, amt ?? vh); break;
+          }
+        }
+
+        return { scrolled: true };
+      },
+      args: [direction, amount, selector, text],
     });
 
-    const scrollResult = result?.[0]?.result;
-    if (!scrollResult) throw Object.assign(new Error('Scroll failed'), { code: 'CONTENT_UNAVAILABLE' });
-    return { content: [{ type: 'text', text: JSON.stringify(scrollResult, null, 2) }] };
+    const scrollAction = scrollRes?.[0]?.result as { scrolled: boolean; error?: string } | null;
+    if (!scrollAction) throw Object.assign(new Error('Scroll execution failed'), { code: 'CONTENT_UNAVAILABLE' });
+
+    // Step 3: Wait for content to settle (in service worker — not in content script)
+    if (waitForContent) {
+      await new Promise(r => setTimeout(r, 800));
+    }
+
+    // Step 4: Read final scroll state + visible text (sync, no args)
+    const stateRes = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (prevHeight: number) => {
+        function findScrollContainer(): Element | null {
+          const all = document.querySelectorAll('*');
+          let best: Element | null = null;
+          let bestHeight = 0;
+          for (const el of all) {
+            if (el === document.body || el === document.documentElement) continue;
+            const style = window.getComputedStyle(el);
+            if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 50) {
+              if (el.scrollHeight > bestHeight) { bestHeight = el.scrollHeight; best = el; }
+            }
+          }
+          return best;
+        }
+
+        const container = findScrollContainer();
+        const useContainer = container !== null && document.documentElement.scrollHeight <= window.innerHeight + 10;
+        const target = useContainer ? container! : document.documentElement;
+
+        const scrollTop = useContainer ? container!.scrollTop : (window.pageYOffset || document.documentElement.scrollTop);
+        const pageHeight = target.scrollHeight;
+        const viewportHeight = useContainer ? container!.clientHeight : window.innerHeight;
+        const pct = pageHeight <= viewportHeight ? 100 : Math.round((scrollTop / (pageHeight - viewportHeight)) * 100);
+
+        // Get visible text
+        const parts: string[] = [];
+        let totalLen = 0;
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          const node = walker.currentNode;
+          const parent = node.parentElement;
+          if (!parent) continue;
+          const rect = parent.getBoundingClientRect();
+          if (rect.bottom >= 0 && rect.top <= window.innerHeight) {
+            const t = (node.textContent ?? '').trim();
+            if (t) { parts.push(t); totalLen += t.length; if (totalLen >= 2000) break; }
+          }
+        }
+        const visibleText = parts.join(' ').slice(0, 2000);
+
+        return {
+          scrolledTo: { x: window.pageXOffset || 0, y: Math.round(scrollTop) },
+          pageHeight,
+          viewportHeight,
+          scrollPercentage: Math.min(100, Math.max(0, pct)),
+          isAtBottom: Math.ceil(scrollTop + viewportHeight) >= pageHeight - 2,
+          isAtTop: scrollTop <= 1,
+          contentChanged: pageHeight > prevHeight,
+          visibleText,
+          scrollContainer: useContainer ? 'element' : 'window',
+        };
+      },
+      args: [before.pageHeight],
+    });
+
+    const finalState = stateRes?.[0]?.result;
+    if (!finalState) throw Object.assign(new Error('Cannot read scroll result'), { code: 'CONTENT_UNAVAILABLE' });
+
+    // Merge scroll action result (may have error for text/selector not found)
+    const output = scrollAction.error
+      ? { ...finalState, found: false, error: scrollAction.error }
+      : finalState;
+
+    return { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] };
   },
 
   async go_back(params) {
@@ -729,11 +789,8 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
     await chrome.tabs.goBack(tab.id!);
     await waitForTabLoad(tab.id!, waitUntil);
 
-    // Brief DOM stability check for SPAs
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id! },
-      func: () => new Promise<void>(r => setTimeout(r, 300)),
-    });
+    // Brief DOM stability check for SPAs (wait in service worker, not content script)
+    await new Promise(r => setTimeout(r, 300));
 
     const updated = await chrome.tabs.get(tab.id!);
     return { content: [{ type: 'text', text: JSON.stringify({ success: true, url: updated.url, title: updated.title }) }] };
@@ -746,11 +803,8 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
     await chrome.tabs.goForward(tab.id!);
     await waitForTabLoad(tab.id!, waitUntil);
 
-    // Brief DOM stability check for SPAs
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id! },
-      func: () => new Promise<void>(r => setTimeout(r, 300)),
-    });
+    // Brief DOM stability check for SPAs (wait in service worker, not content script)
+    await new Promise(r => setTimeout(r, 300));
 
     const updated = await chrome.tabs.get(tab.id!);
     return { content: [{ type: 'text', text: JSON.stringify({ success: true, url: updated.url, title: updated.title }) }] };
