@@ -4,7 +4,6 @@ import { useStore, initStoreFromStorage, listenForUpdates } from '../../sidepane
 import { ConnectionHeader } from '../../sidepanel/components/connection-header.js';
 import { ToolCard } from '../../sidepanel/components/tool-card.js';
 import { ActivityEntryComponent } from '../../sidepanel/components/activity-entry.js';
-import { ErrorCard } from '../../sidepanel/components/error-card.js';
 import { SetupWizard } from '../../sidepanel/components/setup-wizard.js';
 import { useLicense } from '../../sidepanel/hooks/use-license.js';
 import { TOOL_DEFINITIONS } from '../../shared/tool-definitions.js';
@@ -13,7 +12,7 @@ const SUPPORT_URL = 'https://github.com/irmasemma/AIBrowserCopilot/issues';
 const FAQ_URL = 'https://github.com/irmasemma/AIBrowserCopilot/wiki/FAQ';
 
 const App = () => {
-  const connection = useStore((s) => s.connection);
+  const connectionContext = useStore((s) => s.connectionContext);
   const activityLog = useStore((s) => s.activityLog);
   const toolPermissions = useStore((s) => s.toolPermissions);
   const toggleTool = useStore((s) => s.toggleTool);
@@ -26,12 +25,25 @@ const App = () => {
   }, []);
 
   const hasLicense = license.hasLicense;
-  const needsSetup = connection.state === 'setup-needed' && !setupComplete;
+  const { state, diagnosticReason, lastConnectedAt } = connectionContext;
+
+  // Show setup wizard when:
+  // 1. NM helper not installed (fresh install, no native host) AND not manually dismissed
+  // 2. Disconnected with no prior connection AND no specific diagnostic (very first launch)
+  const needsSetup = !setupComplete && (
+    diagnosticReason === 'helper_unavailable' ||
+    (state === 'disconnected' && !lastConnectedAt && !diagnosticReason)
+  );
+
+  // Show "start your AI tool" guidance when helper is installed but nothing is running
+  const waitingForAITool = !needsSetup && (
+    state === 'disconnected' || state === 'reconnecting'
+  ) && diagnosticReason === 'no_lock_file';
 
   if (needsSetup) {
     return (
       <div class="flex flex-col h-screen bg-neutral-50">
-        <ConnectionHeader state={connection.state} connectionInfo={connection} />
+        <ConnectionHeader />
         <div class="flex-1 overflow-y-auto">
           <SetupWizard onComplete={() => setSetupComplete(true)} />
         </div>
@@ -41,23 +53,42 @@ const App = () => {
 
   return (
     <div class="flex flex-col h-screen bg-neutral-50">
-      <ConnectionHeader state={connection.state} connectionInfo={connection} />
+      <ConnectionHeader />
       <div class="flex-1 overflow-y-auto">
-        {connection.state === 'waiting' && (
-          <ErrorCard
-            message="Waiting for AI tool — start Claude Code, VS Code, or another MCP host to connect."
-            actionLabel="Retry Now"
-            onAction={() => chrome.runtime.sendMessage({ type: 'retry_connection' })}
-            helpUrl={FAQ_URL}
-          />
+        {waitingForAITool && (
+          <div class="mx-3 my-2 p-3 rounded border-l-4 border-amber-300 bg-amber-50" role="status">
+            <p class="text-sm font-medium text-amber-900 mb-1">Waiting for AI tool</p>
+            <p class="text-xs text-amber-700 mb-2">
+              Open an AI tool that uses MCP to connect. The extension will detect it automatically.
+            </p>
+            <div class="text-xs text-amber-700 space-y-1">
+              <p class="font-medium">Supported tools:</p>
+              <ul class="list-disc list-inside space-y-0.5 text-amber-600">
+                <li>Claude Code (terminal)</li>
+                <li>VS Code with Copilot or Continue</li>
+                <li>Cursor</li>
+                <li>Windsurf</li>
+                <li>Any MCP-compatible AI tool</li>
+              </ul>
+            </div>
+            <button
+              class="mt-2 text-xs font-medium text-white bg-amber-500 px-3 py-1.5 rounded hover:bg-amber-600"
+              onClick={() => chrome.runtime.sendMessage({ type: 'retry_connection' })}
+            >
+              Check Again
+            </button>
+          </div>
         )}
-        {connection.state === 'disconnected' && connection.error && (
-          <ErrorCard
-            message={connection.error}
-            actionLabel="Reconnect"
-            onAction={() => chrome.runtime.sendMessage({ type: 'retry_connection' })}
-            helpUrl={FAQ_URL}
-          />
+        {!waitingForAITool && state === 'disconnected' && connectionContext.error && (
+          <div class="mx-3 my-2 p-3 rounded border-l-4 border-red-300 bg-red-50" role="alert">
+            <p class="text-sm text-red-800 mb-2">{connectionContext.error}</p>
+            <button
+              class="text-xs font-medium text-white bg-red-500 px-3 py-1 rounded hover:bg-red-600"
+              onClick={() => chrome.runtime.sendMessage({ type: 'retry_connection' })}
+            >
+              Reconnect
+            </button>
+          </div>
         )}
         <section class="py-3">
           <h2 class="px-3 text-sm font-semibold text-neutral-500 mb-1">Tools</h2>
@@ -87,7 +118,7 @@ const App = () => {
         </section>
         <section id="support-section" class="py-3 border-t border-neutral-200 px-3">
           <a href={SUPPORT_URL} target="_blank" rel="noopener" class="text-xs text-brand-primary hover:underline">Report a Problem</a>
-          <span class="text-xs text-neutral-300 mx-2">·</span>
+          <span class="text-xs text-neutral-300 mx-2">{'\u00B7'}</span>
           <a href={FAQ_URL} target="_blank" rel="noopener" class="text-xs text-brand-primary hover:underline">Is this safe?</a>
         </section>
       </div>
@@ -97,7 +128,7 @@ const App = () => {
             class="w-full text-sm font-medium text-white bg-brand-primary py-2 rounded hover:bg-brand-primary-dark"
             onClick={() => chrome.tabs.create({ url: 'https://github.com/irmasemma/AIBrowserCopilot/wiki/Pro' })}
           >
-            Upgrade to Pro — $7/mo
+            Upgrade to Pro
           </button>
         </div>
       )}
