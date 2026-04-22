@@ -24780,6 +24780,52 @@ var extractData = {
   }
 };
 
+// src/tools/scroll-page.ts
+var scrollPage = {
+  name: "scroll_page",
+  description: "Scroll the page in a direction, to a CSS selector, or to specific text. Returns scroll position and newly visible content. Use this to read content below the fold, find elements on long pages, or handle infinite scroll.",
+  tier: "pro",
+  inputSchema: {
+    direction: external_exports.enum(["up", "down", "top", "bottom"]).optional().describe('Scroll direction. "up"/"down" scroll by one viewport height. "top"/"bottom" scroll to page extremes.'),
+    amount: external_exports.number().optional().describe("Pixels to scroll (overrides direction default of one viewport height). Positive = down, negative = up."),
+    selector: external_exports.string().optional().describe("CSS selector \u2014 scroll element into center of viewport."),
+    text: external_exports.string().optional().describe("Find text on page (case-insensitive) and scroll to it."),
+    wait_for_content: external_exports.boolean().optional().default(true).describe("Wait for lazy-loaded content to settle after scroll. Default: true."),
+    tab_id: external_exports.number().optional().describe("Specific tab ID (defaults to active tab)")
+  },
+  async execute() {
+    return { content: [{ type: "text", text: "[Stub] scroll_page: Not connected to browser." }] };
+  }
+};
+
+// src/tools/go-back.ts
+var goBack = {
+  name: "go_back",
+  description: "Navigate back in browser history (like clicking the back button). Use this when the user wants to return to a previous page.",
+  tier: "pro",
+  inputSchema: {
+    wait_until: external_exports.enum(["load", "domcontentloaded"]).optional().default("domcontentloaded").describe('When to consider navigation complete. Default: "domcontentloaded".'),
+    tab_id: external_exports.number().optional().describe("Specific tab ID (defaults to active tab)")
+  },
+  async execute() {
+    return { content: [{ type: "text", text: "[Stub] go_back: Not connected to browser." }] };
+  }
+};
+
+// src/tools/go-forward.ts
+var goForward = {
+  name: "go_forward",
+  description: "Navigate forward in browser history. Use this after going back to return to where you were.",
+  tier: "pro",
+  inputSchema: {
+    wait_until: external_exports.enum(["load", "domcontentloaded"]).optional().default("domcontentloaded").describe('When to consider navigation complete. Default: "domcontentloaded".'),
+    tab_id: external_exports.number().optional().describe("Specific tab ID (defaults to active tab)")
+  },
+  async execute() {
+    return { content: [{ type: "text", text: "[Stub] go_forward: Not connected to browser." }] };
+  }
+};
+
 // src/tools/index.ts
 var toolRegistry = [
   getPageContent,
@@ -24791,7 +24837,10 @@ var toolRegistry = [
   clickElement,
   extractTable,
   readForm,
-  extractData
+  extractData,
+  scrollPage,
+  goBack,
+  goForward
 ];
 
 // ../../node_modules/ws/wrapper.mjs

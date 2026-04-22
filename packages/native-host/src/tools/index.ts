@@ -9,6 +9,9 @@ import { clickElement } from './click-element.js';
 import { extractTable } from './extract-table.js';
 import { readForm } from './read-form.js';
 import { extractData } from './extract-data.js';
+import { scrollPage } from './scroll-page.js';
+import { goBack } from './go-back.js';
+import { goForward } from './go-forward.js';
 
 export const toolRegistry: ToolPlugin[] = [
   getPageContent,
@@ -21,4 +24,7 @@ export const toolRegistry: ToolPlugin[] = [
   extractTable,
   readForm,
   extractData,
+  scrollPage,
+  goBack,
+  goForward,
 ];

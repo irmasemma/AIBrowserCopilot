@@ -47,6 +47,24 @@ const executeContentScript = async <T>(tabId: number, func: () => T): Promise<T>
   return results[0].result as T;
 };
 
+const waitForTabLoad = (tabId: number, waitUntil: string = 'domcontentloaded', timeoutMs = 10_000): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+    };
+    const timer = setTimeout(() => { cleanup(); resolve(); }, timeoutMs); // Resolve on timeout, don't fail
+    const targetStatus = waitUntil === 'load' ? 'complete' : 'loading'; // 'loading' fires on domcontentloaded
+    let seenLoading = false;
+    const onUpdated = (id: number, change: chrome.tabs.TabChangeInfo) => {
+      if (id !== tabId) return;
+      if (change.status === 'loading') seenLoading = true;
+      if (seenLoading && change.status === 'complete') { cleanup(); resolve(); }
+    };
+    chrome.tabs.onUpdated.addListener(onUpdated);
+  });
+};
+
 // Tool implementations
 const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown>> = {
   async get_page_content(params) {
@@ -68,7 +86,18 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
       ? await executeContentScript(tab.id!, () => document.body?.innerHTML ?? '')
       : content;
 
-    return { content: [{ type: 'text', text: result }] };
+    // AD-22: Append scroll state so AI knows there's content below the fold
+    const scrollInfo = await executeContentScript(tab.id!, () => {
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const pageHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+      const viewportHeight = window.innerHeight;
+      const viewBottom = scrollTop + viewportHeight;
+      const pct = pageHeight <= viewportHeight ? 100 : Math.round((scrollTop / (pageHeight - viewportHeight)) * 100);
+      const moreBelow = viewBottom < pageHeight - 1;
+      return `\n\n--- Scroll Position ---\nViewing: ${Math.round(scrollTop)}-${Math.round(viewBottom)} of ${pageHeight}px (${pct}%)\nMore content below: ${moreBelow ? 'yes' : 'no'}`;
+    });
+
+    return { content: [{ type: 'text', text: result + scrollInfo }] };
   },
 
   async take_screenshot(params) {
@@ -409,11 +438,21 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
     const result = await chrome.scripting.executeScript({
       target: { tabId: tab.id! },
       func: (sel: string | null, txt: string | null, idx: number) => {
+        // AD-21: Auto-scroll element into view before clicking
+        function ensureVisible(el: Element): void {
+          const rect = el.getBoundingClientRect();
+          const inViewport = rect.top >= 0 && rect.bottom <= window.innerHeight && rect.left >= 0 && rect.right <= window.innerWidth;
+          if (!inViewport) {
+            el.scrollIntoView({ block: 'center', behavior: 'instant' });
+          }
+        }
+
         // By CSS selector — return the nth match
         if (sel) {
           const matches = Array.from(document.querySelectorAll(sel));
           const el = matches[idx];
           if (!el) return null;
+          ensureVisible(el);
           (el as HTMLElement).click();
           return {
             tag: el.tagName,
@@ -438,6 +477,7 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
           });
           if (exactClickable.length > idx) {
             const el = exactClickable[idx] as HTMLElement;
+            ensureVisible(el);
             el.click();
             return {
               tag: el.tagName,
@@ -455,6 +495,7 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
           });
           if (partialClickable.length > idx) {
             const el = partialClickable[idx] as HTMLElement;
+            ensureVisible(el);
             el.click();
             return {
               tag: el.tagName,
@@ -473,6 +514,7 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
           });
           if (anyMatch.length > idx) {
             const el = anyMatch[idx] as HTMLElement;
+            ensureVisible(el);
             el.click();
             return {
               tag: el.tagName,
@@ -540,6 +582,178 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
     }
 
     return { content: [{ type: 'text', text: JSON.stringify(formData, null, 2) }] };
+  },
+
+  async scroll_page(params) {
+    const tab = await getTab(params.tab_id as number | undefined);
+    const direction = params.direction as string | undefined;
+    const amount = params.amount as number | undefined;
+    const selector = params.selector as string | undefined;
+    const text = params.text as string | undefined;
+    const waitForContent = (params.wait_for_content as boolean) ?? true;
+
+    const result = await chrome.scripting.executeScript({
+      target: { tabId: tab.id! },
+      func: (dir: string | undefined, amt: number | undefined, sel: string | undefined, txt: string | undefined, doWait: boolean) => {
+        // --- helpers ---
+        function getScrollState() {
+          const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+          const pageHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+          const viewportHeight = window.innerHeight;
+          return {
+            scrolledTo: { x: window.pageXOffset || 0, y: scrollTop },
+            pageHeight,
+            viewportHeight,
+            scrollPercentage: pageHeight <= viewportHeight ? 100 : Math.round((scrollTop / (pageHeight - viewportHeight)) * 100),
+            isAtBottom: Math.ceil(scrollTop + viewportHeight) >= pageHeight - 1,
+            isAtTop: scrollTop <= 0,
+          };
+        }
+
+        function getVisibleText(maxLen = 2000): string {
+          const top = window.pageYOffset || 0;
+          const bottom = top + window.innerHeight;
+          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+          const parts: string[] = [];
+          let totalLen = 0;
+          while (walker.nextNode()) {
+            const node = walker.currentNode;
+            const parent = node.parentElement;
+            if (!parent) continue;
+            const rect = parent.getBoundingClientRect();
+            // Element intersects viewport
+            if (rect.bottom >= 0 && rect.top <= window.innerHeight) {
+              const t = (node.textContent ?? '').trim();
+              if (t) {
+                parts.push(t);
+                totalLen += t.length;
+                if (totalLen >= maxLen) break;
+              }
+            }
+          }
+          return parts.join(' ').slice(0, maxLen);
+        }
+
+        function waitForSettle(timeoutMs = 3000): Promise<{ contentChanged: boolean }> {
+          return new Promise((resolve) => {
+            const startHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+            let quietTimer: ReturnType<typeof setTimeout>;
+            const safetyTimer = setTimeout(() => {
+              observer.disconnect();
+              const newHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+              resolve({ contentChanged: newHeight > startHeight });
+            }, timeoutMs);
+
+            const observer = new MutationObserver(() => {
+              clearTimeout(quietTimer);
+              quietTimer = setTimeout(() => {
+                observer.disconnect();
+                clearTimeout(safetyTimer);
+                const newHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+                resolve({ contentChanged: newHeight > startHeight });
+              }, 500);
+            });
+
+            observer.observe(document.body, { childList: true, subtree: true });
+
+            // If no mutations at all within 600ms, resolve
+            quietTimer = setTimeout(() => {
+              observer.disconnect();
+              clearTimeout(safetyTimer);
+              const newHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+              resolve({ contentChanged: newHeight > startHeight });
+            }, 600);
+          });
+        }
+
+        // --- scroll logic (priority: selector > text > direction > default down) ---
+        async function doScroll() {
+          if (sel) {
+            // Scroll to CSS selector
+            const el = document.querySelector(sel);
+            if (!el) return { ...getScrollState(), contentChanged: false, visibleText: getVisibleText(), found: false, error: 'Selector not found: ' + sel };
+            el.scrollIntoView({ block: 'center', behavior: 'instant' });
+          } else if (txt) {
+            // Scroll to text
+            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+            const target = txt.toLowerCase();
+            let found = false;
+            while (walker.nextNode()) {
+              const content = walker.currentNode.textContent ?? '';
+              if (content.toLowerCase().includes(target)) {
+                const parent = walker.currentNode.parentElement;
+                if (parent) {
+                  parent.scrollIntoView({ block: 'center', behavior: 'instant' });
+                  found = true;
+                }
+                break;
+              }
+            }
+            if (!found) return { ...getScrollState(), contentChanged: false, visibleText: getVisibleText(), found: false, error: 'Text not found on page: ' + txt };
+          } else {
+            // Direction-based scroll
+            const vh = window.innerHeight;
+            switch (dir) {
+              case 'up': window.scrollBy(0, -(amt ?? vh)); break;
+              case 'down': window.scrollBy(0, amt ?? vh); break;
+              case 'top': window.scrollTo(0, 0); break;
+              case 'bottom': window.scrollTo(0, document.documentElement.scrollHeight); break;
+              default: window.scrollBy(0, amt ?? vh); break; // default: scroll down
+            }
+          }
+
+          // Wait for content to settle if requested
+          let contentChanged = false;
+          if (doWait) {
+            const settle = await waitForSettle();
+            contentChanged = settle.contentChanged;
+          }
+
+          return { ...getScrollState(), contentChanged, visibleText: getVisibleText() };
+        }
+
+        return doScroll();
+      },
+      args: [direction, amount, selector, text, waitForContent],
+    });
+
+    const scrollResult = result?.[0]?.result;
+    if (!scrollResult) throw Object.assign(new Error('Scroll failed'), { code: 'CONTENT_UNAVAILABLE' });
+    return { content: [{ type: 'text', text: JSON.stringify(scrollResult, null, 2) }] };
+  },
+
+  async go_back(params) {
+    const tab = await getTab(params.tab_id as number | undefined, false);
+    const waitUntil = (params.wait_until as string) ?? 'domcontentloaded';
+
+    await chrome.tabs.goBack(tab.id!);
+    await waitForTabLoad(tab.id!, waitUntil);
+
+    // Brief DOM stability check for SPAs
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id! },
+      func: () => new Promise<void>(r => setTimeout(r, 300)),
+    });
+
+    const updated = await chrome.tabs.get(tab.id!);
+    return { content: [{ type: 'text', text: JSON.stringify({ success: true, url: updated.url, title: updated.title }) }] };
+  },
+
+  async go_forward(params) {
+    const tab = await getTab(params.tab_id as number | undefined, false);
+    const waitUntil = (params.wait_until as string) ?? 'domcontentloaded';
+
+    await chrome.tabs.goForward(tab.id!);
+    await waitForTabLoad(tab.id!, waitUntil);
+
+    // Brief DOM stability check for SPAs
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id! },
+      func: () => new Promise<void>(r => setTimeout(r, 300)),
+    });
+
+    const updated = await chrome.tabs.get(tab.id!);
+    return { content: [{ type: 'text', text: JSON.stringify({ success: true, url: updated.url, title: updated.title }) }] };
   },
 
   async extract_data(params) {
