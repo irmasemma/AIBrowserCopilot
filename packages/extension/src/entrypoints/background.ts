@@ -7,7 +7,7 @@ import {
   getUnconfiguredTools,
   updateBadge,
 } from '../background/tool-scanner';
-import type { ToolScanResult, ConnectionContext } from '../shared/types';
+import type { ToolScanResult } from '../shared/types';
 
 const ALARM_NAME = 'connection-check';
 const ALARM_PERIOD_MINUTES = 0.5; // 30s — Chrome minimum for periodic alarms
@@ -73,22 +73,16 @@ export default defineBackground(() => {
     }
   });
 
-  // AD-16: Reconcile-before-connect on SW startup
-  // When SW restarts after termination, in-memory relay is always null.
-  // If persisted state says "connected", it's stale. Reconcile first.
+  // AD-16: SW startup — re-establish the connection from scratch.
+  // When the SW restarts (after termination, extension reload, or Chrome restart) the
+  // in-memory relay is always null and the in-memory context starts as 'disconnected'.
+  // The persisted `connectionContext` may still claim 'connected', but that's stale —
+  // the only way to know if the native host is still up is to actually try connecting.
+  // We always call connect(); discovery + WS will either succeed (state→connected) or
+  // fail quickly (state→reconnecting, alarm retries via backoff).
   (async () => {
     try {
-      const stored = await chrome.storage.local.get('connectionContext');
-      const ctx = stored.connectionContext as ConnectionContext | undefined;
-
-      if (ctx && (ctx.state === 'connected' || ctx.state === 'degraded')) {
-        // Persisted state claims connected but relay is null (fresh SW start).
-        // Reconcile: validate lock file, reconnect or transition to disconnected.
-        await manager.reconcile();
-      } else {
-        // Normal startup — discover and connect
-        await manager.connect();
-      }
+      await manager.connect();
     } catch {
       // Connection failed (native host not running yet) — normal.
       // Alarm-based reconciliation will keep checking.
@@ -108,6 +102,18 @@ export default defineBackground(() => {
       manager.reconcile()
         .then(() => sendResponse({ done: true }))
         .catch(() => sendResponse({ done: false }));
+      return true; // async response
+    }
+
+    // In-extension chat agent dispatches tools via the same handler that MCP uses.
+    if (message?.type === 'dispatch_tool' && typeof message.name === 'string') {
+      dispatchTool(message.name, (message.params ?? {}) as Record<string, unknown>)
+        .then((result) => sendResponse({ ok: true, result }))
+        .catch((error: unknown) => {
+          const errMessage = error instanceof Error ? error.message : 'Unknown error';
+          const code = (error as { code?: string })?.code ?? 'CONTENT_UNAVAILABLE';
+          sendResponse({ ok: false, error: { message: errMessage, code } });
+        });
       return true; // async response
     }
 

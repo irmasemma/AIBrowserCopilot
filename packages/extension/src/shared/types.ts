@@ -60,9 +60,15 @@ export const STALE_THRESHOLD_MS = 40_000;
 
 export function getDisplayState(ctx: ConnectionContext): DisplayState {
   if (ctx.state === 'connected' || ctx.state === 'degraded') {
-    const age = Date.now() - (ctx.lastVerifiedAt ?? 0);
-    if (age > STALE_THRESHOLD_MS) {
-      return 'stale';
+    // lastVerifiedAt === 0 means we have never verified (e.g. brand-new SW that
+    // hasn't received its first heartbeat yet). That is NOT staleness — staleness
+    // means a previously-good connection has gone quiet. Fall through to the real
+    // state and let the heartbeat/reconcile loop decide.
+    if (ctx.lastVerifiedAt > 0) {
+      const age = Date.now() - ctx.lastVerifiedAt;
+      if (age > STALE_THRESHOLD_MS) {
+        return 'stale';
+      }
     }
   }
   return ctx.state;

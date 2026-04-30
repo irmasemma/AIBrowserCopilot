@@ -23,9 +23,10 @@ const getTab = async (tabId?: number, checkBlocked = true): Promise<chrome.tabs.
 
   if (tabId) {
     tab = await chrome.tabs.get(tabId);
-    // Auto-activate the targeted tab so the user sees what we're working on
+    // Activate the targeted tab inside its window (needed for captureVisibleTab and so
+    // the right tab is showing when the user looks at Chrome). Do NOT focus the window —
+    // that would steal OS focus from whatever app the user is currently in.
     await chrome.tabs.update(tab.id!, { active: true });
-    if (tab.windowId) await chrome.windows.update(tab.windowId, { focused: true });
   } else {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!activeTab?.id) throw Object.assign(new Error('No active tab found'), { code: 'TAB_NOT_FOUND' });

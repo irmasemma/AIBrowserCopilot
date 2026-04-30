@@ -21,7 +21,10 @@ export const ConnectionHeader: FunctionalComponent = () => {
 
   const subtitleText = (): string | null => {
     if (displayState === 'stale') {
-      const age = Date.now() - (connectionContext.lastVerifiedAt ?? 0);
+      // Defensive: lastVerifiedAt === 0 should be ruled out by getDisplayState, but if
+      // it slips through (e.g. mid-state-transition), don't render "29 million minutes ago".
+      if (!connectionContext.lastVerifiedAt) return 'Verifying...';
+      const age = Date.now() - connectionContext.lastVerifiedAt;
       const ago = age < 60_000
         ? `${Math.round(age / 1000)}s ago`
         : `${Math.round(age / 60_000)}m ago`;
