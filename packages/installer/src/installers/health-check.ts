@@ -1,7 +1,7 @@
 import { accessSync, constants as fsConstants } from 'node:fs';
 import { join } from 'node:path';
 import type { PlatformInfo } from '../shared/platform.js';
-import { getAssetName } from '../shared/constants.js';
+import { getStubAssetName } from '../shared/constants.js';
 
 export interface HealthCheckResult {
   healthy: boolean;
@@ -13,7 +13,7 @@ export const checkBinaryHealth = (
   installDir: string,
   platform: PlatformInfo,
 ): HealthCheckResult => {
-  const assetName = getAssetName(platform.os, platform.arch);
+  const assetName = getStubAssetName(platform.os, platform.arch);
   const binaryPath = join(installDir, assetName);
 
   try {

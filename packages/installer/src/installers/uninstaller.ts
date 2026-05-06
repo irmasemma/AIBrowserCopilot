@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import type { PlatformInfo } from '../shared/platform.js';
 import { getInstallDir } from '../shared/platform.js';
-import { getAssetName, NATIVE_HOST_NAME } from '../shared/constants.js';
+import { getStubAssetName, getServiceAssetName, getHelperAssetName, NATIVE_HOST_NAME } from '../shared/constants.js';
 import { getManifestPath } from './host-registrar.js';
 import { removeConfigEntry } from './config-merger.js';
 import { registerAllDetectors, getAll, clear } from '../detectors/index.js';
@@ -29,12 +29,19 @@ export interface ConfigRemovalResult {
  */
 const removeBinary = (platform: PlatformInfo): { removed: boolean; error?: string } => {
   const installDir = getInstallDir(platform);
-  const assetName = getAssetName(platform.os, platform.arch);
-  const binaryPath = join(installDir, assetName);
+  // Phase 1 multi-client: remove all three binaries (stub + service + helper).
+  const assets = [
+    getStubAssetName(platform.os, platform.arch),
+    getServiceAssetName(platform.os, platform.arch),
+    getHelperAssetName(platform.os, platform.arch),
+  ];
 
   try {
-    if (existsSync(binaryPath)) {
-      unlinkSync(binaryPath);
+    for (const asset of assets) {
+      const binaryPath = join(installDir, asset);
+      if (existsSync(binaryPath)) {
+        unlinkSync(binaryPath);
+      }
     }
 
     // Remove install directory if empty

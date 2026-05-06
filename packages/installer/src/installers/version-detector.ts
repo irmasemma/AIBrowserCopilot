@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PlatformInfo } from '../shared/platform.js';
 import { getInstallDir } from '../shared/platform.js';
-import { getAssetName } from '../shared/constants.js';
+import { getStubAssetName } from '../shared/constants.js';
 
 export interface VersionInfo {
   installed: boolean;
@@ -18,7 +18,7 @@ export interface VersionInfo {
  */
 export const detectVersion = (platform: PlatformInfo): VersionInfo => {
   const installDir = getInstallDir(platform);
-  const assetName = getAssetName(platform.os, platform.arch);
+  const assetName = getStubAssetName(platform.os, platform.arch);
   const binaryPath = join(installDir, assetName);
 
   if (!existsSync(binaryPath)) {

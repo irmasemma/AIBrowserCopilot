@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import type { PlatformInfo } from '../shared/platform.js';
 import type { DownloadProgress } from '../installers/binary-installer.js';
-import { getAssetName } from '../shared/constants.js';
+import { getStubAssetName, getServiceAssetName } from '../shared/constants.js';
 
 export type InstallStatus = 'downloading' | 'installing' | 'complete' | 'error';
 
@@ -41,7 +41,9 @@ export const StepInstall: React.FC<StepInstallProps> = ({
   binaryPath,
   errorMessage,
 }) => {
-  const assetName = getAssetName(platform.os, platform.arch);
+  const stubAsset = getStubAssetName(platform.os, platform.arch);
+  const serviceAsset = getServiceAssetName(platform.os, platform.arch);
+  const currentAsset = progress?.asset === 'service' ? serviceAsset : stubAsset;
 
   return (
     <Box flexDirection="column">
@@ -56,7 +58,7 @@ export const StepInstall: React.FC<StepInstallProps> = ({
 
       <Box>
         <Text color="gray">Binary: </Text>
-        <Text>{assetName}</Text>
+        <Text>{currentAsset}</Text>
       </Box>
 
       {status === 'downloading' && progress && (

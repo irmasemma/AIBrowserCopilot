@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { detectPlatform } from '../shared/platform.js';
-import { getAssetName } from '../shared/constants.js';
+import { getStubAssetName } from '../shared/constants.js';
 import { detectVersion, compareVersions, isOutdated } from './version-detector.js';
 
 const TEST_DIR = join(tmpdir(), `copilot-version-test-${Date.now()}`);
@@ -79,7 +79,7 @@ describe('detectVersion', () => {
     const installDir = join(TEST_DIR, '.local', 'share', 'ai-browser-copilot');
     mkdirSync(installDir, { recursive: true });
 
-    const assetName = getAssetName(platform.os, platform.arch);
+    const assetName = getStubAssetName(platform.os, platform.arch);
     // Write a non-executable file
     writeFileSync(join(installDir, assetName), 'not-a-binary');
 
@@ -94,7 +94,7 @@ describe('detectVersion', () => {
     const installDir = join(TEST_DIR, '.local', 'share', 'ai-browser-copilot');
     mkdirSync(installDir, { recursive: true });
 
-    const assetName = getAssetName(platform.os, platform.arch);
+    const assetName = getStubAssetName(platform.os, platform.arch);
     const binaryPath = join(installDir, assetName);
 
     // Create a Node.js script that outputs a version

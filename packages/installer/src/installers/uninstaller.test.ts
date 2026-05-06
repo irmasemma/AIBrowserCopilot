@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { detectPlatform } from '../shared/platform.js';
-import { getAssetName, NATIVE_HOST_NAME } from '../shared/constants.js';
+import { getStubAssetName, NATIVE_HOST_NAME } from '../shared/constants.js';
 import { uninstall } from './uninstaller.js';
 
 const TEST_DIR = join(tmpdir(), `copilot-uninstall-test-${Date.now()}`);
@@ -16,7 +16,7 @@ const testPlatform = (os: 'win32' | 'darwin' | 'linux' = 'linux') =>
  * Creates binary, manifest, and Claude Desktop config with MCP entry.
  */
 const setupFullInstall = (platform = testPlatform('linux')) => {
-  const assetName = getAssetName(platform.os, platform.arch);
+  const assetName = getStubAssetName(platform.os, platform.arch);
 
   // Binary
   const installDir = join(TEST_DIR, '.local', 'share', 'ai-browser-copilot');
@@ -128,7 +128,7 @@ describe('uninstall', () => {
 
   it('succeeds when only binary exists (no configs)', async () => {
     const platform = testPlatform('linux');
-    const assetName = getAssetName(platform.os, platform.arch);
+    const assetName = getStubAssetName(platform.os, platform.arch);
     const installDir = join(TEST_DIR, '.local', 'share', 'ai-browser-copilot');
     mkdirSync(installDir, { recursive: true });
     writeFileSync(join(installDir, assetName), 'binary');
@@ -196,7 +196,7 @@ describe('uninstall', () => {
 
   it('handles macOS paths correctly', async () => {
     const platform = testPlatform('darwin');
-    const assetName = getAssetName(platform.os, platform.arch);
+    const assetName = getStubAssetName(platform.os, platform.arch);
 
     // Set up macOS-style paths
     const installDir = join(TEST_DIR, 'Library', 'Application Support', 'ai-browser-copilot');

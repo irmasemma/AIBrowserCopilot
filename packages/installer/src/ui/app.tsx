@@ -9,10 +9,9 @@ import { downloadBinary, isBinaryInstalled } from '../installers/binary-installe
 import { registerHost } from '../installers/host-registrar.js';
 import { registerAllBrowsers } from '../installers/browser-registrar.js';
 import { checkBinaryHealth } from '../installers/health-check.js';
-import { getHelperAssetName } from '../shared/constants.js';
 import { uninstall, type UninstallResult } from '../installers/uninstaller.js';
 import { getInstallDir } from '../shared/platform.js';
-import { getAssetName } from '../shared/constants.js';
+import { getStubAssetName, getHelperAssetName } from '../shared/constants.js';
 import { join } from 'node:path';
 import { registerAllDetectors, runAll, clear } from '../detectors/index.js';
 import { StepInstall, type InstallStatus } from './step-install.js';
@@ -132,7 +131,7 @@ export const App: React.FC<AppProps> = ({
     const alreadyInstalled = checkInstalledFn(installDir, platform);
 
     if (alreadyInstalled) {
-      setExistingBinaryPath(join(installDir, getAssetName(platform.os, platform.arch)));
+      setExistingBinaryPath(join(installDir, getStubAssetName(platform.os, platform.arch)));
       setDetectStatus('found');
 
       if (flags.yes || flags.update) {

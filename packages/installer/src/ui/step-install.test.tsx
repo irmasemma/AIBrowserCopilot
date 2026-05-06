@@ -82,7 +82,7 @@ describe('StepInstall', () => {
     expect(frame).toContain('Network timeout');
   });
 
-  it('shows binary name for platform', () => {
+  it('shows stub binary name by default for platform', () => {
     const { lastFrame } = render(
       <StepInstall
         platform={makePlatform({ os: 'macos', arch: 'arm64', displayName: 'macOS arm64' })}
@@ -90,7 +90,18 @@ describe('StepInstall', () => {
         progress={{ bytesReceived: 250, totalBytes: 1000, percent: 25 }}
       />,
     );
-    expect(lastFrame()).toContain('ai-browser-copilot-macos-arm64');
+    expect(lastFrame()).toContain('ai-browser-copilot-stub-macos-arm64');
+  });
+
+  it('shows service binary name when downloading service', () => {
+    const { lastFrame } = render(
+      <StepInstall
+        platform={makePlatform({ os: 'macos', arch: 'arm64', displayName: 'macOS arm64' })}
+        status="downloading"
+        progress={{ bytesReceived: 250, totalBytes: 1000, percent: 25, asset: 'service' }}
+      />,
+    );
+    expect(lastFrame()).toContain('ai-browser-copilot-service-macos-arm64');
   });
 
   it('shows progress bar visual representation', () => {

@@ -16,26 +16,41 @@ afterEach(() => {
 });
 
 describe('isBinaryInstalled', () => {
-  it('returns false when binary does not exist', () => {
+  it('returns false when neither binary exists', () => {
     const platform = detectPlatform('win32', 'x64', 'C:\\Users\\test');
     expect(isBinaryInstalled(TEST_DIR, platform)).toBe(false);
   });
 
-  it('returns true when binary exists for Windows', () => {
+  it('returns false when only stub exists (service missing)', () => {
     const platform = detectPlatform('win32', 'x64', 'C:\\Users\\test');
-    writeFileSync(join(TEST_DIR, 'ai-browser-copilot-win-x64.exe'), 'fake-binary');
+    writeFileSync(join(TEST_DIR, 'ai-browser-copilot-stub-win-x64.exe'), 'fake-stub');
+    expect(isBinaryInstalled(TEST_DIR, platform)).toBe(false);
+  });
+
+  it('returns false when only service exists (stub missing)', () => {
+    const platform = detectPlatform('win32', 'x64', 'C:\\Users\\test');
+    writeFileSync(join(TEST_DIR, 'ai-browser-copilot-service-win-x64.exe'), 'fake-service');
+    expect(isBinaryInstalled(TEST_DIR, platform)).toBe(false);
+  });
+
+  it('returns true when both stub + service exist for Windows', () => {
+    const platform = detectPlatform('win32', 'x64', 'C:\\Users\\test');
+    writeFileSync(join(TEST_DIR, 'ai-browser-copilot-stub-win-x64.exe'), 'fake-stub');
+    writeFileSync(join(TEST_DIR, 'ai-browser-copilot-service-win-x64.exe'), 'fake-service');
     expect(isBinaryInstalled(TEST_DIR, platform)).toBe(true);
   });
 
-  it('returns true when binary exists for macOS', () => {
+  it('returns true when both binaries exist for macOS', () => {
     const platform = detectPlatform('darwin', 'arm64', '/Users/test');
-    writeFileSync(join(TEST_DIR, 'ai-browser-copilot-macos-arm64'), 'fake-binary');
+    writeFileSync(join(TEST_DIR, 'ai-browser-copilot-stub-macos-arm64'), 'fake-stub');
+    writeFileSync(join(TEST_DIR, 'ai-browser-copilot-service-macos-arm64'), 'fake-service');
     expect(isBinaryInstalled(TEST_DIR, platform)).toBe(true);
   });
 
-  it('returns true when binary exists for Linux', () => {
+  it('returns true when both binaries exist for Linux', () => {
     const platform = detectPlatform('linux', 'x64', '/home/test');
-    writeFileSync(join(TEST_DIR, 'ai-browser-copilot-linux-x64'), 'fake-binary');
+    writeFileSync(join(TEST_DIR, 'ai-browser-copilot-stub-linux-x64'), 'fake-stub');
+    writeFileSync(join(TEST_DIR, 'ai-browser-copilot-service-linux-x64'), 'fake-service');
     expect(isBinaryInstalled(TEST_DIR, platform)).toBe(true);
   });
 });

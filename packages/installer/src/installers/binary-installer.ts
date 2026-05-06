@@ -3,18 +3,28 @@ import { join } from 'node:path';
 import { get as httpsGet } from 'node:https';
 import { get as httpGet, type IncomingMessage } from 'node:http';
 import type { PlatformInfo } from '../shared/platform.js';
-import { getAssetName, getDownloadUrl } from '../shared/constants.js';
+import {
+  getStubAssetName,
+  getStubDownloadUrl,
+  getServiceAssetName,
+  getServiceDownloadUrl,
+} from '../shared/constants.js';
 import { withRetry } from '../shared/retry.js';
 
 export interface DownloadProgress {
   bytesReceived: number;
   totalBytes: number;
   percent: number;
+  /** Which binary the progress applies to (multiple binaries are downloaded sequentially). */
+  asset?: 'stub' | 'service';
 }
 
 export interface InstallResult {
   success: boolean;
+  /** Path the rest of the installer treats as the "primary" binary — the stub. */
   binaryPath: string;
+  /** Path of the long-lived service the stub spawns. */
+  servicePath?: string;
   error?: string;
   attempts?: number;
 }
@@ -48,6 +58,7 @@ const downloadOnce = async (
   targetPath: string,
   tempPath: string,
   platform: PlatformInfo,
+  asset: 'stub' | 'service' | undefined,
   onProgress?: (progress: DownloadProgress) => void,
 ): Promise<void> => {
   const res = await followRedirects(url);
@@ -64,6 +75,7 @@ const downloadOnce = async (
           bytesReceived,
           totalBytes,
           percent: Math.round((bytesReceived / totalBytes) * 100),
+          asset,
         });
       }
     });
@@ -94,52 +106,94 @@ const downloadOnce = async (
   }
 };
 
+interface SingleDownload {
+  url: string;
+  targetPath: string;
+  tempPath: string;
+  asset: 'stub' | 'service';
+}
+
+const runSingleDownload = async (
+  spec: SingleDownload,
+  platform: PlatformInfo,
+  onProgress: ((p: DownloadProgress) => void) | undefined,
+  onRetry: ((attempt: number, error: Error, delayMs: number) => void) | undefined,
+): Promise<number> => {
+  let attempts = 0;
+  await withRetry(
+    async () => {
+      attempts++;
+      cleanupFile(spec.tempPath);
+      await downloadOnce(spec.url, spec.targetPath, spec.tempPath, platform, spec.asset, onProgress);
+    },
+    {
+      maxAttempts: 3,
+      baseDelayMs: 1000,
+      maxDelayMs: 10000,
+      onRetry,
+    },
+  );
+  return attempts;
+};
+
+/**
+ * Phase 1 multi-client: downloads BOTH the stub and the service binaries.
+ * The stub is what MCP clients spawn; the service is what the stub auto-spawns
+ * on first launch and is the long-lived owner of the WS to the extension.
+ *
+ * Returns the stub's path as `binaryPath` for back-compat with callers that
+ * treated the install as a single binary; `servicePath` is also returned so
+ * callers can verify both are present.
+ */
 export const downloadBinary = async (
   platform: PlatformInfo,
   installDir: string,
   onProgress?: (progress: DownloadProgress) => void,
   onRetry?: (attempt: number, error: Error, delayMs: number) => void,
 ): Promise<InstallResult> => {
-  const assetName = getAssetName(platform.os, platform.arch);
-  const url = getDownloadUrl(platform.os, platform.arch);
-  const targetPath = join(installDir, assetName);
-  const tempPath = `${targetPath}.tmp`;
-
   // Create install directory if needed
   if (!existsSync(installDir)) {
     mkdirSync(installDir, { recursive: true });
   }
 
-  let attempts = 0;
+  const stubAsset = getStubAssetName(platform.os, platform.arch);
+  const serviceAsset = getServiceAssetName(platform.os, platform.arch);
 
+  const stubSpec: SingleDownload = {
+    url: getStubDownloadUrl(platform.os, platform.arch),
+    targetPath: join(installDir, stubAsset),
+    tempPath: join(installDir, `${stubAsset}.tmp`),
+    asset: 'stub',
+  };
+  const serviceSpec: SingleDownload = {
+    url: getServiceDownloadUrl(platform.os, platform.arch),
+    targetPath: join(installDir, serviceAsset),
+    tempPath: join(installDir, `${serviceAsset}.tmp`),
+    asset: 'service',
+  };
+
+  let totalAttempts = 0;
   try {
-    await withRetry(
-      async () => {
-        attempts++;
-        // Clean up any partial temp file from a previous attempt
-        cleanupFile(tempPath);
-        await downloadOnce(url, targetPath, tempPath, platform, onProgress);
-      },
-      {
-        maxAttempts: 3,
-        baseDelayMs: 1000,
-        maxDelayMs: 10000,
-        onRetry,
-      },
-    );
+    // Service first — stub depends on its presence at runtime.
+    totalAttempts += await runSingleDownload(serviceSpec, platform, onProgress, onRetry);
+    totalAttempts += await runSingleDownload(stubSpec, platform, onProgress, onRetry);
 
-    return { success: true, binaryPath: targetPath, attempts };
+    return {
+      success: true,
+      binaryPath: stubSpec.targetPath,
+      servicePath: serviceSpec.targetPath,
+      attempts: totalAttempts,
+    };
   } catch (err) {
-    // Clean up partial/temp files
-    cleanupFile(tempPath);
-    cleanupFile(targetPath);
-
+    cleanupFile(stubSpec.tempPath);
+    cleanupFile(serviceSpec.tempPath);
     const message = err instanceof Error ? err.message : String(err);
     return {
       success: false,
-      binaryPath: targetPath,
-      error: `Download failed after ${attempts} attempt(s): ${message}`,
-      attempts,
+      binaryPath: stubSpec.targetPath,
+      servicePath: serviceSpec.targetPath,
+      error: `Download failed after ${totalAttempts} attempt(s): ${message}`,
+      attempts: totalAttempts,
     };
   }
 };
@@ -154,9 +208,14 @@ const cleanupFile = (path: string): void => {
   }
 };
 
+/**
+ * "Installed" requires both the stub and the service to be present — neither
+ * works alone after the multi-client refactor.
+ */
 export const isBinaryInstalled = (installDir: string, platform: PlatformInfo): boolean => {
-  const assetName = getAssetName(platform.os, platform.arch);
-  return existsSync(join(installDir, assetName));
+  const stubAsset = getStubAssetName(platform.os, platform.arch);
+  const serviceAsset = getServiceAssetName(platform.os, platform.arch);
+  return existsSync(join(installDir, stubAsset)) && existsSync(join(installDir, serviceAsset));
 };
 
 export interface BinaryLockCheck {
@@ -166,39 +225,30 @@ export interface BinaryLockCheck {
 }
 
 /**
- * Check if the binary file is locked (currently running).
- * On Windows, running executables cannot be renamed/deleted.
- * On macOS/Linux, files can be overwritten while running (not locked).
+ * On Windows, running executables cannot be renamed/deleted. Either binary
+ * being locked blocks an in-place upgrade, so check both.
  */
 export const checkBinaryLocked = (installDir: string, platform: PlatformInfo): BinaryLockCheck => {
-  const assetName = getAssetName(platform.os, platform.arch);
-  const binaryPath = join(installDir, assetName);
-
-  if (!existsSync(binaryPath)) {
-    return { locked: false, path: binaryPath };
-  }
-
-  // Only Windows locks running executables
   if (platform.os !== 'windows') {
-    return { locked: false, path: binaryPath };
+    return { locked: false, path: installDir };
   }
-
-  // Try a test rename — if it fails with EPERM/EBUSY, file is locked
-  const testPath = `${binaryPath}.lock-test`;
-  try {
-    renameSync(binaryPath, testPath);
-    renameSync(testPath, binaryPath); // Rename back
-    return { locked: false, path: binaryPath };
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'EPERM' || code === 'EBUSY' || code === 'EACCES') {
-      return {
-        locked: true,
-        path: binaryPath,
-        error: 'The browser bridge is currently running. Close your AI tool (Claude Code, Cursor, etc.) and try again.',
-      };
+  for (const asset of [getStubAssetName(platform.os, platform.arch), getServiceAssetName(platform.os, platform.arch)]) {
+    const binaryPath = join(installDir, asset);
+    if (!existsSync(binaryPath)) continue;
+    const testPath = `${binaryPath}.lock-test`;
+    try {
+      renameSync(binaryPath, testPath);
+      renameSync(testPath, binaryPath);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'EPERM' || code === 'EBUSY' || code === 'EACCES') {
+        return {
+          locked: true,
+          path: binaryPath,
+          error: 'The browser bridge is currently running. Close your AI tool (Claude Code, Cursor, etc.) and try again.',
+        };
+      }
     }
-    // Some other error — not a lock
-    return { locked: false, path: binaryPath };
   }
+  return { locked: false, path: installDir };
 };
