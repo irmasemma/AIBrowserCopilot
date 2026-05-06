@@ -3,16 +3,13 @@ import net from 'node:net';
 import { toolRegistry } from './tools/index.js';
 
 // Inline version to avoid circular import with index.ts
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 import {
   checkExistingInstance,
   writeLockFile,
-  deleteLockFile,
   getLockFilePath,
   registerCleanupHandlers,
-  readLockFile,
-  killProcess,
-  waitForProcessExit,
+  deleteLockFile,
   writeWakeFile,
   deleteWakeFile,
 } from './lock-file-manager.js';
@@ -132,19 +129,18 @@ async function findAvailablePort(preferred: number): Promise<number> {
   });
 }
 
-export const startRelay = async (): Promise<number> => {
+export interface StartRelayOptions {
+  ipcPath?: string;
+}
+
+export const startRelay = async (opts: StartRelayOptions = {}): Promise<number> => {
   const lockPath = getLockFilePath();
 
-  // Check for existing instance — takeover if one is running
+  // Singleton invariant: if another service is already alive, refuse to start.
+  // (Pre-Phase-1 behavior was to kill the prior PID — replaced with attach via stub.)
   const status = await checkExistingInstance(lockPath);
   if (status === 'alive') {
-    const lock = readLockFile(lockPath);
-    if (lock) {
-      process.stderr.write(`Taking over from existing instance (PID ${lock.pid})\n`);
-      killProcess(lock.pid);
-      await waitForProcessExit(lock.pid);
-    }
-    deleteLockFile(lockPath);
+    throw new Error('Another ai-browser-copilot service is already running. Connect via stub instead.');
   }
   if (status === 'orphaned') {
     deleteLockFile(lockPath);
@@ -166,6 +162,7 @@ export const startRelay = async (): Promise<number> => {
         startedAt: new Date().toISOString(),
         version: VERSION,
         startedBy,
+        ipcPath: opts.ipcPath,
       }, lockPath);
 
       // AD-18: Write wake file to signal extension that server is ready

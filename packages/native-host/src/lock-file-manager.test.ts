@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { platform } from 'node:os';
 import {
   readLockFile,
   writeLockFile,
@@ -10,6 +11,8 @@ import {
   checkExistingInstance,
   killProcess,
   waitForProcessExit,
+  getDefaultIpcPath,
+  getStartingLockPath,
   type LockFileData,
 } from './lock-file-manager.js';
 
@@ -168,6 +171,44 @@ describe('lock-file-manager', () => {
     it('returns true immediately for a dead PID', async () => {
       const result = await waitForProcessExit(999999, 1000);
       expect(result).toBe(true);
+    });
+  });
+
+  describe('ipcPath round-trip', () => {
+    it('persists ipcPath through write/read', () => {
+      const ipcPath = platform() === 'win32' ? '\\\\.\\pipe\\test-ipc' : '/tmp/test.sock';
+      writeLockFile(makeLockData({ ipcPath, version: '0.2.0' }), TEST_LOCK);
+      const data = readLockFile(TEST_LOCK);
+      expect(data?.ipcPath).toBe(ipcPath);
+      expect(data?.version).toBe('0.2.0');
+    });
+
+    it('readLockFile tolerates legacy lock files without ipcPath', () => {
+      // Simulate a 0.1.0 lock file that predates ipcPath
+      const legacy = makeLockData({ version: '0.1.0' });
+      delete (legacy as Partial<LockFileData>).ipcPath;
+      writeLockFile(legacy, TEST_LOCK);
+      const data = readLockFile(TEST_LOCK);
+      expect(data?.ipcPath).toBeUndefined();
+      expect(data?.version).toBe('0.1.0');
+    });
+  });
+
+  describe('getDefaultIpcPath', () => {
+    it('returns a Windows named pipe on win32', () => {
+      const p = getDefaultIpcPath();
+      if (platform() === 'win32') {
+        expect(p).toMatch(/^\\\\\.\\pipe\\ai-browser-copilot\./);
+      } else {
+        expect(p).toMatch(/service\.sock$/);
+      }
+    });
+  });
+
+  describe('getStartingLockPath', () => {
+    it('returns a path inside the lock dir', () => {
+      const p = getStartingLockPath();
+      expect(p).toMatch(/service\.starting$/);
     });
   });
 });

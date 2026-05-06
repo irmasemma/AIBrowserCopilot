@@ -11,6 +11,7 @@ export interface LockFileData {
   startedAt: string;
   version: string;
   startedBy: string;
+  ipcPath?: string;
 }
 
 export type InstanceCheck = 'none' | 'alive' | 'orphaned';
@@ -32,6 +33,18 @@ export function getLockFilePath(): string {
 
 export function getWakeFilePath(): string {
   return join(getLockDir(), 'server.wake');
+}
+
+// Stub↔service local IPC path. Named pipe on Windows, Unix domain socket elsewhere.
+export function getDefaultIpcPath(): string {
+  if (platform() === 'win32') {
+    return `\\\\.\\pipe\\ai-browser-copilot.${process.env['USERNAME'] ?? 'user'}.service`;
+  }
+  return join(getLockDir(), 'service.sock');
+}
+
+export function getStartingLockPath(): string {
+  return join(getLockDir(), 'service.starting');
 }
 
 export function generateToken(): string {
