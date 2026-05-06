@@ -46,23 +46,28 @@ jobs:
           - os: ubuntu-latest
             target: linux-x64
             compile-script: compile:linux
-            binary: ai-browser-copilot-linux-x64
+            stub-binary: ai-browser-copilot-stub-linux-x64
+            service-binary: ai-browser-copilot-service-linux-x64
           - os: ubuntu-latest
             target: linux-arm64
             compile-script: compile:linux-arm
-            binary: ai-browser-copilot-linux-arm64
+            stub-binary: ai-browser-copilot-stub-linux-arm64
+            service-binary: ai-browser-copilot-service-linux-arm64
           - os: macos-latest
             target: macos-x64
             compile-script: compile:mac
-            binary: ai-browser-copilot-macos-x64
+            stub-binary: ai-browser-copilot-stub-macos-x64
+            service-binary: ai-browser-copilot-service-macos-x64
           - os: macos-latest
             target: macos-arm64
             compile-script: compile:mac-arm
-            binary: ai-browser-copilot-macos-arm64
+            stub-binary: ai-browser-copilot-stub-macos-arm64
+            service-binary: ai-browser-copilot-service-macos-arm64
           - os: windows-latest
             target: win-x64
             compile-script: compile:win
-            binary: ai-browser-copilot-win-x64.exe
+            stub-binary: ai-browser-copilot-stub-win-x64.exe
+            service-binary: ai-browser-copilot-service-win-x64.exe
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -73,25 +78,30 @@ jobs:
       - run: npm run ${{ matrix.compile-script }} -w packages/native-host
 
       # Code signing placeholder — uncomment and configure when certificates are available
-      # - name: Sign binary (macOS)
+      # - name: Sign binaries (macOS)
       #   if: runner.os == 'macOS'
       #   run: |
-      #     codesign --sign "${{ secrets.APPLE_DEVELOPER_ID }}" \
-      #       --options runtime \
-      #       --timestamp \
-      #       packages/native-host/bin/${{ matrix.binary }}
-      # - name: Sign binary (Windows)
+      #     for f in ${{ matrix.stub-binary }} ${{ matrix.service-binary }}; do
+      #       codesign --sign "${{ secrets.APPLE_DEVELOPER_ID }}" \
+      #         --options runtime --timestamp \
+      #         packages/native-host/bin/$f
+      #     done
+      # - name: Sign binaries (Windows)
       #   if: runner.os == 'Windows'
       #   uses: dlemstra/code-sign-action@v1
       #   with:
       #     certificate: '${{ secrets.WINDOWS_SIGNING_CERT }}'
       #     password: '${{ secrets.WINDOWS_SIGNING_PASSWORD }}'
-      #     files: packages/native-host/bin/${{ matrix.binary }}
+      #     files: |
+      #       packages/native-host/bin/${{ matrix.stub-binary }}
+      #       packages/native-host/bin/${{ matrix.service-binary }}
 
       - uses: actions/upload-artifact@v4
         with:
           name: native-host-${{ matrix.target }}
-          path: packages/native-host/bin/${{ matrix.binary }}
+          path: |
+            packages/native-host/bin/${{ matrix.stub-binary }}
+            packages/native-host/bin/${{ matrix.service-binary }}
 
   create-release:
     runs-on: ubuntu-latest

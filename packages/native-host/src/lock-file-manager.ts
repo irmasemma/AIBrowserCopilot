@@ -17,6 +17,9 @@ export interface LockFileData {
 export type InstanceCheck = 'none' | 'alive' | 'orphaned';
 
 function getLockDir(): string {
+  // Test/integration override — lets tests use a temp dir without clobbering
+  // a real user installation on the same machine.
+  if (process.env['COPILOT_LOCK_DIR']) return process.env['COPILOT_LOCK_DIR'];
   switch (platform()) {
     case 'win32':
       return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'ai-browser-copilot');
@@ -37,6 +40,9 @@ export function getWakeFilePath(): string {
 
 // Stub↔service local IPC path. Named pipe on Windows, Unix domain socket elsewhere.
 export function getDefaultIpcPath(): string {
+  // Test/integration override — same env var the stub honors, so service and
+  // stub agree when both run under a custom path.
+  if (process.env['COPILOT_IPC_PATH']) return process.env['COPILOT_IPC_PATH'];
   if (platform() === 'win32') {
     return `\\\\.\\pipe\\ai-browser-copilot.${process.env['USERNAME'] ?? 'user'}.service`;
   }
