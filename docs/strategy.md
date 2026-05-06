@@ -127,3 +127,92 @@ Reasoning:
   budget so throttling is legible.
 - **Don't suggest Phase 3 work** until Phase 2 has shipped and Phase 1 has clear
   engagement metrics.
+
+## Case study (2026-05-05): the registration that vanished
+
+A working installation went silent. `chrome://extensions` showed CoPilot enabled,
+the side panel said "Not Connected", and `claude mcp list` did not list
+`ai-browser-copilot`. The user's reasonable belief was "it worked yesterday."
+
+**Root cause:** the registration *did* exist. A backup at
+`~/.claude.json.backup-20260330-230259` proved that `~/.claude.json` had
+`projects."C:/Dev/1M".mcpServers.ai-browser-copilot` pointing at
+`node .../packages/native-host/dist/index.js`. On 2026-05-05 at 16:05, the file
+was modified and shrunk by 5,297 bytes — the entry was removed. We don't know
+*who* removed it (a `claude mcp` command, a manual edit, an auto-prune), but
+the failure mode is clear: **someone else's tool can rewrite our registration
+out from under us, and there is no recovery path inside the extension UI**.
+
+Two compounding bugs made it worse:
+
+1. The entry was at **project scope** (`projects.<dir>.mcpServers`), not user
+   scope (top-level `mcpServers`). Project-scope entries are easier for `claude
+   mcp` and Claude Code's bookkeeping to drop silently, and they're invisible
+   the moment the user `cd`s elsewhere.
+2. The `command` was `node .../dist/index.js` — a **dev path** that requires
+   `node` on PATH and a build to be present. Both the deleted entry and the
+   `.vscode/mcp.json` on this developer's machine had the same wrong shape,
+   pointing at "however this developer hand-set things up while testing,"
+   not "the production install layout the installer would write."
+
+## The robust install pattern (locked in)
+
+Implemented across all detectors in `packages/installer/src/detectors/*.ts` and
+in the native-host helper's self-heal action.
+
+1. **Always register at user scope, never project scope.** Top-level
+   `mcpServers` (Claude Code, Claude Desktop, Continue, JetBrains) or top-level
+   `mcp.servers` (Cursor, VS Code, Windsurf, Zed). Project-scope is a non-goal
+   unless the user explicitly opts in.
+2. **Use the production `.exe` path in `%LOCALAPPDATA%/ai-browser-copilot/`,
+   never a dev `node .../dist/index.js`.** The dev path is fragile (requires
+   PATH, requires a build) and routinely breaks for real users. The native-host
+   helper now derives the correct binary path from its own install dir at
+   runtime via `getNativeHostBinaryPath()`.
+3. **Verify the entry survived after every write.** `verifyWrite` only checked
+   that the file parsed as JSON, which doesn't catch the failure mode where a
+   merge silently drops our entry. New `verifyEntryAtPath(filePath, jsonPath)`
+   actually walks to the entry and confirms it exists. Every detector's
+   `verifyConfig` now uses it.
+
+## The self-heal pattern (locked in)
+
+Lives in `packages/native-host-helper/src/mcp-registrar.ts` and is exposed to
+the extension via two new native-messaging actions:
+
+- `check_mcp_registration` — reads `~/.claude.json`, returns whether
+  `ai-browser-copilot` is registered, at what scope (`user` | `project` | null),
+  whether the production binary exists.
+- `repair_mcp_registration` — writes the entry to **user scope** with the
+  production `.exe` path, backs up the existing config first, then verifies the
+  entry survived (calls `check_mcp_registration` internally and refuses to
+  return success if the entry isn't there post-write).
+
+The Settings tab calls `check_mcp_registration` on mount and renders one of
+three cards:
+
+- **Registered (user scope)** — quiet "✓ Registered with Claude Code" line.
+- **Registered (project scope)** — amber card warning that project-scope is
+  fragile, with a "Move to user scope" button that runs repair.
+- **Not registered (but `~/.claude.json` exists)** — amber card explaining what
+  happened, with a "Re-add to Claude Code" button that runs repair.
+- **Config doesn't exist** — silent (the user hasn't run Claude Code yet).
+
+This means a future "someone removed our entry" event becomes a one-click fix
+instead of a dead-end. The user opens the side panel, clicks Re-add, restarts
+their AI tool. No installer re-run, no manual JSON editing, no support thread.
+
+## What this still doesn't fix
+
+- **Other AI clients (Cursor, Windsurf, etc.).** The self-heal action currently
+  only handles Claude Code. Same pattern can be repeated per-client when
+  someone reports the same symptom there. Don't pre-build it.
+- **The native-host binary going missing.** The repair button refuses to write
+  the registration if the binary doesn't exist at the expected path. In that
+  case the user still has to re-run the installer. The card surfaces this
+  clearly rather than writing an entry that points at a non-existent file.
+- **The user being on a fresh machine where `~/.claude.json` doesn't exist
+  yet.** The card stays silent in that case (no notification) — the assumption
+  being "if you don't have Claude Code, you don't care about Claude Code MCP
+  registration." If we ever want to nudge users *toward* installing Claude
+  Code, that's a different feature.

@@ -170,6 +170,34 @@ export const verifyWrite = (filePath: string): void => {
   JSON.parse(content);
 };
 
+/**
+ * Verify a specific entry survived a write — the file must parse AND the value
+ * at the given JSON path must exist (and be non-null).
+ *
+ * Why this exists: `verifyWrite` only confirms the file is valid JSON. That
+ * doesn't catch the failure mode where another process (or `claude mcp` CLI)
+ * rewrites the file and silently drops our entry. After mergeConfig, callers
+ * should verify the specific entry they wrote is still there.
+ *
+ * Example: verifyEntryAtPath('/.../.claude.json', ['mcpServers', 'ai-browser-copilot'])
+ */
+export const verifyEntryAtPath = (filePath: string, jsonPath: string[]): boolean => {
+  if (!existsSync(filePath)) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(filePath, 'utf-8'));
+  } catch {
+    return false;
+  }
+  let cursor: unknown = parsed;
+  for (const segment of jsonPath) {
+    if (typeof cursor !== 'object' || cursor === null) return false;
+    cursor = (cursor as Record<string, unknown>)[segment];
+    if (cursor === undefined || cursor === null) return false;
+  }
+  return true;
+};
+
 export interface RemoveResult {
   success: boolean;
   backupPath?: string;

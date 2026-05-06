@@ -117,6 +117,21 @@ export default defineBackground(() => {
       return true; // async response
     }
 
+    // Self-heal: side panel asks "is CoPilot registered with Claude Code?" and "if not, fix it."
+    if (message?.type === 'check_mcp_registration') {
+      discovery.checkMcpRegistration()
+        .then((status) => sendResponse(status))
+        .catch((err) => sendResponse({ available: false, error: String(err) }));
+      return true;
+    }
+
+    if (message?.type === 'repair_mcp_registration') {
+      discovery.repairMcpRegistration()
+        .then((result) => sendResponse(result))
+        .catch((err) => sendResponse({ success: false, error: String(err) }));
+      return true;
+    }
+
     return false;
   });
 });

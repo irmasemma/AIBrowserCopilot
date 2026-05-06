@@ -26,9 +26,30 @@ export interface DiscoveryResult {
   diagnostic: DiagnosticReason;
 }
 
+export interface McpRegistrationStatus {
+  available: boolean; // false → helper unavailable; treat UI as unknown
+  configExists: boolean;
+  configPath: string;
+  registered: boolean;
+  scope: 'user' | 'project' | null;
+  binaryPath: string;
+  binaryExists: boolean;
+}
+
+export interface McpRegistrationRepairResult {
+  success: boolean;
+  configPath: string;
+  binaryPath: string;
+  scope: 'user';
+  backupPath?: string;
+  error?: string;
+}
+
 export interface ServiceDiscovery {
   discoverEndpoint(): Promise<DiscoveryResult>;
   scanTools(): Promise<ToolScanResult[]>;
+  checkMcpRegistration(): Promise<McpRegistrationStatus>;
+  repairMcpRegistration(): Promise<McpRegistrationRepairResult>;
 }
 
 export function createServiceDiscovery(): ServiceDiscovery {
@@ -76,6 +97,53 @@ export function createServiceDiscovery(): ServiceDiscovery {
         // NM helper not available
       }
       return [];
+    },
+
+    async checkMcpRegistration(): Promise<McpRegistrationStatus> {
+      try {
+        const r = await sendNativeMessage('check_mcp_registration');
+        return {
+          available: true,
+          configExists: Boolean(r.configExists),
+          configPath: typeof r.configPath === 'string' ? r.configPath : '',
+          registered: Boolean(r.registered),
+          scope: (r.scope === 'user' || r.scope === 'project') ? r.scope : null,
+          binaryPath: typeof r.binaryPath === 'string' ? r.binaryPath : '',
+          binaryExists: Boolean(r.binaryExists),
+        };
+      } catch {
+        return {
+          available: false,
+          configExists: false,
+          configPath: '',
+          registered: false,
+          scope: null,
+          binaryPath: '',
+          binaryExists: false,
+        };
+      }
+    },
+
+    async repairMcpRegistration(): Promise<McpRegistrationRepairResult> {
+      try {
+        const r = await sendNativeMessage('repair_mcp_registration');
+        return {
+          success: Boolean(r.success),
+          configPath: typeof r.configPath === 'string' ? r.configPath : '',
+          binaryPath: typeof r.binaryPath === 'string' ? r.binaryPath : '',
+          scope: 'user',
+          backupPath: typeof r.backupPath === 'string' ? r.backupPath : undefined,
+          error: typeof r.error === 'string' ? r.error : undefined,
+        };
+      } catch (err) {
+        return {
+          success: false,
+          configPath: '',
+          binaryPath: '',
+          scope: 'user',
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
     },
   };
 }

@@ -277,6 +277,159 @@ function scanAITools() {
   return detectors.map(scanDetector);
 }
 
+// src/mcp-registrar.ts
+var import_node_fs3 = require("node:fs");
+var import_node_path3 = require("node:path");
+var import_node_os3 = require("node:os");
+var getClaudeCodeConfigPath = () => (0, import_node_path3.join)((0, import_node_os3.homedir)(), ".claude.json");
+var getInstallDir = () => {
+  switch ((0, import_node_os3.platform)()) {
+    case "win32":
+      return (0, import_node_path3.join)(process.env.LOCALAPPDATA ?? (0, import_node_path3.join)((0, import_node_os3.homedir)(), "AppData", "Local"), "ai-browser-copilot");
+    case "darwin":
+      return (0, import_node_path3.join)((0, import_node_os3.homedir)(), "Library", "Application Support", "ai-browser-copilot");
+    default:
+      return (0, import_node_path3.join)((0, import_node_os3.homedir)(), ".local", "share", "ai-browser-copilot");
+  }
+};
+var getNativeHostBinaryName = () => {
+  const arch = (0, import_node_os3.arch)();
+  switch ((0, import_node_os3.platform)()) {
+    case "win32":
+      return `ai-browser-copilot-win-${arch === "arm64" ? "arm64" : "x64"}.exe`;
+    case "darwin":
+      return `ai-browser-copilot-macos-${arch === "arm64" ? "arm64" : "x64"}`;
+    default:
+      return `ai-browser-copilot-linux-${arch === "arm64" ? "arm64" : "x64"}`;
+  }
+};
+var getNativeHostBinaryPath = () => (0, import_node_path3.join)(getInstallDir(), getNativeHostBinaryName());
+var isPlainObject = (val) => typeof val === "object" && val !== null && !Array.isArray(val);
+var detectIndent = (content) => {
+  for (const line of content.split("\n")) {
+    const m = line.match(/^(\s+)/);
+    if (m) return m[1].includes("	") ? "	" : " ".repeat(m[1].length);
+  }
+  return "  ";
+};
+var hasEntry = (mcpServers) => {
+  if (!isPlainObject(mcpServers)) return false;
+  const entry = mcpServers["ai-browser-copilot"];
+  return isPlainObject(entry) && typeof entry.command === "string";
+};
+var checkClaudeCodeRegistration = () => {
+  const configPath = getClaudeCodeConfigPath();
+  const binaryPath = getNativeHostBinaryPath();
+  const binaryExists = (0, import_node_fs3.existsSync)(binaryPath);
+  if (!(0, import_node_fs3.existsSync)(configPath)) {
+    return { configExists: false, configPath, registered: false, scope: null, binaryPath, binaryExists };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse((0, import_node_fs3.readFileSync)(configPath, "utf-8"));
+  } catch {
+    return { configExists: true, configPath, registered: false, scope: null, binaryPath, binaryExists };
+  }
+  if (!isPlainObject(parsed)) {
+    return { configExists: true, configPath, registered: false, scope: null, binaryPath, binaryExists };
+  }
+  if (hasEntry(parsed.mcpServers)) {
+    return { configExists: true, configPath, registered: true, scope: "user", binaryPath, binaryExists };
+  }
+  const projects = parsed.projects;
+  if (isPlainObject(projects)) {
+    for (const proj of Object.values(projects)) {
+      if (isPlainObject(proj) && hasEntry(proj.mcpServers)) {
+        return { configExists: true, configPath, registered: true, scope: "project", binaryPath, binaryExists };
+      }
+    }
+  }
+  return { configExists: true, configPath, registered: false, scope: null, binaryPath, binaryExists };
+};
+var buildBackupPath = (filePath) => {
+  const now = /* @__PURE__ */ new Date();
+  const stamp = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+    "-",
+    String(now.getHours()).padStart(2, "0"),
+    String(now.getMinutes()).padStart(2, "0"),
+    String(now.getSeconds()).padStart(2, "0")
+  ].join("");
+  return `${filePath}.backup-${stamp}`;
+};
+var repairClaudeCodeRegistration = () => {
+  const configPath = getClaudeCodeConfigPath();
+  const binaryPath = getNativeHostBinaryPath();
+  if (!(0, import_node_fs3.existsSync)(binaryPath)) {
+    return {
+      success: false,
+      configPath,
+      binaryPath,
+      scope: "user",
+      error: `Native host binary not found at ${binaryPath}. Run the installer to download it.`
+    };
+  }
+  const newEntry = {
+    command: binaryPath,
+    args: []
+  };
+  let existing = {};
+  let raw = "";
+  let indentStr = "  ";
+  let trailingNewline = true;
+  let backupPath;
+  if ((0, import_node_fs3.existsSync)(configPath)) {
+    raw = (0, import_node_fs3.readFileSync)(configPath, "utf-8");
+    try {
+      const parsed = JSON.parse(raw);
+      if (!isPlainObject(parsed)) {
+        return {
+          success: false,
+          configPath,
+          binaryPath,
+          scope: "user",
+          error: "Existing config is not a JSON object \u2014 refusing to overwrite."
+        };
+      }
+      existing = parsed;
+    } catch (err) {
+      return {
+        success: false,
+        configPath,
+        binaryPath,
+        scope: "user",
+        error: `Existing config is not valid JSON \u2014 refusing to overwrite. ${String(err)}`
+      };
+    }
+    indentStr = detectIndent(raw);
+    trailingNewline = raw.endsWith("\n");
+    backupPath = buildBackupPath(configPath);
+    (0, import_node_fs3.copyFileSync)(configPath, backupPath);
+  }
+  const mcpServers = isPlainObject(existing.mcpServers) ? { ...existing.mcpServers } : {};
+  mcpServers["ai-browser-copilot"] = newEntry;
+  const merged = { ...existing, mcpServers };
+  let output = JSON.stringify(merged, null, indentStr);
+  if (trailingNewline) output += "\n";
+  const tmp = `${configPath}.tmp`;
+  (0, import_node_fs3.writeFileSync)(tmp, output, "utf-8");
+  (0, import_node_fs3.renameSync)(tmp, configPath);
+  const verify = checkClaudeCodeRegistration();
+  if (!verify.registered || verify.scope !== "user") {
+    return {
+      success: false,
+      configPath,
+      binaryPath,
+      scope: "user",
+      backupPath,
+      error: "Wrote config but post-write verification could not find the entry at user scope."
+    };
+  }
+  return { success: true, configPath, binaryPath, scope: "user", backupPath };
+};
+
 // src/index.ts
 function readMessage() {
   return new Promise((resolve, reject) => {
@@ -354,6 +507,16 @@ async function main() {
       case "scan_ai_tools": {
         const tools = scanAITools();
         writeMessage({ tools });
+        break;
+      }
+      case "check_mcp_registration": {
+        const result = checkClaudeCodeRegistration();
+        writeMessage(result);
+        break;
+      }
+      case "repair_mcp_registration": {
+        const result = repairClaudeCodeRegistration();
+        writeMessage(result);
         break;
       }
       default:

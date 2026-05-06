@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PlatformInfo } from '../shared/platform.js';
 import type { ToolDetector, DetectionResult, WriteConfigResult } from './types.js';
-import { mergeConfig, verifyWrite } from '../installers/config-merger.js';
+import { mergeConfig, verifyEntryAtPath } from '../installers/config-merger.js';
 import { hasExistingMcpEntry } from './utils.js';
 
 const CONFIG_FILENAME = 'claude_desktop_config.json';
@@ -61,11 +61,6 @@ export const claudeDesktopDetector: ToolDetector = {
   },
 
   async verifyConfig(platform: PlatformInfo): Promise<boolean> {
-    try {
-      verifyWrite(getConfigPath(platform));
-      return true;
-    } catch {
-      return false;
-    }
+    return verifyEntryAtPath(getConfigPath(platform), ['mcpServers', 'ai-browser-copilot']);
   },
 };

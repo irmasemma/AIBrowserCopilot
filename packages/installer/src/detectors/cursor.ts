@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PlatformInfo } from '../shared/platform.js';
 import type { ToolDetector, DetectionResult, WriteConfigResult } from './types.js';
-import { mergeConfig, verifyWrite } from '../installers/config-merger.js';
+import { mergeConfig, verifyEntryAtPath } from '../installers/config-merger.js';
 import { isCommandAvailable, hasExistingMcpEntry } from './utils.js';
 
 const getSettingsDir = (platform: PlatformInfo): string => {
@@ -63,11 +63,6 @@ export const cursorDetector: ToolDetector = {
   },
 
   async verifyConfig(platform: PlatformInfo): Promise<boolean> {
-    try {
-      verifyWrite(getSettingsPath(platform));
-      return true;
-    } catch {
-      return false;
-    }
+    return verifyEntryAtPath(getSettingsPath(platform), ['mcp', 'servers', 'ai-browser-copilot']);
   },
 };

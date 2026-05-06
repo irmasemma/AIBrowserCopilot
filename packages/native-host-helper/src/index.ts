@@ -1,5 +1,6 @@
 import { readLockFile, deleteLockFile } from './lock-file-reader.js';
 import { scanAITools } from './tool-scanner.js';
+import { checkClaudeCodeRegistration, repairClaudeCodeRegistration } from './mcp-registrar.js';
 
 // Chrome Native Messaging protocol: 4-byte LE length prefix + JSON
 
@@ -90,6 +91,20 @@ async function main(): Promise<void> {
       case 'scan_ai_tools': {
         const tools = scanAITools();
         writeMessage({ tools });
+        break;
+      }
+
+      case 'check_mcp_registration': {
+        // Currently Claude Code only — extend with a `tool` parameter when other
+        // clients gain a "Re-add" UI surface.
+        const result = checkClaudeCodeRegistration();
+        writeMessage(result);
+        break;
+      }
+
+      case 'repair_mcp_registration': {
+        const result = repairClaudeCodeRegistration();
+        writeMessage(result);
         break;
       }
 
