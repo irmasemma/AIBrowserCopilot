@@ -6,6 +6,7 @@ import { listTabs } from './list-tabs.js';
 import { navigate } from './navigate.js';
 import { fillForm } from './fill-form.js';
 import { clickElement } from './click-element.js';
+import { pressKey } from './press-key.js';
 import { extractTable } from './extract-table.js';
 import { readForm } from './read-form.js';
 import { extractData } from './extract-data.js';
@@ -23,6 +24,7 @@ export const toolRegistry: ToolPlugin[] = [
   navigate,
   fillForm,
   clickElement,
+  pressKey,
   extractTable,
   readForm,
   extractData,

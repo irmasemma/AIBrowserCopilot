@@ -14,6 +14,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   { name: 'navigate', displayName: 'Navigate', description: 'Go to any URL', icon: '🧭', tier: 'pro' },
   { name: 'fill_form', displayName: 'Fill Form', description: 'Auto-fill form fields', icon: '✏️', tier: 'pro' },
   { name: 'click_element', displayName: 'Click', description: 'Click buttons and links', icon: '👆', tier: 'pro' },
+  { name: 'press_key', displayName: 'Press Key', description: 'Submit forms or press keyboard keys', icon: '⌨️', tier: 'pro' },
   { name: 'extract_table', displayName: 'Extract Table', description: 'Get table data as structured data', icon: '📊', tier: 'pro' },
   { name: 'read_form', displayName: 'Read Form', description: 'Read all form fields and their metadata', icon: '📝', tier: 'pro' },
   { name: 'extract_data', displayName: 'Extract Data', description: 'Detect and extract structured data from any page', icon: '🔍', tier: 'pro' },

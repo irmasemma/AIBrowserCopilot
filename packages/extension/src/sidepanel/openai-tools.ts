@@ -90,27 +90,30 @@ export const OPENAI_TOOLS: OpenAIFunctionTool[] = [
     type: 'function',
     function: {
       name: 'fill_form',
-      description: 'Fill one or more form fields on the current page. Each field can be located by CSS selector, label text, ARIA role, or placeholder. Supports text inputs, dropdowns, checkboxes, radios, file uploads, and date fields. Call read_form first if you do not know what fields exist.',
+      description: 'Fill one or more form fields on the current page. PREFER calling `snapshot` first and using the [ref=eN] IDs in the field `ref` parameter — refs are unambiguous and cross iframes. Other locators (label, role+name, placeholder, selector) are accepted as fallbacks. Element type is auto-detected from the DOM; you only need `type` to override detection. Use `checked: true|false` for checkboxes, `values: [...]` for multi-select.',
       parameters: {
         type: 'object',
         properties: {
           fields: {
             type: 'array',
-            description: 'Fields to fill in. At least one of selector/label/role/placeholder is required per field.',
+            description: 'Fields to fill. Each field needs a locator (ref preferred, else label/role+name/placeholder/selector) plus value/values/checked.',
             items: {
               type: 'object',
               properties: {
+                ref: { type: 'string', description: 'PREFERRED locator: ref ID from snapshot (e.g., "e3").' },
                 selector: { type: 'string', description: 'CSS selector.' },
                 label: { type: 'string', description: 'Visible label text.' },
-                role: { type: 'string', description: 'ARIA role.' },
+                role: { type: 'string', description: 'ARIA role. MUST be paired with `name` (role-only is rejected).' },
+                name: { type: 'string', description: 'Accessible name to combine with `role` (e.g., role: "textbox", name: "Email").' },
                 placeholder: { type: 'string', description: 'Placeholder text.' },
-                value: { type: 'string', description: 'Value to fill in. For checkboxes use "true"/"false".' },
-                type: { type: 'string', enum: ['text', 'select', 'checkbox', 'radio', 'file', 'date'], description: 'Field type hint.' },
+                value: { type: 'string', description: 'Value to fill in. For text inputs, single-select, file paths.' },
+                values: { type: 'array', items: { type: 'string' }, description: 'For multi-select: list of options. For file inputs: list of paths.' },
+                checked: { type: 'boolean', description: 'For checkboxes/switches: explicit checked state.' },
+                type: { type: 'string', enum: ['text', 'select', 'checkbox', 'radio', 'file', 'date'], description: 'Override type detection. Usually unnecessary.' },
               },
-              required: ['value'],
             },
           },
-          iframe: { type: 'string', description: 'CSS selector for an iframe to target.' },
+          iframe: { type: 'string', description: 'CSS selector for an iframe (used only with non-ref locators; refs cross iframes automatically).' },
           tab_id: { type: 'number', description: 'Specific tab id (defaults to active tab).' },
         },
         required: ['fields'],
@@ -121,15 +124,33 @@ export const OPENAI_TOOLS: OpenAIFunctionTool[] = [
     type: 'function',
     function: {
       name: 'click_element',
-      description: 'Click a button, link, or any clickable element on the current page. Locate by CSS selector or by visible text.',
+      description: 'Click a button, link, or any clickable element on the current page. PREFER `ref` from the page snapshot for unambiguous targeting. Falls back to text or CSS selector.',
       parameters: {
         type: 'object',
         properties: {
+          ref: { type: 'string', description: 'PREFERRED: ref ID from snapshot (e.g., "e7").' },
           selector: { type: 'string', description: 'CSS selector for the element to click.' },
           text: { type: 'string', description: 'Visible text of the element. Prefers buttons/links.' },
           index: { type: 'number', description: 'Which match to click when multiple match (0 = first).' },
           tab_id: { type: 'number', description: 'Specific tab id (defaults to active tab).' },
         },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'press_key',
+      description: 'Press a keyboard key, optionally focused on a specific element. Use to submit forms (key="Enter" with the last input\'s ref), dismiss dialogs (key="Escape"), or navigate (key="Tab", "ArrowDown"). Omit ref/selector to send the key at the page level.',
+      parameters: {
+        type: 'object',
+        properties: {
+          key: { type: 'string', description: 'Key name: "Enter", "Escape", "Tab", "Backspace", "ArrowDown", "PageDown", "Control+a", etc.' },
+          ref: { type: 'string', description: 'PREFERRED: ref ID of element to focus before pressing.' },
+          selector: { type: 'string', description: 'CSS selector of element to focus before pressing.' },
+          tab_id: { type: 'number', description: 'Specific tab id (defaults to active tab).' },
+        },
+        required: ['key'],
       },
     },
   },

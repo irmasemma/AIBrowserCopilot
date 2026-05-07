@@ -7767,18 +7767,22 @@ var navigate = {
 // src/tools/fill-form.ts
 var fillForm = {
   name: "fill_form",
-  description: "Fill in form fields on the page the user is viewing. Supports CSS selectors, label text, ARIA roles, and placeholder matching. Handles text inputs, dropdowns, checkboxes, radio buttons, file uploads, and date fields. Can target fields inside iframes. Use this when the user asks you to fill out a form, enter data into fields, or auto-complete form inputs in their browser.",
+  description: "Fill in form fields on the page the user is viewing. Prefer the `ref` field on each entry \u2014 call `snapshot` first and use the [ref=eN] IDs from the result; refs are unambiguous and work across iframes. Other locators (label, role+name, placeholder, selector) are supported as fallbacks. Element type (text/select/checkbox/radio/file) is auto-detected from the DOM unless you set `type` explicitly. For checkboxes use `checked: true|false`. For multi-select use `values: [...]`. role-only is rejected \u2014 always pair with `name`. Use this when the user asks you to fill out a form, enter data into fields, or auto-complete form inputs in their browser.",
   tier: "pro",
   inputSchema: {
     fields: external_exports.array(external_exports.object({
+      ref: external_exports.string().optional().describe('PREFERRED: ref ID from the page snapshot (e.g., "e3"). Unambiguous; works across iframes.'),
       selector: external_exports.string().optional().describe("CSS selector for the form field"),
       label: external_exports.string().optional().describe("Find field by its label text"),
-      role: external_exports.string().optional().describe("Find field by ARIA role"),
+      role: external_exports.string().optional().describe('ARIA role (e.g., "textbox"). Must be paired with `name` \u2014 role-only is rejected.'),
+      name: external_exports.string().optional().describe('Accessible name to combine with `role` (e.g., role: "textbox", name: "Email")'),
       placeholder: external_exports.string().optional().describe("Find field by placeholder text"),
-      value: external_exports.string().describe("Value to fill in"),
-      type: external_exports.enum(["text", "select", "checkbox", "radio", "file", "date"]).optional().describe("Field type hint for proper handling")
-    })).describe("Array of form fields to fill"),
-    iframe: external_exports.string().optional().describe("CSS selector for iframe to target (for forms inside iframes)"),
+      value: external_exports.string().optional().describe("Value to fill in for text inputs, single-select, file paths"),
+      values: external_exports.array(external_exports.string()).optional().describe("For multi-select: list of option values. For file inputs: list of file paths."),
+      checked: external_exports.boolean().optional().describe('For checkboxes/switches: explicit checked state. Preferred over passing "true"/"false" strings via `value`.'),
+      type: external_exports.enum(["text", "select", "checkbox", "radio", "file", "date"]).optional().describe("Override type detection. Usually unnecessary \u2014 type is auto-detected from the DOM.")
+    })).describe("Array of form fields to fill. Each field: provide `ref` (preferred) or one of label/role+name/placeholder/selector, plus `value` (or `values`/`checked`)."),
+    iframe: external_exports.string().optional().describe("CSS selector for iframe to target. Used only with non-ref locators (refs work across iframes automatically)."),
     tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
   }
 };
@@ -7786,13 +7790,27 @@ var fillForm = {
 // src/tools/click-element.ts
 var clickElement = {
   name: "click_element",
-  description: "Click a button, link, or other element on the page the user is viewing. Use this when the user asks you to click something, press a button, or interact with an element in their browser.",
+  description: "Click a button, link, or other element on the page the user is viewing. Prefer `ref` from the page snapshot for unambiguous targeting. Falls back to visible text or a CSS selector. Use this when the user asks you to click something, press a button, or interact with an element in their browser.",
   tier: "pro",
   inputSchema: {
+    ref: external_exports.string().optional().describe('PREFERRED: ref ID from the page snapshot (e.g., "e7"). Unambiguous and stable.'),
     selector: external_exports.string().optional().describe("CSS selector for the element"),
     text: external_exports.string().optional().describe("Visible text of the button or link to click. Prefers clickable elements (buttons, links) over plain text."),
     index: external_exports.number().optional().default(0).describe("Which match to click when multiple elements match (0 = first). Use when there are duplicate buttons."),
     tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
+  }
+};
+
+// src/tools/press-key.ts
+var pressKey = {
+  name: "press_key",
+  description: 'Press a keyboard key, optionally focused on a specific element. Use this to submit forms (key="Enter" with the last input\'s ref), dismiss dialogs (key="Escape"), navigate (key="Tab", "ArrowDown", "PageDown"), or trigger keyboard shortcuts. Prefer `ref` from the page snapshot to focus a specific element first; omit ref/selector to send the keystroke at the page level.',
+  tier: "pro",
+  inputSchema: {
+    key: external_exports.string().describe('Key name (Playwright syntax): "Enter", "Escape", "Tab", "Backspace", "ArrowDown", "PageDown", "Control+a", etc.'),
+    ref: external_exports.string().optional().describe('PREFERRED: ref ID of the element to focus before pressing (from snapshot, e.g., "e3").'),
+    selector: external_exports.string().optional().describe("CSS selector of the element to focus before pressing."),
+    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab).")
   }
 };
 
@@ -7891,6 +7909,7 @@ var toolRegistry = [
   navigate,
   fillForm,
   clickElement,
+  pressKey,
   extractTable,
   readForm,
   extractData,

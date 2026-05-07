@@ -7,21 +7,155 @@ import { readFormFields } from '../content/form-reader.js';
 import { detectAndExtractData } from '../content/data-detector.js';
 
 /**
- * Capture an ARIA accessibility snapshot of the page.
- * Returns a compact YAML-like tree that the LLM can use to understand
- * page state after a mutating action (validation errors, new fields, etc.).
+ * Walk the DOM, assign a stable `data-ai-ref="eN"` to every interactive
+ * element, and emit a compact YAML-like list of those elements plus the
+ * page's accessibility snapshot. The refs let the LLM target a specific
+ * element unambiguously via `page.locator('[data-ai-ref="eN"]')`.
  *
- * Inspired by BrowserMCP's auto-snapshot pattern.
+ * Inspired by BrowserMCP/mcp's snapshot+ref pattern, adapted for our
+ * Playwright 1.58.2 runtime (which lacks `ariaSnapshot({ ref: true })`).
  */
+const SNAPSHOT_REF_INJECTOR = `(() => {
+  const SELECTOR = [
+    'input:not([type="hidden"])',
+    'select',
+    'textarea',
+    'button',
+    'a[href]',
+    '[role="button"]',
+    '[role="link"]',
+    '[role="checkbox"]',
+    '[role="radio"]',
+    '[role="combobox"]',
+    '[role="textbox"]',
+    '[role="searchbox"]',
+    '[role="switch"]',
+    '[role="tab"]',
+    '[role="menuitem"]',
+    '[role="option"]',
+    '[contenteditable=""]',
+    '[contenteditable="true"]',
+  ].join(',');
+
+  const ROLE_FROM_TAG = (el) => {
+    const explicit = el.getAttribute('role');
+    if (explicit) return explicit;
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'a') return 'link';
+    if (tag === 'button') return 'button';
+    if (tag === 'select') return el.multiple ? 'listbox' : 'combobox';
+    if (tag === 'textarea') return 'textbox';
+    if (tag === 'input') {
+      const t = (el.type || 'text').toLowerCase();
+      if (t === 'checkbox') return 'checkbox';
+      if (t === 'radio') return 'radio';
+      if (t === 'submit' || t === 'button' || t === 'reset') return 'button';
+      if (t === 'file') return 'file';
+      if (t === 'range') return 'slider';
+      return 'textbox';
+    }
+    return tag;
+  };
+
+  const ACC_NAME = (el) => {
+    const aria = el.getAttribute('aria-label');
+    if (aria && aria.trim()) return aria.trim();
+    const labelledBy = el.getAttribute('aria-labelledby');
+    if (labelledBy) {
+      const ids = labelledBy.split(/\\s+/).filter(Boolean);
+      const text = ids
+        .map(id => document.getElementById(id)?.textContent?.trim() || '')
+        .filter(Boolean)
+        .join(' ');
+      if (text) return text;
+    }
+    if (el.id) {
+      const labelEl = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+      const t = labelEl?.textContent?.trim();
+      if (t) return t;
+    }
+    const wrappingLabel = el.closest('label');
+    if (wrappingLabel) {
+      const clone = wrappingLabel.cloneNode(true);
+      clone.querySelectorAll('input,select,textarea').forEach(c => c.remove());
+      const t = clone.textContent?.trim();
+      if (t) return t;
+    }
+    if (el.placeholder) return el.placeholder;
+    if (el.title) return el.title;
+    if (el.tagName === 'BUTTON' || el.tagName === 'A') {
+      const t = el.textContent?.trim();
+      if (t) return t.slice(0, 80);
+    }
+    if (el.value && el.tagName === 'INPUT' && (el.type === 'submit' || el.type === 'button')) {
+      return el.value;
+    }
+    return '';
+  };
+
+  const STATE = (el) => {
+    const parts = [];
+    if (el.disabled) parts.push('disabled');
+    if (el.required) parts.push('required');
+    if (el.readOnly) parts.push('readonly');
+    if (el.checked) parts.push('checked');
+    const aria = (a) => el.getAttribute(a);
+    if (aria('aria-checked') === 'true') parts.push('checked');
+    if (aria('aria-selected') === 'true') parts.push('selected');
+    if (aria('aria-expanded') === 'true') parts.push('expanded');
+    if (aria('aria-invalid') === 'true') parts.push('invalid');
+    if (el.tagName === 'INPUT' && el.value && el.type !== 'password') {
+      const v = String(el.value).slice(0, 40);
+      parts.push('value=' + JSON.stringify(v));
+    }
+    return parts.length ? ' ' + parts.join(' ') : '';
+  };
+
+  const IS_VISIBLE = (el) => {
+    if (!el.isConnected) return false;
+    const cs = getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return false;
+    return true;
+  };
+
+  document.querySelectorAll('[data-ai-ref]').forEach(el => el.removeAttribute('data-ai-ref'));
+
+  const lines = [];
+  let counter = 0;
+  const elements = document.querySelectorAll(SELECTOR);
+  for (const el of elements) {
+    if (!IS_VISIBLE(el)) continue;
+    const ref = 'e' + (++counter);
+    el.setAttribute('data-ai-ref', ref);
+    const role = ROLE_FROM_TAG(el);
+    const name = ACC_NAME(el).replace(/"/g, '\\\\"').slice(0, 80);
+    lines.push('- ' + role + ' "' + name + '" [ref=' + ref + ']' + STATE(el));
+  }
+  return lines.join('\\n');
+})()`;
+
 const captureSnapshot = async (tabId: number): Promise<string> => {
   try {
     return await withPlaywrightPage(tabId, async (page: Page) => {
-      const body = page.locator('body');
-      if (typeof (body as any).ariaSnapshot === 'function') {
-        const snapshot = await (body as any).ariaSnapshot({ timeout: 5000 }) as string;
-        return snapshot.length > 4000 ? snapshot.slice(0, 4000) + '\n... (truncated)' : snapshot;
-      }
-      return '';
+      const refLines = await page.evaluate(SNAPSHOT_REF_INJECTOR).catch(() => '') as string;
+      let aria = '';
+      try {
+        const body = page.locator('body');
+        if (typeof (body as any).ariaSnapshot === 'function') {
+          aria = await (body as any).ariaSnapshot({ timeout: 5000 }) as string;
+        }
+      } catch { /* aria snapshot best-effort */ }
+
+      const refSection = refLines
+        ? '# Interactive elements (use [ref=eN] in fill_form, click_element, press_key)\n' + refLines
+        : '';
+      const ariaSection = aria
+        ? '\n\n# Page structure\n' + (aria.length > 4000 ? aria.slice(0, 4000) + '\n... (truncated)' : aria)
+        : '';
+      const out = (refSection + ariaSection).trim();
+      return out.length > 6000 ? out.slice(0, 6000) + '\n... (truncated)' : out;
     });
   } catch {
     return '';
@@ -297,11 +431,15 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
 
   async fill_form(params) {
     const fields = params.fields as Array<{
+      ref?: string;
       selector?: string;
       label?: string;
       role?: string;
+      name?: string;
       placeholder?: string;
-      value: string;
+      value?: string;
+      values?: string[];
+      checked?: boolean;
       type?: string;
     }>;
     const iframeSelector = params.iframe as string | undefined;
@@ -311,47 +449,110 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
       const fieldResults: Array<{ field: string; success: boolean; error?: string }> = [];
 
       for (const field of fields) {
-        try {
-          const context = iframeSelector ? page.frameLocator(iframeSelector) : page;
+        const fieldId = field.ref ? `ref=${field.ref}` :
+          field.label || (field.role && field.name ? `${field.role}:${field.name}` : '') ||
+          field.placeholder || field.selector || 'unknown';
 
+        try {
+          // Build locator with strict preference order: ref > label > role+name >
+          // placeholder > selector. role-only is REJECTED — it silently filled the
+          // first matching element on the page (a real bug, not a feature).
           let locator;
-          if (field.label) {
-            locator = context.getByLabel(field.label);
-          } else if (field.role) {
-            locator = context.getByRole(field.role as Parameters<typeof context.getByRole>[0]);
-          } else if (field.placeholder) {
-            locator = context.getByPlaceholder(field.placeholder);
-          } else if (field.selector) {
-            locator = context.locator(field.selector);
+          if (field.ref) {
+            // ref locators ignore the iframe parameter — refs are page-wide and
+            // injected only in the top frame today (documented limitation).
+            locator = page.locator(`[data-ai-ref="${field.ref}"]`);
           } else {
-            fieldResults.push({ field: JSON.stringify(field), success: false, error: 'No locator provided' });
-            continue;
+            const context = iframeSelector ? page.frameLocator(iframeSelector) : page;
+            if (field.label) {
+              locator = context.getByLabel(field.label);
+            } else if (field.role) {
+              if (!field.name) {
+                fieldResults.push({
+                  field: fieldId,
+                  success: false,
+                  error: 'role requires a `name` (e.g., {role: "textbox", name: "Email"}). Use ref from snapshot for unambiguous targeting.',
+                });
+                continue;
+              }
+              locator = context.getByRole(
+                field.role as Parameters<typeof context.getByRole>[0],
+                { name: field.name },
+              );
+            } else if (field.placeholder) {
+              locator = context.getByPlaceholder(field.placeholder);
+            } else if (field.selector) {
+              locator = context.locator(field.selector);
+            } else {
+              fieldResults.push({ field: fieldId, success: false, error: 'No locator (ref, label, role+name, placeholder, or selector required)' });
+              continue;
+            }
           }
 
-          const fieldId = field.label || field.role || field.placeholder || field.selector || 'unknown';
+          // Auto-detect element type from the DOM. Only used when `field.type`
+          // is not provided. This prevents the bug where omitting `type` for a
+          // <select> caused locator.fill() to throw "element is not an input".
+          let detected: { tag: string; type: string; multiple: boolean; ce: boolean } = { tag: '', type: '', multiple: false, ce: false };
+          if (!field.type) {
+            try {
+              detected = await locator.evaluate((el: Element) => ({
+                tag: (el as HTMLElement).tagName,
+                type: ((el as HTMLInputElement).type || '').toLowerCase(),
+                multiple: !!(el as HTMLSelectElement).multiple,
+                ce: (el as HTMLElement).isContentEditable,
+              })) as { tag: string; type: string; multiple: boolean; ce: boolean };
+            } catch {
+              // Locator didn't resolve — let the action below throw a clearer error
+            }
+          }
 
-          switch (field.type) {
-            case 'select':
-              await locator.selectOption(field.value);
+          const effectiveType =
+            field.type ??
+            (detected.tag === 'SELECT' ? 'select' :
+             detected.type === 'checkbox' ? 'checkbox' :
+             detected.type === 'radio' ? 'radio' :
+             detected.type === 'file' ? 'file' :
+             'text');
+
+          const valueStr = field.value ?? '';
+
+          switch (effectiveType) {
+            case 'select': {
+              const opts = field.values ?? (valueStr ? [valueStr] : []);
+              if (opts.length === 0) {
+                fieldResults.push({ field: fieldId, success: false, error: 'select requires `value` or `values`' });
+                continue;
+              }
+              await locator.selectOption(detected.multiple ? opts : opts[0]);
               break;
-            case 'checkbox':
-              if (field.value === 'true' || field.value === 'on') await locator.check();
+            }
+            case 'checkbox': {
+              // Prefer explicit `checked`. Fallback: parse common truthy strings.
+              const truthy = field.checked ?? /^(true|on|yes|1|checked)$/i.test(valueStr);
+              if (truthy) await locator.check();
               else await locator.uncheck();
               break;
-            case 'radio':
+            }
+            case 'radio': {
+              // Radios cannot be unchecked individually. `checked: false` is a
+              // user error — radios are selected by checking a different one.
+              if (field.checked === false) {
+                fieldResults.push({ field: fieldId, success: false, error: 'radio cannot be unchecked; check a sibling radio instead' });
+                continue;
+              }
               await locator.check();
               break;
+            }
             case 'file':
-              await locator.setInputFiles(field.value);
+              await locator.setInputFiles(field.values ?? valueStr);
               break;
             default:
-              await locator.fill(field.value);
+              await locator.fill(valueStr);
               break;
           }
 
           fieldResults.push({ field: fieldId, success: true });
         } catch (err) {
-          const fieldId = field.label || field.role || field.placeholder || field.selector || 'unknown';
           fieldResults.push({
             field: fieldId,
             success: false,
@@ -367,6 +568,7 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
   },
 
   async click_element(params) {
+    const ref = (params.ref as string | undefined) ?? null;
     const selector = (params.selector as string) ?? null;
     const text = (params.text as string) ?? null;
     const index = (params.index as number) ?? 0;
@@ -374,12 +576,14 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
 
     const result = await withPlaywrightPage(tab.id!, async (page) => {
       let locator;
-      if (text) {
+      if (ref) {
+        locator = page.locator(`[data-ai-ref="${ref}"]`);
+      } else if (text) {
         locator = page.getByText(text, { exact: false });
       } else if (selector) {
         locator = page.locator(selector);
       } else {
-        throw new Error('Must provide selector or text');
+        throw new Error('Must provide ref, selector, or text');
       }
 
       if (index > 0) locator = locator.nth(index);
@@ -397,6 +601,27 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
     });
 
     return withSnapshot(tab.id!, { content: [{ type: 'text', text: JSON.stringify({ success: true, element: result }) }] });
+  },
+
+  async press_key(params) {
+    const ref = (params.ref as string | undefined) ?? null;
+    const selector = (params.selector as string | undefined) ?? null;
+    const key = params.key as string;
+    if (!key) throw new Error('press_key requires `key` (e.g., "Enter", "Escape", "Tab")');
+    const tab = await getTab(params.tab_id as number | undefined);
+
+    await withPlaywrightPage(tab.id!, async (page) => {
+      if (ref) {
+        await page.locator(`[data-ai-ref="${ref}"]`).press(key);
+      } else if (selector) {
+        await page.locator(selector).press(key);
+      } else {
+        // No target — fire as a global keyboard event on the page.
+        await page.keyboard.press(key);
+      }
+    });
+
+    return withSnapshot(tab.id!, { content: [{ type: 'text', text: JSON.stringify({ success: true, key }) }] });
   },
 
   async extract_table(params) {
