@@ -22,6 +22,10 @@ export interface LockFileResult {
 }
 
 function getLockDir(): string {
+  // Test/integration override — same env var native-host honors. Allows tests
+  // to point both the service AND the discovery helper at a temp dir without
+  // touching the user's real installation.
+  if (process.env['COPILOT_LOCK_DIR']) return process.env['COPILOT_LOCK_DIR'];
   switch (platform()) {
     case 'win32':
       return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'ai-browser-copilot');

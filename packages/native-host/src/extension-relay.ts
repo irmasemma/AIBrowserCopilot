@@ -63,6 +63,7 @@ const handleConnection = (ws: WebSocket, _req: { url?: string }): void => {
   // No token auth needed — server binds to 127.0.0.1 only (localhost)
 
   extensionSocket = ws;
+  process.stderr.write(`[relay] extension WS connected\n`);
 
   // AD-18: Extension arrived — delete wake signal
   deleteWakeFile();
@@ -101,8 +102,15 @@ const handleConnection = (ws: WebSocket, _req: { url?: string }): void => {
   });
 
   ws.on('close', () => {
+    process.stderr.write(`[relay] extension WS closed\n`);
+    // Only null out the global if THIS ws is still the active one. If the
+    // extension already reconnected, extensionSocket points at the newer ws —
+    // mustn't clobber it.
+    if (extensionSocket !== ws) {
+      return;
+    }
     extensionSocket = null;
-    // Reject all pending requests
+    // Reject all pending requests bound to this socket
     for (const [id, pending] of pendingRequests) {
       clearTimeout(pending.timer);
       pending.reject(new Error('Extension disconnected'));

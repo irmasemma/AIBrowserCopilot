@@ -25016,6 +25016,8 @@ function getServerInfo() {
 }
 var handleConnection = (ws, _req) => {
   extensionSocket = ws;
+  process.stderr.write(`[relay] extension WS connected
+`);
   deleteWakeFile();
   ws.send(JSON.stringify(getServerInfo()));
   ws.on("message", (data) => {
@@ -25040,6 +25042,11 @@ var handleConnection = (ws, _req) => {
     }
   });
   ws.on("close", () => {
+    process.stderr.write(`[relay] extension WS closed
+`);
+    if (extensionSocket !== ws) {
+      return;
+    }
     extensionSocket = null;
     for (const [id, pending] of pendingRequests) {
       clearTimeout(pending.timer);

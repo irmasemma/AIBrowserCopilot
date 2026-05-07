@@ -28,6 +28,7 @@ var import_node_path = require("node:path");
 var import_node_os = require("node:os");
 var import_node_net = __toESM(require("node:net"), 1);
 function getLockDir() {
+  if (process.env["COPILOT_LOCK_DIR"]) return process.env["COPILOT_LOCK_DIR"];
   switch ((0, import_node_os.platform)()) {
     case "win32":
       return (0, import_node_path.join)(process.env.LOCALAPPDATA ?? (0, import_node_path.join)((0, import_node_os.homedir)(), "AppData", "Local"), "ai-browser-copilot");
