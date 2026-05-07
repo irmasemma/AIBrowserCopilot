@@ -5,7 +5,7 @@ import type { DownloadProgress, InstallResult } from '../installers/binary-insta
 import type { RegistrationResult } from '../installers/host-registrar.js';
 import type { HealthCheckResult } from '../installers/health-check.js';
 import type { ToolDetectionSummary } from '../detectors/types.js';
-import { downloadBinary, isBinaryInstalled } from '../installers/binary-installer.js';
+import { downloadBinary, isBinaryInstalled, installFromLocal } from '../installers/binary-installer.js';
 import { registerHost } from '../installers/host-registrar.js';
 import { registerAllBrowsers } from '../installers/browser-registrar.js';
 import { checkBinaryHealth } from '../installers/health-check.js';
@@ -34,6 +34,7 @@ export interface CliFlags {
   update: boolean;
   uninstall: boolean;
   extensionId?: string;
+  fromLocal?: string;
 }
 
 export interface AppProps {
@@ -165,13 +166,18 @@ export const App: React.FC<AppProps> = ({
       try {
         setInstallStatus('downloading');
         const installDir = getInstallDir(platform);
-        const dlResult: InstallResult = await downloadFn(
-          platform,
-          installDir,
-          (p: DownloadProgress) => {
-            if (!cancelled) setProgress(p);
-          },
-        );
+        // --from-local <path> bypasses the GitHub download and copies pre-built
+        // binaries from a local source directory (used during development /
+        // testing when the published release doesn't yet have new asset names).
+        const dlResult: InstallResult = flags.fromLocal
+          ? await installFromLocal(platform, installDir, flags.fromLocal)
+          : await downloadFn(
+              platform,
+              installDir,
+              (p: DownloadProgress) => {
+                if (!cancelled) setProgress(p);
+              },
+            );
 
         if (cancelled) return;
 

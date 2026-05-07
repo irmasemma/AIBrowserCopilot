@@ -278,6 +278,54 @@ const cleanupFile = (path: string): void => {
 };
 
 /**
+ * Install pre-built binaries from a local directory instead of downloading
+ * from the GitHub release. Useful for development/testing flows where the
+ * latest release on GitHub doesn't yet have the new asset names. Same
+ * taskkill-then-place behavior as downloadBinary, just without the network.
+ */
+export const installFromLocal = async (
+  platform: PlatformInfo,
+  installDir: string,
+  sourceDir: string,
+): Promise<InstallResult> => {
+  const { copyFileSync } = await import('node:fs');
+  const stubAsset = getStubAssetName(platform.os, platform.arch);
+  const serviceAsset = getServiceAssetName(platform.os, platform.arch);
+  const stubSource = join(sourceDir, stubAsset);
+  const serviceSource = join(sourceDir, serviceAsset);
+  if (!existsSync(stubSource) || !existsSync(serviceSource)) {
+    return {
+      success: false,
+      binaryPath: join(installDir, stubAsset),
+      error:
+        `Local source missing required artifacts. Expected:\n` +
+        `  ${stubSource}\n  ${serviceSource}`,
+    };
+  }
+  if (!existsSync(installDir)) {
+    mkdirSync(installDir, { recursive: true });
+  }
+  killRunningNativeHosts(platform);
+  try {
+    const stubTarget = join(installDir, stubAsset);
+    const serviceTarget = join(installDir, serviceAsset);
+    copyFileSync(serviceSource, serviceTarget);
+    copyFileSync(stubSource, stubTarget);
+    if (platform.os !== 'windows') {
+      chmodSync(stubTarget, 0o755);
+      chmodSync(serviceTarget, 0o755);
+    }
+    return { success: true, binaryPath: stubTarget, servicePath: serviceTarget };
+  } catch (err) {
+    return {
+      success: false,
+      binaryPath: join(installDir, stubAsset),
+      error: `Local install failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+};
+
+/**
  * "Installed" requires both the stub and the service to be present — neither
  * works alone after the multi-client refactor.
  */

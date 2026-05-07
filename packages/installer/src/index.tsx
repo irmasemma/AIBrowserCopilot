@@ -29,6 +29,7 @@ const main = (): void => {
       --update       Update existing installation
       --uninstall    Remove installation and configs
       --extension-id Chrome extension ID (for development)
+      --from-local   Use pre-built binaries from <path> instead of downloading
 
     Examples
       $ ai-browser-copilot-setup
@@ -36,6 +37,7 @@ const main = (): void => {
       $ ai-browser-copilot-setup --tools vscode,cursor
       $ ai-browser-copilot-setup --update
       $ ai-browser-copilot-setup --uninstall
+      $ ai-browser-copilot-setup --from-local ./packages/native-host/bin
   `,
     {
       importMeta: import.meta,
@@ -45,6 +47,7 @@ const main = (): void => {
         update: { type: 'boolean', default: false },
         uninstall: { type: 'boolean', default: false },
         extensionId: { type: 'string' },
+        fromLocal: { type: 'string' },
       },
     },
   );
