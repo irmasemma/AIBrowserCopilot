@@ -1,55 +1,81 @@
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { createMcpServer } from './mcp-server.js';
-import { startRelay, setStartedBy } from './extension-relay.js';
+import net from 'node:net';
+import { WebSocket } from 'ws';
+import { startServer } from './service.js';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
+const PORT = 7483;
 
 if (process.argv.includes('--version')) {
   process.stdout.write(`${VERSION}\n`);
   process.exit(0);
 }
 
-// Detect which AI tool started us
-const startedByArg = process.argv.find((a) => a.startsWith('--started-by='));
+// Pause stdin so no data is lost during the port probe
+process.stdin.pause();
 
-function detectStartedBy(): string {
-  if (startedByArg) return startedByArg.split('=')[1];
-  if (process.env['COPILOT_STARTED_BY']) return process.env['COPILOT_STARTED_BY'];
-  // Auto-detect from known environment variables set by AI tools
-  if (process.env['CLAUDECODE'] || process.env['CLAUDE_CODE_ENTRYPOINT']) return 'Claude Code';
-  if (process.env['CURSOR_TRACE_ID'] || process.env['CURSOR_CHANNEL']) return 'Cursor';
-  if (process.env['VSCODE_PID'] || process.env['TERM_PROGRAM'] === 'vscode') return 'VS Code';
-  if (process.env['WINDSURF_SESSION']) return 'Windsurf';
-  // Check parent process name via ppid
-  try {
-    const ppid = process.ppid;
-    if (ppid) {
-      const { execSync } = require('node:child_process');
-      const parentName = execSync(`tasklist /FI "PID eq ${ppid}" /FO CSV /NH`, { encoding: 'utf-8', timeout: 2000 }).toLowerCase();
-      if (parentName.includes('claude')) return 'Claude Code';
-      if (parentName.includes('code.exe')) return 'VS Code';
-      if (parentName.includes('cursor')) return 'Cursor';
-      if (parentName.includes('windsurf')) return 'Windsurf';
+const probe = net.createServer();
+probe.listen(PORT, '127.0.0.1', () => {
+  // Port free → we are the server
+  probe.close(() => startServer(PORT));
+});
+probe.on('error', () => {
+  // Port taken → connect as WS client, proxy stdio ↔ WS
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}?role=mcp`);
+
+  // Collect raw stdin chunks until WS is ready
+  const pending: Buffer[] = [];
+  let wsReady = false;
+
+  // Parser that handles Content-Length framing
+  let parseBuf = Buffer.alloc(0);
+  let contentLength = -1;
+
+  function feedParser(chunk: Buffer): void {
+    parseBuf = Buffer.concat([parseBuf, chunk]);
+    while (true) {
+      if (contentLength === -1) {
+        const headerEnd = parseBuf.indexOf('\r\n\r\n');
+        if (headerEnd === -1) break;
+        const header = parseBuf.subarray(0, headerEnd).toString();
+        const match = header.match(/Content-Length:\s*(\d+)/i);
+        if (!match) { parseBuf = parseBuf.subarray(headerEnd + 4); continue; }
+        contentLength = parseInt(match[1], 10);
+        parseBuf = parseBuf.subarray(headerEnd + 4);
+      }
+      if (contentLength >= 0 && parseBuf.length >= contentLength) {
+        const json = parseBuf.subarray(0, contentLength).toString();
+        parseBuf = parseBuf.subarray(contentLength);
+        contentLength = -1;
+        if (wsReady) ws.send(json);
+      } else {
+        break;
+      }
     }
-  } catch {
-    // Ignore — parent process detection is best-effort
   }
-  return 'unknown';
-}
 
-const startedBy = detectStartedBy();
-setStartedBy(startedBy);
+  // Start reading stdin immediately
+  process.stdin.on('data', (chunk: Buffer) => {
+    if (wsReady) {
+      feedParser(Buffer.from(chunk));
+    } else {
+      pending.push(Buffer.from(chunk));
+    }
+  });
+  process.stdin.resume();
 
-const main = async () => {
-  const port = await startRelay();
-  process.stderr.write(`Extension relay listening on 127.0.0.1:${port}\n`);
+  ws.on('open', () => {
+    wsReady = true;
+    // Feed buffered chunks
+    for (const chunk of pending) feedParser(chunk);
+    pending.length = 0;
 
-  const server = createMcpServer();
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-};
+    ws.on('message', (data) => {
+      const body = data.toString();
+      process.stdout.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+    });
+  });
 
-main().catch((error: unknown) => {
-  process.stderr.write(`Fatal error: ${error}\n`);
-  process.exit(1);
+  ws.on('close', () => process.exit(0));
+  ws.on('error', () => process.exit(1));
+  process.stdin.on('end', () => { ws.close(); process.exit(0); });
 });

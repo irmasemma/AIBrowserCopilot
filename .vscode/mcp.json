@@ -1,10 +1,8 @@
 {
   "mcpServers": {
     "ai-browser-copilot": {
-      "command": "node",
-      "args": [
-        "C:/Dev/1M/ai-browser-copilot/packages/native-host/dist/index.js"
-      ]
+      "command": "${env:LOCALAPPDATA}/ai-browser-copilot/ai-browser-copilot-win-x64.exe",
+      "args": []
     }
   }
 }

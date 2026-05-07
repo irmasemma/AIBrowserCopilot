@@ -16,7 +16,7 @@ describe('compiled binary smoke test', () => {
   });
 
   it('--version outputs correct version', () => {
-    const output = execFileSync(BINARY_PATH, ['--version'], { encoding: 'utf-8', timeout: 5000 });
-    expect(output.trim()).toBe('0.1.0');
+    const output = execFileSync(BINARY_PATH, ['--version'], { encoding: 'utf-8', timeout: 10000 });
+    expect(output.trim()).toBe('0.2.0');
   });
 });

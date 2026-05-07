@@ -27,6 +27,8 @@ const buildDiagnosticsText = (serverInfo: ServerInfo | null, ctx: ConnectionCont
     `Version: ${serverInfo?.version ?? 'N/A'}`,
     `Uptime: ${uptime}`,
     `Started by: ${serverInfo?.startedBy ?? 'N/A'}`,
+    `Browsers: ${serverInfo?.connectedBrowsers?.join(', ') || 'N/A'}`,
+    `MCP clients: ${serverInfo?.connectedStubs ?? 'N/A'}`,
     `Reconnects this session: ${ctx.reconnectsThisSession}`,
     `Missed heartbeats: ${ctx.missedHeartbeats}`,
   ];
@@ -70,6 +72,8 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
       <div>Version: {serverInfo?.version ?? 'N/A'}</div>
       <div>Uptime: {connectionContext.lastConnectedAt ? formatUptime((now - connectionContext.lastConnectedAt) / 1000) : 'N/A'}</div>
       <div>Started by: {serverInfo?.startedBy ?? 'N/A'}</div>
+      <div>Browsers: {serverInfo?.connectedBrowsers?.join(', ') || 'N/A'}</div>
+      <div>MCP clients: {serverInfo?.connectedStubs ?? 'N/A'}</div>
       <div>Reconnects: {connectionContext.reconnectsThisSession}</div>
       <div>Missed heartbeats: {connectionContext.missedHeartbeats}</div>
       {connectionContext.error && (

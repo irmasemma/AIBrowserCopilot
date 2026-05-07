@@ -30,8 +30,21 @@ export const ConnectionHeader: FunctionalComponent = () => {
         : `${Math.round(age / 60_000)}m ago`;
       return `Last confirmed ${ago}`;
     }
-    if (displayState === 'connected' && serverInfo?.startedBy && serverInfo.startedBy !== 'unknown') {
-      return `Connected via ${serverInfo.startedBy}`;
+    if (displayState === 'connected' && serverInfo) {
+      const parts: string[] = [];
+      if (serverInfo.connectedStubs && serverInfo.connectedStubs > 0) {
+        parts.push(`${serverInfo.connectedStubs} AI tool${serverInfo.connectedStubs > 1 ? 's' : ''}`);
+      }
+      if (serverInfo.connectedBrowsers && serverInfo.connectedBrowsers.length > 1) {
+        parts.push(`${serverInfo.connectedBrowsers.length} browsers`);
+      }
+      if (parts.length > 0) {
+        return `Connected — ${parts.join(', ')}`;
+      }
+      if (serverInfo.startedBy && serverInfo.startedBy !== 'unknown' && serverInfo.startedBy !== 'service') {
+        return `Connected via ${serverInfo.startedBy}`;
+      }
+      return 'Connected';
     }
     if (state === 'reconnecting') {
       return `Reconnecting (attempt ${failureCount})...`;

@@ -8,6 +8,7 @@ export interface LockFileData {
   pid: number;
   port: number;
   token: string;
+  ipcPath: string;
   startedAt: string;
   version: string;
   startedBy: string;
@@ -28,6 +29,13 @@ function getLockDir(): string {
 
 export function getLockFilePath(): string {
   return join(getLockDir(), 'server.lock');
+}
+
+export function getIpcPath(): string {
+  if (platform() === 'win32') {
+    return `\\\\.\\pipe\\ai-browser-copilot-${process.pid}`;
+  }
+  return join(getLockDir(), `service-${process.pid}.sock`);
 }
 
 export function getWakeFilePath(): string {
@@ -125,30 +133,6 @@ function probeWebSocket(port: number, expectedPid: number, timeoutMs: number = 3
       resolve(false);
     };
   });
-}
-
-export function killProcess(pid: number): boolean {
-  try {
-    process.kill(pid, 'SIGTERM');
-    return true;
-  } catch {
-    return false; // Process already dead
-  }
-}
-
-export async function waitForProcessExit(pid: number, timeoutMs: number = 3000): Promise<boolean> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (!isProcessAlive(pid)) return true;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  // Last resort: force kill
-  try {
-    process.kill(pid, 'SIGKILL');
-  } catch {
-    // Already dead
-  }
-  return !isProcessAlive(pid);
 }
 
 export async function checkExistingInstance(lockPath?: string): Promise<InstanceCheck> {

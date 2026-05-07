@@ -8,8 +8,6 @@ import {
   deleteLockFile,
   generateToken,
   checkExistingInstance,
-  killProcess,
-  waitForProcessExit,
   type LockFileData,
 } from './lock-file-manager.js';
 
@@ -21,6 +19,7 @@ function makeLockData(overrides?: Partial<LockFileData>): LockFileData {
     pid: process.pid,
     port: 7483,
     token: 'abc123',
+    ipcPath: '',
     startedAt: new Date().toISOString(),
     version: '0.1.0',
     startedBy: 'test',
@@ -158,16 +157,4 @@ describe('lock-file-manager', () => {
     });
   });
 
-  describe('killProcess', () => {
-    it('returns false for a non-existent PID', () => {
-      expect(killProcess(999999)).toBe(false);
-    });
-  });
-
-  describe('waitForProcessExit', () => {
-    it('returns true immediately for a dead PID', async () => {
-      const result = await waitForProcessExit(999999, 1000);
-      expect(result).toBe(true);
-    });
-  });
 });

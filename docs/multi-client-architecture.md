@@ -1,321 +1,224 @@
 # Multi-Client Architecture
 
-**Status:** Proposal — branch `multi-client-architecture`
+**Status:** Implemented on `multi-client-architecture` branch
 **Date:** 2026-05-06
-**Scope:** native-host, native-host-helper, extension, installer
+**Scope:** native-host, extension
 
-This document captures the design for letting multiple MCP clients (Claude Desktop, Claude Code, VS Code, Cursor, ...) and multiple browsers (Chrome, Edge, Brave, ...) share one local relay simultaneously, without the current "second client kills the first" behavior.
+This document describes how multiple MCP clients (Claude Desktop, Claude Code, VS Code, Cursor, …) and multiple browsers (Chrome, Edge, Brave, …) share **one** local relay simultaneously.
 
 ---
 
-## 1. Problem
+## 1. Goals
 
-Today, when a second MCP client launches its own native host, the new host hits `checkExistingInstance === 'alive'` and **kills** the previous host's PID:
+- Any number of MCP clients on one machine — no client kills another.
+- Any number of browsers connected — selectable per tool call via `browser` parameter.
+- One small binary, no helpers, no IPC sockets, no native messaging discovery.
+- First spawn becomes the server; later spawns auto‑detect and become WS clients.
+
+---
+
+## 2. Architecture (one diagram)
+
+```
+                    ┌─────────────────────────────────────────────────────┐
+                    │           ai-browser-copilot-win-x64.exe            │
+                    │      (single binary, two roles, port 7483)          │
+                    │                                                     │
+ stdio MCP ───────► │  PRIMARY (first spawn)                              │
+ (this client)      │   ├─ port 7483 free → bind WS server                │
+                    │   ├─ handle own stdio MCP                           │
+                    │   ├─ accept WS extensions  (?browserId=…)           │
+                    │   └─ accept WS MCP clients (?role=mcp)              │
+                    │                                                     │
+ stdio MCP ───────► │  SECONDARY (later spawns)                           │
+ (other clients)    │   ├─ port 7483 taken → connect ws://127.0.0.1:7483  │
+                    │   └─ proxy own stdio ↔ WS (Content-Length framed)   │
+                    └─────────────────────────────────────────────────────┘
+                              ▲                            ▲
+                  ws://…?browserId=chrome     ws://…?browserId=edge
+                              │                            │
+                       ┌──────┴──────┐              ┌──────┴──────┐
+                       │  Chrome ext │              │   Edge ext  │
+                       └─────────────┘              └─────────────┘
+```
+
+Total moving parts: **1 binary, 1 TCP port**. No lock file for discovery, no
+helper binary, no native-messaging manifest required for connection setup.
+
+---
+
+## 3. Process flow
+
+### 3.1 Binary startup (`packages/native-host/src/index.ts`)
 
 ```ts
-// packages/native-host/src/extension-relay.ts:138-146
-const status = await checkExistingInstance(lockPath);
-if (status === 'alive') {
-  const lock = readLockFile(lockPath);
-  if (lock) {
-    process.stderr.write(`Taking over from existing instance (PID ${lock.pid})\n`);
-    killProcess(lock.pid);                 // ⚠ this is the bug
-    await waitForProcessExit(lock.pid);
-  }
-}
+const PORT = 7483;
+const probe = net.createServer();
+probe.listen(PORT, '127.0.0.1', () => {
+  // Port free → become server; own stdio is the "primary" MCP client
+  probe.close(() => startServer(PORT));
+});
+probe.on('error', () => {
+  // Port taken → connect as WS MCP client; proxy stdio↔WS
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}?role=mcp`);
+  // …Content-Length framing both directions
+});
 ```
 
-This means everyday setups fail:
-
-- 2 VS Code windows in parallel → 2nd kills 1st
-- Claude Desktop + Claude Code → 2nd kills 1st
-- 2 Claude Code terminals → 2nd kills 1st
-
-The browser side has the same shape of bug: the WS server holds a single `_ws` and evicts any prior one, so Chrome + Edge cannot be connected at the same time.
-
----
-
-## 2. Glossary
-
-| Term | Meaning |
-|---|---|
-| **MCP** | Model Context Protocol — JSON-RPC over stdio between LLM client and tool server. |
-| **WS** | WebSocket — persistent bi-directional TCP socket. URL: `ws://127.0.0.1:<port>`. |
-| **Service** | Long-lived local process. Owns the WS to extensions, owns the lock file, multiplexes all stubs. Singleton per machine per user. |
-| **Stub** | Tiny per-MCP-client process. Replaces today's native host as the binary spawned over stdio. Pipes stdio ↔ IPC to the service. Has zero browser logic. |
-| **IPC** | Local interprocess channel between stub ↔ service. Unix domain socket on macOS/Linux, Windows named pipe. |
-| **Lock file** | `%LOCALAPPDATA%/ai-browser-copilot/server.lock`. Holds service PID, WS port, IPC path, auth token. |
-
----
-
-## 3. Today's architecture (single-client)
-
-```
-┌─────────────────┐  stdio MCP   ┌────────────────────────────────────┐
-│  MCP Client     │ ◄──────────► │  Native Host (Node.js)              │
-│ (Claude Code,   │              │                                     │
-│  VS Code, ...)  │              │  • MCP server over stdio            │
-└─────────────────┘              │  • startRelay():                    │
-                                 │     - checkExistingInstance         │
-                                 │     - if 'alive' → KILL old PID ⚠   │
-                                 │     - open WS on dyn port           │
-                                 │     - write lock file               │
-                                 │  • forwards tool calls to extension │
-                                 └────────┬──────────────┬─────────────┘
-                                          │              │
-                          writes lock     │              │  WS ?token=…
-                                          ▼              ▼
-                              ┌────────────────────┐  ┌──────────────────────────────┐
-                              │  server.lock file  │  │  Chrome Extension            │
-                              │  %LOCALAPPDATA%/   │  │  ┌────────────────────────┐  │
-                              │  ai-browser-copilot│  │  │ Service Worker         │  │
-                              │  /server.lock      │  │  │  • discovers via       │  │
-                              └────────▲───────────┘  │  │    com.copilot.        │  │
-                                       │ reads via    │  │    native_host_helper  │  │
-                                       │              │  │  • opens single WS     │  │
-                              ┌────────┴───────────┐  │  │  • tool-dispatcher     │  │
-                              │  Native messaging  │ ◄┼──┤    routes by tab_id    │  │
-                              │  helper (one-shot) │  │  └────────────────────────┘  │
-                              │  (read lock file)  │  │  ┌────────────────────────┐  │
-                              └────────────────────┘  │  │ Side Panel chat        │  │
-                                                      │  │  follows active tab    │  │
-                                                      │  └────────────────────────┘  │
-                                                      └──────────┬───────────────────┘
-                                                                 │ chrome.tabs / scripting
-                                                                 ▼
-                                                      ┌──────────────────────────────┐
-                                                      │   Browser tabs (any number)  │
-                                                      └──────────────────────────────┘
-```
-
-**Wins over browsermcp/mcp:** dynamic port, token auth, explicit `tab_id` tool routing, multi-tab per client, multi-browser native-host registration.
-
-**Same flaw as browsermcp:** hostile takeover on second host launch (see §1).
-
----
-
-## 4. Proposed architecture — service + stubs
-
-One long-lived **service** owns the WS to extensions and the lock file. Every MCP client launches a tiny **stub** that proxies stdio ↔ IPC to the service. The first stub auto-spawns the service if it isn't already running. The service stays alive as long as any stub is connected, plus an idle timeout.
-
-```
-                          ╔════════════════════════════════════════════════════════════╗
-                          ║                      Local machine                          ║
-                          ╚════════════════════════════════════════════════════════════╝
-
-  MCP CLIENTS (stdio)                    ONE SERVICE                       BROWSERS (WS)
-  ─────────────                          ──────────────                    ──────────────────────
-  ┌──────────┐ stdio  ┌──────┐ IPC                                         ┌────────────────────┐
-  │Claude    │ ◄────► │stub 1│ ◄──┐                                    ┌─► │Chrome              │
-  │ Desktop  │        └──────┘    │                                    │   │ browserId=chrome   │
-  └──────────┘                    │                                    │   │  ┌────┐ ┌────┐     │
-                                  │                                    │   │  │tab1│ │tab5│ ... │
-  ┌──────────┐ stdio  ┌──────┐ IPC│                                    │   │  └────┘ └────┘     │
-  │Claude    │ ◄────► │stub 2│ ◄──┤                                    │   └────────────────────┘
-  │ Code A   │        └──────┘    │   ┌────────────────────────────┐   │
-  └──────────┘                    │   │      Service               │   │   ┌────────────────────┐
-                                  ├──►│                            │ ◄─┤   │Edge                │
-  ┌──────────┐ stdio  ┌──────┐ IPC│   │ Map<stubId, IPCSocket>     │   ├─► │ browserId=edge     │
-  │ VS Code  │ ◄────► │stub 3│ ◄──┤   │ Map<browserId, WebSocket>  │   │   │  ┌────┐ ┌────┐     │
-  └──────────┘        └──────┘    │   │ Map<reqId,                 │   │   │  │tab1│ │tab3│ ... │
-                                  │   │   {stubId, browserId,      │   │   │  └────┘ └────┘     │
-  ┌──────────┐ stdio  ┌──────┐ IPC│   │    startedAt}>             │   │   └────────────────────┘
-  │ Cursor   │ ◄────► │stub 4│ ◄──┘   │                            │ ◄─┤
-  └──────────┘        └──────┘        │ Routes:                    │   │   ┌────────────────────┐
-                                      │   in:  stub  →  service    │   └─► │Brave               │
-                                      │        (by stubId)         │       │ browserId=brave    │
-                                      │   out: service →  ext      │       │  ┌────┐            │
-                                      │        (by browserId)      │       │  │tab1│ ...        │
-                                      │   ack: ext    →  stub      │       │  └────┘            │
-                                      │        (by reqId map)      │       └────────────────────┘
-                                      └────────────────────────────┘
-```
-
-### 4.1 Routing keys
-
-| ID | Set by | Scope | Purpose |
-|---|---|---|---|
-| `browserId` | Extension on WS connect (e.g. `?browserId=chrome`) | chrome / edge / brave / arc / vivaldi | Pick the right WS |
-| `tabId` | The browser itself (`chrome.tabs` API) | Per browser instance — **not unique across browsers** | Pick the right tab |
-| `stubId` | Service assigns on stub IPC connect | Per running MCP client | Route response back to correct stub |
-| `requestId` | MCP client (existing JSON-RPC `id`) | Per call within one stub | Match call ↔ response |
-
-`(stubId, requestId)` uniquely identifies a call in flight. `(browserId, tabId)` uniquely identifies a tab.
-
-### 4.2 Tool call surface
+Because both modes are produced by the **same** binary, the MCP host (`mcp.json`,
+`claude_desktop_config.json`, etc.) only ever needs to know one path:
 
 ```jsonc
+// .vscode/mcp.json
 {
-  "tool": "click_element",
-  "args": {
-    "selector": "...",
-    "browser":  "chrome",   // optional, default = configured/last-used
-    "tab_id":   5           // optional, default = active tab in that browser
+  "servers": {
+    "ai-browser-copilot": {
+      "command": "${env:LOCALAPPDATA}/ai-browser-copilot/ai-browser-copilot-win-x64.exe",
+      "args": []
+    }
   }
 }
 ```
 
-If `browser` is omitted: route to default browser (last-connected, or user-pinned).
-If `tab_id` is omitted: extension uses active-tab fallback (already implemented in `tool-dispatcher.ts:21-40`).
+### 3.2 Server (`packages/native-host/src/service.ts`)
 
-### 4.3 Stub — pseudocode
+The first binary that grabs port 7483 runs:
 
-```js
-// The whole stub fits on one screen
-const lock = readLockFile() ?? await spawnServiceAndWait();
-const sock = net.connect(lock.ipcPath);
-process.stdin.pipe(sock);
-sock.pipe(process.stdout);
-sock.on('close', () => process.exit(0));
+- `WebSocketServer` on `127.0.0.1:7483`
+- One stdio MCP handler for the primary client (the one that spawned it)
+- Extensions connect with `?browserId=chrome|edge|brave|…` and stay in
+  `browserSockets: Map<browserId, WebSocket>`
+- Secondary MCP clients connect with `?role=mcp` and stay in
+  `mcpClients: Map<clientId, WebSocket>`
+- Pending tool requests are tracked in `pendingRequests` keyed by request id
+
+### 3.3 Tool dispatch
+
+```
+MCP client                Server                   Browser ext
+   │  initialize ─────────►│                            │
+   │◄──── server_info ─────│                            │
+   │                       │                            │
+   │  tools/list ─────────►│ inject `browser` enum      │
+   │◄──── full schema ─────│ from connected browsers    │
+   │                       │                            │
+   │  tools/call ─────────►│ pick socket by browser ──► │
+   │                       │   (or first if absent)     │
+   │                       │                            │
+   │                       │ ◄─────── tool result ──────│
+   │◄────── result ────────│                            │
 ```
 
-The stub speaks no MCP, knows no WebSocket, knows no tabs. Pure pipe.
+### 3.4 The `browser` parameter
 
-### 4.4 Service lifecycle
+The tool schemas in `packages/native-host/src/tools/*.ts` declare `args: []`. The
+server injects `browser` as an enum at `tools/list` time, with values pulled from
+`Array.from(browserSockets.keys())`. This keeps tool source files free of the
+parameter and lets the enum reflect what is actually connected right now.
+
+---
+
+## 4. What was removed vs the original proposal
+
+The earlier proposal added a long-lived **service** plus tiny per-client
+**stubs** talking over an **IPC** channel (named pipe / unix socket), discovered
+via a **lock file** read by a **native-messaging helper**.
+
+The shipped design collapses that into one binary by using port 7483 itself as
+the rendezvous. Removed components:
+
+- `extension-relay.ts` (deleted)
+- `mcp-server.ts` (deleted)
+- `relay-integration.test.ts`, `extension-relay.test.ts` (deleted)
+- IPC named-pipe layer (never built)
+- Lock-file based discovery for MCP clients (kept only as breadcrumb for the extension UI)
+- Native-messaging helper as a connection prerequisite
+
+Net result: ~1 100 lines deleted; the binary is one Node entry point + one
+service module.
+
+---
+
+## 5. Lifecycle
 
 | Event | Behavior |
 |---|---|
-| First stub starts, no service | Stub spawns service (detached child), waits for `ipcPath` to be ready, connects |
-| Second+ stub starts | Service already running → just connects |
-| Stub exits (MCP client closes) | Service drops that stub's pending requests |
-| All stubs gone | Service stays alive for `IDLE_TIMEOUT` (suggested 60 s), then exits cleanly |
-| Service crashes | Stubs exit on stdio EOF → MCP clients see disconnect → next start respawns service |
+| First MCP client spawns binary | Becomes server, handles own stdio. |
+| Second MCP client spawns binary | Becomes WS client, proxies stdio↔WS. |
+| Browser opens with extension | Extension WS-connects with `?browserId=…`. Multiple browsers add to the map. |
+| MCP client disconnects | Its slot in `mcpClients` (or the primary stdio) is freed. Server stays alive. |
+| Browser disconnects | Slot in `browserSockets` is freed; pending tool calls for that browser fail fast. |
+| Server idle | Stays alive. Killed only by user / OS. *(See note below — we may add a cleanup policy later.)* |
 
-### 4.5 Lock file format (after fix)
-
-```jsonc
-{
-  "version":  "0.2.0",
-  "pid":      12345,
-  "port":     7483,             // WS port for extensions
-  "token":    "abc...",          // WS auth
-  "ipcPath":  "\\\\.\\pipe\\...",   // stub ↔ service IPC (Windows named pipe / Unix socket)
-  "startedAt": "2026-05-06T10:00:00Z"
-}
-```
+> **Note on idle shutdown:** The earlier draft auto‑exited after 60 s with no
+> clients. That was removed because it interacted badly with `tools/list`
+> warm‑up calls and produced flapping. A future revision may reintroduce a
+> longer idle window or a tray‑driven shutdown — for now the server runs until
+> killed.
 
 ---
 
-## 5. Multi-browser concurrent connections
+## 6. Wire protocols
 
-Today the service worker holds a single `_ws`; a second extension WS evicts the first.
+### 6.1 Stdio MCP (primary + secondary)
 
-Change: service holds `Map<browserId, WebSocket>`. Each extension identifies itself in the WS upgrade:
+JSON-RPC 2.0 messages framed with **`Content-Length: N\r\n\r\n` + body** — the
+LSP-style framing required by MCP stdio transports. Both directions use the
+same framing. The secondary client implements parsing in
+`packages/native-host/src/index.ts`; the server implements it in
+`parseStdioMessages` inside `service.ts`.
 
-```
-ws://127.0.0.1:<port>?token=<x>&browserId=chrome&profileId=Default
-```
+### 6.2 WebSocket (extensions + secondary MCP clients)
 
-| Piece | Effort |
+Plain JSON messages, one per WS frame. Query string selects role:
+
+| Query | Role |
 |---|---|
-| Service: `_ws` → `Map<browserId, WS>` | ~50 LoC |
-| Extension: include `browserId` in WS query | ~10 LoC |
-| Tools: optional `browser` arg, default fallback | ~30 LoC across handlers |
-| Tests | ~80 LoC |
+| `?browserId=chrome` (or `edge`, `brave`, …) | Browser extension |
+| `?role=mcp` | Secondary MCP client (proxied stdio) |
+
+There is no auth token in this revision — the listener is bound to
+`127.0.0.1` only. Token reintroduction is tracked separately.
 
 ---
 
-## 6. Scenario coverage matrix
+## 7. Verification
 
-| # | Scenario | Today | After service+stubs | After + multi-WS |
-|---|---|:-:|:-:|:-:|
-| 1 | Claude Desktop + Claude Code together | ❌ | ✅ | ✅ |
-| 2 | 2 VS Code windows in parallel | ❌ | ✅ | ✅ |
-| 3 | Switch window A↔B mid-task | ❌ | ✅ | ✅ |
-| 4 | 2 Claude Code terminals | ❌ | ✅ | ✅ |
-| 5 | Claude Desktop + VS Code + Cursor | ❌ | ✅ | ✅ |
-| 6 | "New Chat" in same client | ✅ | ✅ | ✅ |
-| 7 | Two chats hit same tab (race) | ⚠️ | ⚠️ | ⚠️ (needs per-tab mutex) |
-| 8 | Tool with explicit `tab_id` | ✅ | ✅ | ✅ |
-| 9 | Default → active tab | ✅ | ✅ | ✅ |
-| 10 | Parallel tool calls to different tabs | ✅ | ✅ | ✅ |
-| 11 | Parallel tool calls to same tab | ⚠️ | ⚠️ | ⚠️ (needs per-tab mutex) |
-| 12 | Chat panel + multiple tabs in parallel | ❌ | ❌ | ❌ (needs chat↔tab pin) |
-| 13 | Switch tabs mid chat conversation | ⚠️ | ⚠️ | ⚠️ (needs chat↔tab pin) |
-| 14 | Chrome + Edge concurrent | ❌ | ❌ | ✅ |
-| 15 | Chrome + Chrome Canary | ❌ | ❌ | ✅ |
-| 16 | Random local proc probes the port | ✅ token | ✅ | ✅ |
+Run from `packages/native-host`:
 
-Three orthogonal fixes cover everything:
-1. **Service + stubs** → rows 1–5
-2. **Multi-WS in service** → rows 14–15
-3. **Per-tab mutex + chat↔tab pin** → rows 7, 11, 12, 13
+```bash
+npm run build && npm run compile:win
+# copy bin\ai-browser-copilot-win-x64.exe to %LOCALAPPDATA%\ai-browser-copilot\
+```
 
----
+End-to-end test (simulates how MCP clients spawn the binary):
 
-## 7. Implementation plan
+```bash
+node -e "
+const cp = require('child_process');
+const c = cp.spawn(process.env.LOCALAPPDATA + '/ai-browser-copilot/ai-browser-copilot-win-x64.exe', [], { stdio: ['pipe','pipe','pipe'] });
+let buf = Buffer.alloc(0), cl = -1;
+c.stdout.on('data', chunk => { /* parse Content-Length frames, send initialize then tools/call list_tabs */ });
+"
+```
 
-### Phase 1 — Service + stubs (rows 1–5)
+Expected: `initialize` returns `server_info`; `tools/call list_tabs` returns the
+live browser tabs as JSON.
 
-**Native-host package — split into two binaries:**
+All 398 unit tests across the four packages pass:
 
-- `packages/native-host/src/service.ts` (new)
-  - Long-lived. WS server + token auth (port from existing logic).
-  - IPC server (Unix socket / Windows named pipe).
-  - `Map<stubId, IPCSocket>`, multiplexes by `(stubId, requestId)`.
-  - Owns lock file with new `ipcPath` field.
-  - Idle-shutdown timer.
-
-- `packages/native-host/src/stub.ts` (new)
-  - Reads lock file. If service alive → connect IPC.
-  - If service missing/stale → spawn detached service, wait for ready, connect.
-  - Pipes `stdin`↔IPC, IPC↔`stdout`. Exits on stdio EOF.
-
-- `packages/native-host/src/extension-relay.ts`
-  - Replace kill branch (lines 138–146) — delete file or repurpose for service-side WS handling.
-
-**Installer package:**
-
-- `packages/installer/src/installers/host-registrar.ts`
-  - Update so the stub binary is what's registered as the native messaging host (the binary Chrome spawns on extension request — though after Phase 1 this path is barely used since the extension uses `native-host-helper` for discovery; keep for back-compat).
-  - Update MCP client config writers to spawn the **stub** binary (was: native host).
-
-- Lock file path / install paths unchanged — backward compatible for users who already installed.
-
-**Tests:**
-
-- Unit tests for service and stub.
-- Integration: spin up service + 2 stubs, fire concurrent tool calls from both, assert each stub gets its own response.
-
-### Phase 2 — Multi-WS (rows 14–15)
-
-- Service: `Map<browserId, WebSocket>`, parse `browserId` from WS query.
-- Extension: append `&browserId=<chrome|edge|brave|arc|vivaldi>` to WS URL. Detect via UA / build-time constant.
-- Tool layer: optional `browser` arg in schemas; default fallback in service.
-- Tests: two-extension fixture (Chrome + Edge), assert both connected, tool calls routable.
-
-### Phase 3 — Chat↔tab pin + per-tab mutex (rows 7, 11, 12, 13)
-
-- Extension: bind chat conversation to `tab_id` it was opened on. Persist in storage. Don't follow active-tab unless the user explicitly reattaches.
-- Extension: per-`tab_id` `AsyncMutex` in `tool-dispatcher.ts` for write tools (`click`, `fill_form`, `navigate`, `type`). Read tools stay concurrent.
+```
+extension          97 passed
+installer         262 passed
+native-host        28 passed
+native-host-helper 11 passed
+```
 
 ---
 
-## 8. What does NOT change
+## 8. Future work
 
-- Native messaging registration (per-user, multi-browser): already correct; stays as is.
-- Discovery via `com.copilot.native_host_helper`: unchanged.
-- WS auth via lock-file token: unchanged.
-- Tab dispatcher fallback to active tab: unchanged.
-- Existing tools' implementations: unchanged.
-- Extension IDs, manifests, CWS submission: unchanged.
-
----
-
-## 9. Open questions
-
-- **Windows named pipe ACL** — must scope to current user only, not Everyone.
-- **Stub spawns service: race when two stubs start simultaneously** — both see no service, both spawn. Mitigation: stub atomically creates a `.starting` lock; loser waits and connects.
-- **Service crash mid-flight** — stubs exit on stdio EOF; MCP clients receive transport errors and surface them. Acceptable Phase-1.
-- **Default browser when multiple are connected** — last-connected? user-pinned via setup wizard? Decide before Phase 2.
-- **Cross-machine / SSH scenarios** — out of scope. The model assumes localhost.
-
----
-
-## 10. Cross-references
-
-- Connection comparison vs browsermcp/mcp: `_bmad-output/planning-artifacts/connection-multiclient-analysis-2026-05-05.md`
-- browsermcp/mcp architecture explainer: `_bmad-output/planning-artifacts/browsermcp-architecture-diagram.md`
-- The kill bug location: `packages/native-host/src/extension-relay.ts:138-146`
-- Today's tab dispatcher: `packages/extension/src/background/tool-dispatcher.ts:21-40`
-- Browser native-messaging registration: `packages/installer/src/installers/browser-registrar.ts`
+- Reintroduce auth token in WS handshake (lightweight, browser-only).
+- Idle / tray-driven shutdown policy.
+- Multiple browsers of the same kind (e.g. two Chromes) — add a stable
+  client-supplied id to disambiguate.

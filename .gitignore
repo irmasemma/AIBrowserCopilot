@@ -10,3 +10,9 @@ Thumbs.db
 .env.local
 test-results/
 packages/extension/.wxt/
+
+# BMAD Method
+_bmad/
+_bmad-output/
+.agents/
+.claude-memory/

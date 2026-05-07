@@ -40,6 +40,8 @@ export function createRelay(callbacks: RelayCallbacks): Relay {
             startedBy: data.startedBy,
             capabilities: data.capabilities,
             uptime: data.uptime,
+            connectedBrowsers: data.connectedBrowsers,
+            connectedStubs: data.connectedStubs,
           });
           break;
         case 'pong':

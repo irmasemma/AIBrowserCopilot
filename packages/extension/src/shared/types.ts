@@ -10,7 +10,7 @@ export type NativeHostMessage =
   | { type: 'tool_error'; id: string; error: { message: string; code: string } }
   | { type: 'mcp_status'; connected: boolean; host: string }
   | { type: 'pong' }
-  | { type: 'server_info'; pid: number; port: number; version: string; startedBy: string; capabilities: string[]; uptime: number }
+  | { type: 'server_info'; pid: number; port: number; version: string; startedBy: string; capabilities: string[]; uptime: number; connectedBrowsers?: string[]; connectedStubs?: number }
   | { type: 'tool_scan'; tools: ToolScanResult[] };
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'degraded' | 'reconnecting';
@@ -39,6 +39,8 @@ export interface ServerInfo {
   startedBy: string;
   capabilities: string[];
   uptime: number;
+  connectedBrowsers?: string[];
+  connectedStubs?: number;
 }
 
 export interface ConnectionContext {

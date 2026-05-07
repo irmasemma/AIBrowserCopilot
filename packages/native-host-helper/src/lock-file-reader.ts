@@ -7,6 +7,7 @@ export interface LockFileData {
   pid: number;
   port: number;
   token: string;
+  ipcPath?: string;
   startedAt: string;
   version: string;
   startedBy: string;

@@ -3,6 +3,18 @@ import type { DiagnosticReason } from '../shared/types';
 const NM_HELPER_NAME = 'com.copilot.native_host_helper';
 const DEFAULT_URL = 'ws://127.0.0.1:7483';
 
+function detectBrowserId(): string {
+  if (typeof navigator === 'undefined') return 'unknown';
+  const ua = navigator.userAgent;
+  if (ua.includes('Edg/')) return 'edge';
+  if (ua.includes('Brave')) return 'brave';
+  if (ua.includes('Vivaldi')) return 'vivaldi';
+  if (ua.includes('OPR/') || ua.includes('Opera')) return 'opera';
+  if (ua.includes('Arc')) return 'arc';
+  if (ua.includes('Chrome/')) return 'chrome';
+  return 'unknown';
+}
+
 export interface LockFileInfo {
   exists: boolean;
   pid?: number;
@@ -71,20 +83,11 @@ export function createServiceDiscovery(): ServiceDiscovery {
 
   return {
     async discoverEndpoint(): Promise<DiscoveryResult> {
-      try {
-        const response = await sendNativeMessage('read_lock_file');
-        if (response.exists && response.port) {
-          const port = response.port as number;
-          const token = response.token as string | undefined;
-          const url = `ws://127.0.0.1:${port}${token ? `?token=${token}` : ''}`;
-          return { url, token, diagnostic: 'connecting' };
-        }
-        // Helper works but no lock file — server not running
-        return { url: DEFAULT_URL, diagnostic: 'no_lock_file' };
-      } catch {
-        // Helper not available — setup incomplete
-        return { url: DEFAULT_URL, diagnostic: 'helper_unavailable' };
-      }
+      const browserId = detectBrowserId();
+      return {
+        url: `ws://127.0.0.1:7483?browserId=${browserId}`,
+        diagnostic: 'connecting',
+      };
     },
 
     async scanTools() {

@@ -2,8 +2,45 @@ import type { ActivityEntry } from '../shared/types.js';
 import { MAX_ACTIVITY_LOG_SIZE } from '../shared/constants.js';
 import { isBlockedDomain } from '../shared/domain-blocklist.js';
 import { withPlaywrightPage } from './playwright-bridge.js';
+import type { Page } from 'playwright-crx/test';
 import { readFormFields } from '../content/form-reader.js';
 import { detectAndExtractData } from '../content/data-detector.js';
+
+/**
+ * Capture an ARIA accessibility snapshot of the page.
+ * Returns a compact YAML-like tree that the LLM can use to understand
+ * page state after a mutating action (validation errors, new fields, etc.).
+ *
+ * Inspired by BrowserMCP's auto-snapshot pattern.
+ */
+const captureSnapshot = async (tabId: number): Promise<string> => {
+  try {
+    return await withPlaywrightPage(tabId, async (page: Page) => {
+      const body = page.locator('body');
+      if (typeof (body as any).ariaSnapshot === 'function') {
+        const snapshot = await (body as any).ariaSnapshot({ timeout: 5000 }) as string;
+        return snapshot.length > 4000 ? snapshot.slice(0, 4000) + '\n... (truncated)' : snapshot;
+      }
+      return '';
+    });
+  } catch {
+    return '';
+  }
+};
+
+/** Append an ARIA snapshot to a tool result */
+const withSnapshot = async (
+  tabId: number,
+  result: { content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> },
+): Promise<typeof result> => {
+  const snapshot = await captureSnapshot(tabId);
+  if (!snapshot) return result;
+  result.content.push({
+    type: 'text',
+    text: `\n--- Page Snapshot ---\n\`\`\`yaml\n${snapshot}\n\`\`\``,
+  });
+  return result;
+};
 
 const logActivity = async (entry: ActivityEntry): Promise<void> => {
   const data = await chrome.storage.local.get('activityLog');
@@ -215,7 +252,7 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
     await chrome.tabs.update(tabId, { url });
 
     const updated = await loaded;
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, url: updated.url, title: updated.title }) }] };
+    return withSnapshot(tabId, { content: [{ type: 'text', text: JSON.stringify({ success: true, url: updated.url, title: updated.title }) }] });
   },
 
   async fill_form(params) {
@@ -230,186 +267,63 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
     const iframeSelector = params.iframe as string | undefined;
     const tab = await getTab(params.tab_id as number | undefined);
 
-    // Determine if we need playwright-crx (complex operations) or can use simple approach
-    const needsPlaywright = fields.some(f =>
-      f.label || f.role || f.placeholder ||
-      f.type === 'select' || f.type === 'checkbox' || f.type === 'radio' ||
-      f.type === 'file' || f.type === 'date',
-    ) || !!iframeSelector;
+    const results = await withPlaywrightPage(tab.id!, async (page) => {
+      const fieldResults: Array<{ field: string; success: boolean; error?: string }> = [];
 
-    if (needsPlaywright) {
-      // Use playwright-crx for complex form interactions
-      const results = await withPlaywrightPage(tab.id!, async (page) => {
-        const fieldResults: Array<{ field: string; success: boolean; error?: string }> = [];
+      for (const field of fields) {
+        try {
+          const context = iframeSelector ? page.frameLocator(iframeSelector) : page;
 
-        for (const field of fields) {
-          try {
-            // Determine the base context (page or iframe)
-            const context = iframeSelector
-              ? page.frameLocator(iframeSelector)
-              : page;
-
-            // Determine locator
-            let locator;
-            if (field.label) {
-              locator = context.getByLabel(field.label);
-            } else if (field.role) {
-              locator = context.getByRole(field.role as Parameters<typeof context.getByRole>[0]);
-            } else if (field.placeholder) {
-              locator = context.getByPlaceholder(field.placeholder);
-            } else if (field.selector) {
-              locator = context.locator(field.selector);
-            } else {
-              fieldResults.push({ field: JSON.stringify(field), success: false, error: 'No locator provided (need selector, label, role, or placeholder)' });
-              continue;
-            }
-
-            const fieldId = field.label || field.role || field.placeholder || field.selector || 'unknown';
-
-            // Perform the appropriate action based on type
-            switch (field.type) {
-              case 'select':
-                await locator.selectOption(field.value);
-                break;
-              case 'checkbox':
-                if (field.value === 'true' || field.value === 'on') {
-                  await locator.check();
-                } else {
-                  await locator.uncheck();
-                }
-                break;
-              case 'radio':
-                await locator.check();
-                break;
-              case 'file':
-                await locator.setInputFiles(field.value);
-                break;
-              case 'date':
-                await locator.fill(field.value);
-                break;
-              default:
-                await locator.fill(field.value);
-                break;
-            }
-
-            fieldResults.push({ field: fieldId, success: true });
-          } catch (err) {
-            const fieldId = field.label || field.role || field.placeholder || field.selector || 'unknown';
-            fieldResults.push({
-              field: fieldId,
-              success: false,
-              error: err instanceof Error ? err.message : String(err),
-            });
+          let locator;
+          if (field.label) {
+            locator = context.getByLabel(field.label);
+          } else if (field.role) {
+            locator = context.getByRole(field.role as Parameters<typeof context.getByRole>[0]);
+          } else if (field.placeholder) {
+            locator = context.getByPlaceholder(field.placeholder);
+          } else if (field.selector) {
+            locator = context.locator(field.selector);
+          } else {
+            fieldResults.push({ field: JSON.stringify(field), success: false, error: 'No locator provided' });
+            continue;
           }
+
+          const fieldId = field.label || field.role || field.placeholder || field.selector || 'unknown';
+
+          switch (field.type) {
+            case 'select':
+              await locator.selectOption(field.value);
+              break;
+            case 'checkbox':
+              if (field.value === 'true' || field.value === 'on') await locator.check();
+              else await locator.uncheck();
+              break;
+            case 'radio':
+              await locator.check();
+              break;
+            case 'file':
+              await locator.setInputFiles(field.value);
+              break;
+            default:
+              await locator.fill(field.value);
+              break;
+          }
+
+          fieldResults.push({ field: fieldId, success: true });
+        } catch (err) {
+          const fieldId = field.label || field.role || field.placeholder || field.selector || 'unknown';
+          fieldResults.push({
+            field: fieldId,
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
+      }
 
-        return fieldResults;
-      });
-
-      return { content: [{ type: 'text', text: JSON.stringify(results) }] };
-    }
-
-    // Simple path: use chrome.scripting for basic text fills (no debugger needed)
-    // Uses native value setter to work with React/Vue controlled inputs
-    const simpleFields = fields.map(f => ({ selector: f.selector!, value: f.value }));
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: tab.id! },
-      func: (fieldList: Array<{ selector: string; value: string }>) => {
-        // Shadow DOM traversal fallback
-        function queryShadow(selector: string): Element | null {
-          let el = document.querySelector(selector);
-          if (el) return el;
-          const hosts = document.querySelectorAll('*');
-          for (const host of hosts) {
-            if (host.shadowRoot) {
-              el = host.shadowRoot.querySelector(selector);
-              if (el) return el;
-            }
-          }
-          return null;
-        }
-
-        // Get native setters — React/Vue override .value, so direct assignment doesn't trigger state updates
-        const inputSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-        const textareaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-        const selectSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
-
-        return fieldList.map(({ selector, value }) => {
-          const el = queryShadow(selector) as HTMLElement | null;
-          if (!el) return { selector, success: false, error: 'Element not found' };
-
-          try {
-            // Gap 4: Contenteditable support — must trigger mutation observers and editor listeners
-            if (el.getAttribute('contenteditable') === 'true' || el.getAttribute('contenteditable') === '') {
-              el.focus();
-              // Select all existing content and replace it
-              const selection = window.getSelection();
-              const range = document.createRange();
-              range.selectNodeContents(el);
-              selection?.removeAllRanges();
-              selection?.addRange(range);
-              // execCommand triggers mutation observers, input events, and editor state sync
-              document.execCommand('insertText', false, value);
-              // Fire events for any listeners that execCommand didn't trigger
-              el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-              return { selector, success: true };
-            }
-
-            // Gap 3: ARIA widget interaction (div-based, not native inputs)
-            const role = el.getAttribute('role');
-            if (role === 'slider') {
-              el.setAttribute('aria-valuenow', value);
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              return { selector, success: true };
-            } else if (role === 'switch') {
-              const checked = value === 'true' || value === 'on';
-              el.setAttribute('aria-checked', String(checked));
-              el.click();
-              return { selector, success: true };
-            } else if (role === 'combobox' || role === 'listbox') {
-              const hiddenInput = el.querySelector('input[type="hidden"]') || el.parentElement?.querySelector('input[type="hidden"]');
-              if (hiddenInput) (hiddenInput as HTMLInputElement).value = value;
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-              return { selector, success: true };
-            }
-
-            // Standard input/textarea/select path
-            const inputEl = el as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-
-            // Use the native setter for the right element type
-            if (inputEl instanceof HTMLTextAreaElement && textareaSetter) {
-              textareaSetter.call(inputEl, value);
-            } else if (inputEl instanceof HTMLSelectElement && selectSetter) {
-              selectSetter.call(inputEl, value);
-            } else if (inputSetter) {
-              inputSetter.call(inputEl, value);
-            } else {
-              inputEl.value = value;
-            }
-
-            // Fire events that React/Vue/Angular listen to
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-            // React 17+ also listens for native input events
-            el.dispatchEvent(new Event('blur', { bubbles: true }));
-
-            // Gap 1: Fire keyboard events for autocomplete/typeahead triggers
-            el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'a' }));
-            el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
-            el.dispatchEvent(new KeyboardEvent('keypress', { bubbles: true, key: 'a' }));
-
-            return { selector, success: true };
-          } catch (err) {
-            return { selector, success: false, error: (err as Error).message };
-          }
-        });
-      },
-      args: [simpleFields],
+      return fieldResults;
     });
 
-    return { content: [{ type: 'text', text: JSON.stringify(results?.[0]?.result ?? []) }] };
+    return withSnapshot(tab.id!, { content: [{ type: 'text', text: JSON.stringify(results) }] });
   },
 
   async click_element(params) {
@@ -418,105 +332,31 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
     const index = (params.index as number) ?? 0;
     const tab = await getTab(params.tab_id as number | undefined);
 
-    const result = await chrome.scripting.executeScript({
-      target: { tabId: tab.id! },
-      func: (sel: string | null, txt: string | null, idx: number) => {
-        // AD-21: Auto-scroll element into view before clicking
-        function ensureVisible(el: Element): void {
-          const rect = el.getBoundingClientRect();
-          const inViewport = rect.top >= 0 && rect.bottom <= window.innerHeight && rect.left >= 0 && rect.right <= window.innerWidth;
-          if (!inViewport) {
-            el.scrollIntoView({ block: 'center', behavior: 'instant' });
-          }
-        }
+    const result = await withPlaywrightPage(tab.id!, async (page) => {
+      let locator;
+      if (text) {
+        locator = page.getByText(text, { exact: false });
+      } else if (selector) {
+        locator = page.locator(selector);
+      } else {
+        throw new Error('Must provide selector or text');
+      }
 
-        // By CSS selector — return the nth match
-        if (sel) {
-          const matches = Array.from(document.querySelectorAll(sel));
-          const el = matches[idx];
-          if (!el) return null;
-          ensureVisible(el);
-          (el as HTMLElement).click();
-          return {
-            tag: el.tagName,
-            text: el.textContent?.trim().slice(0, 100),
-            href: (el as HTMLAnchorElement).href ?? null,
-            matchCount: matches.length,
-            matchIndex: idx,
-          };
-        }
+      if (index > 0) locator = locator.nth(index);
 
-        // By visible text — prefer clickable elements, match direct text not inherited
-        if (txt) {
-          const clickable = 'a, button, input[type="submit"], input[type="button"], [role="button"], [onclick], summary';
-          const target = txt.toLowerCase();
+      await locator.scrollIntoViewIfNeeded();
+      await locator.click();
 
-          // Pass 1: exact match on clickable elements (direct text only)
-          const clickables = Array.from(document.querySelectorAll(clickable));
-          const exactClickable = clickables.filter(el => {
-            // Get direct text (not from children) or the full text for simple elements
-            const elText = el.textContent?.trim().toLowerCase() ?? '';
-            return elText === target;
-          });
-          if (exactClickable.length > idx) {
-            const el = exactClickable[idx] as HTMLElement;
-            ensureVisible(el);
-            el.click();
-            return {
-              tag: el.tagName,
-              text: el.textContent?.trim().slice(0, 100),
-              href: (el as HTMLAnchorElement).href ?? null,
-              matchCount: exactClickable.length,
-              matchIndex: idx,
-            };
-          }
+      const el = await locator.evaluateHandle((el) => ({
+        tag: el.tagName,
+        text: el.textContent?.trim().slice(0, 100) ?? '',
+        href: (el as HTMLAnchorElement).href ?? null,
+      }));
 
-          // Pass 2: partial/contains match on clickable elements
-          const partialClickable = clickables.filter(el => {
-            const elText = el.textContent?.trim().toLowerCase() ?? '';
-            return elText.includes(target);
-          });
-          if (partialClickable.length > idx) {
-            const el = partialClickable[idx] as HTMLElement;
-            ensureVisible(el);
-            el.click();
-            return {
-              tag: el.tagName,
-              text: el.textContent?.trim().slice(0, 100),
-              href: (el as HTMLAnchorElement).href ?? null,
-              matchCount: partialClickable.length,
-              matchIndex: idx,
-            };
-          }
-
-          // Pass 3: any element with exact text (fallback)
-          const allElements = Array.from(document.querySelectorAll('*'));
-          const anyMatch = allElements.filter(el => {
-            const elText = el.textContent?.trim().toLowerCase() ?? '';
-            return elText === target && el.children.length === 0; // leaf nodes only
-          });
-          if (anyMatch.length > idx) {
-            const el = anyMatch[idx] as HTMLElement;
-            ensureVisible(el);
-            el.click();
-            return {
-              tag: el.tagName,
-              text: el.textContent?.trim().slice(0, 100),
-              href: (el as HTMLAnchorElement).href ?? null,
-              matchCount: anyMatch.length,
-              matchIndex: idx,
-            };
-          }
-        }
-
-        return null;
-      },
-      args: [selector, text, index],
+      return await el.jsonValue();
     });
 
-    const clicked = result?.[0]?.result;
-    if (!clicked) throw Object.assign(new Error('Element not found'), { code: 'CONTENT_UNAVAILABLE' });
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, element: clicked }) }] };
+    return withSnapshot(tab.id!, { content: [{ type: 'text', text: JSON.stringify({ success: true, element: result }) }] });
   },
 
   async extract_table(params) {
@@ -688,7 +528,7 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
       return scrollError ? { ...state, found: false, error: scrollError } : state;
     });
 
-    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    return withSnapshot(tab.id!, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
   },
 
   async go_back(params) {
@@ -700,7 +540,7 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
       return { success: true, url: page.url(), title: await page.title() };
     });
 
-    return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    return withSnapshot(tab.id!, { content: [{ type: 'text', text: JSON.stringify(result) }] });
   },
 
   async go_forward(params) {
@@ -712,7 +552,7 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
       return { success: true, url: page.url(), title: await page.title() };
     });
 
-    return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    return withSnapshot(tab.id!, { content: [{ type: 'text', text: JSON.stringify(result) }] });
   },
 
   async extract_data(params) {
@@ -775,6 +615,22 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
           pagination_detected: region.paginationDetected,
           next_button_selector: region.nextButtonSelector,
         }, null, 2),
+      }],
+    };
+  },
+
+  async snapshot(params) {
+    const tab = await getTab(params.tab_id as number | undefined);
+    const snap = await captureSnapshot(tab.id!);
+    if (!snap) {
+      throw Object.assign(new Error('Could not capture page snapshot'), { code: 'CONTENT_UNAVAILABLE' });
+    }
+    const url = tab.url ?? '';
+    const title = tab.title ?? '';
+    return {
+      content: [{
+        type: 'text',
+        text: `- Page URL: ${url}\n- Page Title: ${title}\n- Page Snapshot\n\`\`\`yaml\n${snap}\n\`\`\``,
       }],
     };
   },

@@ -12,11 +12,13 @@ import { extractData } from './extract-data.js';
 import { scrollPage } from './scroll-page.js';
 import { goBack } from './go-back.js';
 import { goForward } from './go-forward.js';
+import { snapshot } from './snapshot.js';
 
 export const toolRegistry: ToolPlugin[] = [
   getPageContent,
   getPageMetadata,
   takeScreenshot,
+  snapshot,
   listTabs,
   navigate,
   fillForm,
