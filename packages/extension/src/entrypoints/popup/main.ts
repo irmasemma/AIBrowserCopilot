@@ -1,3 +1,5 @@
+import { isOutdatedNativeHostVersion, MIN_NATIVE_HOST_VERSION } from '../../shared/types.js';
+
 const dot = document.createElement('span');
 dot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:#9CA3AF;display:inline-block';
 
@@ -10,6 +12,11 @@ statusRow.style.cssText = 'display:flex;align-items:center;gap:8px';
 statusRow.appendChild(dot);
 statusRow.appendChild(label);
 
+const updateBanner = document.createElement('div');
+updateBanner.setAttribute('data-testid', 'outdated-native-host-banner');
+updateBanner.setAttribute('role', 'alert');
+updateBanner.style.cssText = 'display:none;margin-top:10px;padding:10px;background:#FEF3C7;border:1px solid #FDE68A;border-radius:6px;color:#92400E;font-size:12px;line-height:1.4';
+
 const btn = document.createElement('button');
 btn.textContent = 'Open Side Panel';
 btn.style.cssText = 'display:block;margin-top:8px;width:100%;padding:6px;background:#2563EB;color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer';
@@ -19,7 +26,29 @@ btn.addEventListener('click', () => {
 
 const app = document.getElementById('app')!;
 app.appendChild(statusRow);
+app.appendChild(updateBanner);
 app.appendChild(btn);
+
+const renderUpdateBanner = (version: string | undefined): void => {
+  if (isOutdatedNativeHostVersion(version)) {
+    updateBanner.innerHTML = '';
+    const title = document.createElement('div');
+    title.style.cssText = 'font-weight:600;margin-bottom:4px';
+    title.textContent = 'Update needed';
+    const body = document.createElement('div');
+    body.style.cssText = 'margin-bottom:6px';
+    body.textContent = `Bridge is on ${version ?? 'unknown'} but extension expects ${MIN_NATIVE_HOST_VERSION}+. Re-run installer.`;
+    const cmd = document.createElement('code');
+    cmd.style.cssText = 'display:block;margin-top:4px;padding:4px 6px;background:#FDE68A;border-radius:4px;font-family:ui-monospace,monospace;font-size:11px';
+    cmd.textContent = 'npx ai-browser-copilot-setup --yes';
+    updateBanner.appendChild(title);
+    updateBanner.appendChild(body);
+    updateBanner.appendChild(cmd);
+    updateBanner.style.display = 'block';
+  } else {
+    updateBanner.style.display = 'none';
+  }
+};
 
 const getDiagnosticLabel = (reason?: string): string => {
   switch (reason) {
@@ -61,10 +90,11 @@ const updateStatus = (state: string, diagnosticReason?: string) => {
 
 // Read from connectionContext (new key) with fallback to connectionState (old key)
 chrome.storage.local.get(['connectionContext', 'connectionState'], (data: Record<string, unknown>) => {
-  const ctx = data.connectionContext as { state?: string; diagnosticReason?: string } | undefined;
+  const ctx = data.connectionContext as { state?: string; diagnosticReason?: string; serverInfo?: { version?: string } } | undefined;
   const old = data.connectionState as { state?: string } | undefined;
   const state = ctx?.state ?? old?.state ?? 'disconnected';
   updateStatus(state, ctx?.diagnosticReason);
+  renderUpdateBanner(ctx?.serverInfo?.version);
 });
 
 // Listen for changes on both keys
@@ -72,6 +102,7 @@ chrome.storage.onChanged.addListener((changes) => {
   if (changes.connectionContext?.newValue) {
     const ctx = changes.connectionContext.newValue;
     updateStatus(ctx.state ?? 'disconnected', ctx.diagnosticReason);
+    renderUpdateBanner(ctx.serverInfo?.version);
   } else if (changes.connectionState?.newValue) {
     updateStatus(changes.connectionState.newValue.state ?? 'disconnected');
   }

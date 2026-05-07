@@ -58,6 +58,27 @@ export type DisplayState = ConnectionState | 'stale';
 /** Threshold in ms — if lastVerifiedAt is older than this, state is stale */
 export const STALE_THRESHOLD_MS = 40_000;
 
+/**
+ * Minimum native-host version this extension knows how to talk to. Anything
+ * older means the user has a pre-Phase-1 monolithic binary installed; the
+ * extension will still connect but flag it so the user knows to re-run the
+ * installer to get the multi-client architecture.
+ */
+export const MIN_NATIVE_HOST_VERSION = '0.2.0';
+
+export function isOutdatedNativeHostVersion(version: string | undefined | null): boolean {
+  if (!version) return false;
+  const v = version.split('.').map(n => Number.parseInt(n, 10));
+  const m = MIN_NATIVE_HOST_VERSION.split('.').map(n => Number.parseInt(n, 10));
+  for (let i = 0; i < Math.max(v.length, m.length); i++) {
+    const a = Number.isFinite(v[i]) ? v[i] : 0;
+    const b = Number.isFinite(m[i]) ? m[i] : 0;
+    if (a < b) return true;
+    if (a > b) return false;
+  }
+  return false;
+}
+
 export function getDisplayState(ctx: ConnectionContext): DisplayState {
   if (ctx.state === 'connected' || ctx.state === 'degraded') {
     // lastVerifiedAt === 0 means we have never verified (e.g. brand-new SW that

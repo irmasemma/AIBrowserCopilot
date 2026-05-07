@@ -1,5 +1,6 @@
 import { createWriteStream, existsSync, mkdirSync, unlinkSync, renameSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
+import { execSync } from 'node:child_process';
 import { get as httpsGet } from 'node:https';
 import { get as httpGet, type IncomingMessage } from 'node:http';
 import type { PlatformInfo } from '../shared/platform.js';
@@ -137,6 +138,69 @@ const runSingleDownload = async (
 };
 
 /**
+ * Kill any running instance of the native host binaries so an upgrade isn't
+ * blocked by Windows file locks. Best-effort; safe to call even if nothing is
+ * running. Names match all generations: pre-Phase-1 monolithic binary plus
+ * the new stub + service binaries.
+ */
+export const killRunningNativeHosts = (platform: PlatformInfo): { killed: string[]; errors: string[] } => {
+  const killed: string[] = [];
+  const errors: string[] = [];
+
+  const targets =
+    platform.os === 'windows'
+      ? [
+          // Pre-Phase-1 monolithic binary
+          'ai-browser-copilot-win-x64.exe',
+          'ai-browser-copilot-win-arm64.exe',
+          // Phase 1 stub + service
+          'ai-browser-copilot-stub-win-x64.exe',
+          'ai-browser-copilot-stub-win-arm64.exe',
+          'ai-browser-copilot-service-win-x64.exe',
+          'ai-browser-copilot-service-win-arm64.exe',
+        ]
+      : [
+          'ai-browser-copilot-macos-x64',
+          'ai-browser-copilot-macos-arm64',
+          'ai-browser-copilot-linux-x64',
+          'ai-browser-copilot-linux-arm64',
+          'ai-browser-copilot-stub-macos-x64',
+          'ai-browser-copilot-stub-macos-arm64',
+          'ai-browser-copilot-stub-linux-x64',
+          'ai-browser-copilot-stub-linux-arm64',
+          'ai-browser-copilot-service-macos-x64',
+          'ai-browser-copilot-service-macos-arm64',
+          'ai-browser-copilot-service-linux-x64',
+          'ai-browser-copilot-service-linux-arm64',
+        ];
+
+  for (const name of targets) {
+    try {
+      if (platform.os === 'windows') {
+        // taskkill returns 0 only when at least one process was killed.
+        // Suppress the "process not found" stderr by routing to ignore.
+        execSync(`taskkill /F /IM "${name}"`, { stdio: 'ignore' });
+        killed.push(name);
+      } else {
+        execSync(`pkill -f "${name}"`, { stdio: 'ignore' });
+        killed.push(name);
+      }
+    } catch {
+      // Not running — that's fine
+    }
+  }
+
+  // Give the OS a moment to release file handles before we overwrite binaries.
+  if (killed.length > 0 && platform.os === 'windows') {
+    const sleepMs = 500;
+    const end = Date.now() + sleepMs;
+    while (Date.now() < end) { /* spin briefly */ }
+  }
+
+  return { killed, errors };
+};
+
+/**
  * Phase 1 multi-client: downloads BOTH the stub and the service binaries.
  * The stub is what MCP clients spawn; the service is what the stub auto-spawns
  * on first launch and is the long-lived owner of the WS to the extension.
@@ -155,6 +219,11 @@ export const downloadBinary = async (
   if (!existsSync(installDir)) {
     mkdirSync(installDir, { recursive: true });
   }
+
+  // First — kill any running prior-version binaries so we can overwrite them.
+  // On Windows, .exe files are file-locked by their running process. The user
+  // shouldn't have to taskkill manually before re-running the installer.
+  killRunningNativeHosts(platform);
 
   const stubAsset = getStubAssetName(platform.os, platform.arch);
   const serviceAsset = getServiceAssetName(platform.os, platform.arch);

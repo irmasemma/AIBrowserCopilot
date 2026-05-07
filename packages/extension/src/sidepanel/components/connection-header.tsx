@@ -4,7 +4,7 @@ import { useEffect } from 'preact/hooks';
 import { StatusBadge } from './status-badge.js';
 import { DiagnosticsPanel } from './diagnostics-panel.js';
 import { useStore } from '../store.js';
-import { getDisplayState } from '../../shared/types.js';
+import { getDisplayState, isOutdatedNativeHostVersion, MIN_NATIVE_HOST_VERSION } from '../../shared/types.js';
 
 export const ConnectionHeader: FunctionalComponent = () => {
   const [showDiag, setShowDiag] = useState(false);
@@ -66,9 +66,28 @@ export const ConnectionHeader: FunctionalComponent = () => {
 
   const subtitle = subtitleText();
   const guidance = guidanceText();
+  const outdatedHost = displayState === 'connected' && isOutdatedNativeHostVersion(serverInfo?.version);
 
   return (
     <header class="border-b border-neutral-200 bg-white" role="banner">
+      {outdatedHost && (
+        <div
+          role="alert"
+          aria-label="Update needed"
+          class="bg-amber-50 border-b border-amber-200 px-6 py-3 text-xs"
+          data-testid="outdated-native-host-banner"
+        >
+          <p class="font-semibold text-amber-900 mb-1">Update needed</p>
+          <p class="text-amber-800 mb-2">
+            Your AI Browser CoPilot bridge is on version {serverInfo?.version ?? 'unknown'} but
+            the extension expects {MIN_NATIVE_HOST_VERSION} or newer. Re-run the installer to upgrade.
+          </p>
+          <p class="text-amber-800">
+            <span class="font-medium">Run in your terminal:</span>{' '}
+            <code class="bg-amber-100 px-1 py-0.5 rounded font-mono">npx ai-browser-copilot-setup --yes</code>
+          </p>
+        </div>
+      )}
       <div class="flex items-center justify-between px-6 py-3">
         <button
           class="flex items-center gap-1 cursor-pointer hover:opacity-80"

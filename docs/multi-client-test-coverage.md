@@ -15,6 +15,7 @@ Maps every use case from [`multi-client-architecture.md`](./multi-client-archite
 
 - `tests/e2e/multi-client-real.spec.ts` — real Playwright e2e: install + connect, two stubs concurrent
 - `tests/e2e/install-uninstall-multi-browser-real.spec.ts` — real Playwright e2e: full install/uninstall/reinstall cycle, multiple sequential MCP calls, Microsoft Edge browser
+- `tests/e2e/version-mismatch-real.spec.ts` — real Playwright e2e: old (pre-Phase-1) binary running → side panel shows "Update needed" banner with reinstall command → installer's taskkill terminates running old binary (no manual user action) → new binaries take over → banner disappears → version 0.2.0 reported. Uses the actual pre-Phase-1 binary recovered from git history (`a453656^`) at `tests/e2e/fixtures/old-version/`.
 - `packages/native-host/src/e2e/service-stub.e2e.test.ts` — real-process Vitest e2e (real bundles, child processes)
 - `packages/native-host/src/service-impl.test.ts` — in-process Vitest (real net sockets, real MCP server)
 - `packages/native-host/src/lock-file-manager.test.ts` — unit
@@ -83,6 +84,16 @@ Maps every use case from [`multi-client-architecture.md`](./multi-client-archite
 | I4 | Re-install after uninstall produces a working system | ✅ | Same — A6 |
 | I5 | Same flow runs in Microsoft Edge (NM under HKCU\\Microsoft\\Edge) | ✅ | Same file — Suite C |
 | I6 | Multiple sequential MCP calls — per-stub MCP server stable across N calls | ✅ | Same file — Suite B (5 sequential `tools/list` requests; all succeed) |
+
+### Version-mismatch upgrade flow
+
+| # | Scenario | Status | How |
+|---|---|:-:|---|
+| V1 | Pre-Phase-1 binary running (lock file v0.1.0, no `ipcPath`) | ✅ | `version-mismatch-real.spec.ts` step 1 — runs the actual recovered pre-Phase-1 binary from git history |
+| V2 | Side panel renders "Update needed" banner with the exact reinstall command (`npx ai-browser-copilot-setup --yes`) | ✅ | Same file step 2 — visible UI assertions on the rendered banner element + the literal command text |
+| V3 | Installer's taskkill terminates the running old binary — user does NOT need a manual taskkill | ✅ | Same file step 3 — running PID confirmed before, gone after |
+| V4 | New binaries take over, lock file gains `ipcPath`, version reported as `0.2.0` | ✅ | Same file step 4 |
+| V5 | Side panel auto-reconnects, banner disappears, "Connected via …" subtitle appears | ✅ | Same file step 5 |
 
 ### Auth / safety
 
