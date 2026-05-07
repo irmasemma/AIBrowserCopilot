@@ -50,6 +50,9 @@ export const detectPlatform = (
 };
 
 export const getInstallDir = (platform: PlatformInfo): string => {
+  // Test/integration override — lets tests redirect the install dir without
+  // clobbering the user's real installation.
+  if (process.env['COPILOT_INSTALL_DIR']) return process.env['COPILOT_INSTALL_DIR'];
   switch (platform.os) {
     case 'windows':
       return join(
