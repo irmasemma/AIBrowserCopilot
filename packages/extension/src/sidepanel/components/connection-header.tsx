@@ -66,7 +66,12 @@ export const ConnectionHeader: FunctionalComponent = () => {
 
   const subtitle = subtitleText();
   const guidance = guidanceText();
-  const outdatedHost = displayState === 'connected' && isOutdatedNativeHostVersion(serverInfo?.version);
+  // Show the "Update needed" banner whenever serverInfo carries an outdated
+  // version, regardless of the current connection state. A brief flip to
+  // `connecting`/`reconnecting` (MV3 SW eviction, heartbeat miss, etc.)
+  // shouldn't make the warning disappear — the user should keep seeing it
+  // until the new version is verified.
+  const outdatedHost = isOutdatedNativeHostVersion(serverInfo?.version);
 
   return (
     <header class="border-b border-neutral-200 bg-white" role="banner">
