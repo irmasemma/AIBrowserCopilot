@@ -271,16 +271,25 @@ export function startServer(port: number): void {
     }
   });
 
-  // Primary MCP client: read JSON-RPC from own stdio (Content-Length framed)
+  // Primary MCP client: read JSON-RPC from own stdio.
+  // The MCP spec uses newline-delimited JSON ("\n" separator). Some legacy
+  // tooling and our own e2e tests use LSP-style Content-Length framing.
+  // The parser auto-detects on the first valid message and latches the
+  // format for the rest of the session; replies use the same format.
   // When stdin closes (client exits), server keeps running for other clients + extensions.
   // Note: index.ts paused stdin during the port probe to avoid losing data;
   // explicitly resume after the data listener is wired up.
+  const stdioFormat: { format: 'ndjson' | 'lsp' } = { format: 'ndjson' };
   parseStdioMessages(process.stdin, (json) => {
     handleMcpMessage('stdio', json, (msg) => {
       const body = JSON.stringify(msg);
-      process.stdout.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+      if (stdioFormat.format === 'lsp') {
+        process.stdout.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+      } else {
+        process.stdout.write(`${body}\n`);
+      }
     });
-  });
+  }, stdioFormat);
   if (typeof (process.stdin as NodeJS.ReadStream).resume === 'function') {
     (process.stdin as NodeJS.ReadStream).resume();
   }
@@ -293,42 +302,75 @@ export function shutdownServer(): void {
   deleteLockFile();
 }
 
-// ── Content-Length framed stdio parser ─────────────────────────────────────
-// MCP protocol uses HTTP-style framing: Content-Length: N\r\n\r\n{json}
-export function parseStdioMessages(stream: NodeJS.ReadableStream, onMessage: (json: string) => void): void {
+// ── Stdio JSON-RPC parser (auto-detect NDJSON / Content-Length) ───────────
+// MCP spec: newline-delimited JSON  →  JSON.stringify(msg) + "\n"
+// LSP-style legacy framing:           →  Content-Length: N\r\n\r\n{body}
+//
+// We support both. The first valid parse latches the format via the optional
+// `formatHolder` so the caller can mirror it on replies.
+export function parseStdioMessages(
+  stream: NodeJS.ReadableStream,
+  onMessage: (json: string) => void,
+  formatHolder?: { format: 'ndjson' | 'lsp' },
+): void {
   let buffer = Buffer.alloc(0);
   let contentLength = -1;
+  let latched = false;
 
-  stream.on('data', (chunk: Buffer) => {
+  const latch = (f: 'ndjson' | 'lsp'): void => {
+    if (formatHolder && !latched) {
+      formatHolder.format = f;
+      latched = true;
+    }
+  };
+
+  stream.on('data', (chunk: Buffer | string) => {
     buffer = Buffer.concat([buffer, typeof chunk === 'string' ? Buffer.from(chunk) : chunk]);
 
     while (true) {
-      if (contentLength === -1) {
-        // Look for \r\n\r\n header separator
-        const headerEnd = buffer.indexOf('\r\n\r\n');
-        if (headerEnd === -1) break;
-
-        const header = buffer.subarray(0, headerEnd).toString();
-        const match = header.match(/Content-Length:\s*(\d+)/i);
-        if (!match) {
-          // Not Content-Length framed — try as raw JSON line (fallback)
-          const line = buffer.subarray(0, headerEnd).toString().trim();
-          buffer = buffer.subarray(headerEnd + 4);
-          if (line) onMessage(line);
-          continue;
-        }
-        contentLength = parseInt(match[1], 10);
-        buffer = buffer.subarray(headerEnd + 4);
-      }
-
-      if (contentLength >= 0 && buffer.length >= contentLength) {
+      // Drain in-progress Content-Length-framed body before re-detecting format.
+      if (contentLength !== -1) {
+        if (buffer.length < contentLength) break;
         const json = buffer.subarray(0, contentLength).toString();
         buffer = buffer.subarray(contentLength);
         contentLength = -1;
+        latch('lsp');
         onMessage(json);
-      } else {
-        break;
+        continue;
       }
+
+      // Skip leading whitespace / line breaks between messages.
+      let i = 0;
+      while (
+        i < buffer.length &&
+        (buffer[i] === 0x0a || buffer[i] === 0x0d || buffer[i] === 0x20 || buffer[i] === 0x09)
+      ) i++;
+      if (i > 0) buffer = buffer.subarray(i);
+      if (buffer.length === 0) break;
+
+      // NDJSON: top-level JSON value starts with '{' or '[', terminated by '\n'.
+      if (buffer[0] === 0x7b /* { */ || buffer[0] === 0x5b /* [ */) {
+        const nl = buffer.indexOf(0x0a);
+        if (nl === -1) break; // need more data
+        const line = buffer.subarray(0, nl).toString().replace(/\r$/, '');
+        buffer = buffer.subarray(nl + 1);
+        if (line) {
+          latch('ndjson');
+          onMessage(line);
+        }
+        continue;
+      }
+
+      // LSP framing: read header up to \r\n\r\n, then Content-Length bytes of body.
+      const headerEnd = buffer.indexOf('\r\n\r\n');
+      if (headerEnd === -1) break; // need full header
+      const header = buffer.subarray(0, headerEnd).toString();
+      const m = header.match(/Content-Length:\s*(\d+)/i);
+      buffer = buffer.subarray(headerEnd + 4);
+      if (m) {
+        contentLength = parseInt(m[1], 10);
+      }
+      // Otherwise the unrecognized header is silently skipped; loop continues.
     }
   });
 }

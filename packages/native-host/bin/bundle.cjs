@@ -8160,47 +8160,70 @@ function startServer(port) {
       handleExtension(ws, params.get("browserId") || "default");
     }
   });
+  const stdioFormat = { format: "ndjson" };
   parseStdioMessages(process.stdin, (json) => {
     handleMcpMessage("stdio", json, (msg) => {
       const body = JSON.stringify(msg);
-      process.stdout.write(`Content-Length: ${Buffer.byteLength(body)}\r
+      if (stdioFormat.format === "lsp") {
+        process.stdout.write(`Content-Length: ${Buffer.byteLength(body)}\r
 \r
 ${body}`);
+      } else {
+        process.stdout.write(`${body}
+`);
+      }
     });
-  });
+  }, stdioFormat);
   if (typeof process.stdin.resume === "function") {
     process.stdin.resume();
   }
   process.stderr.write(`Server started on 127.0.0.1:${port} (pid=${process.pid})
 `);
 }
-function parseStdioMessages(stream, onMessage) {
+function parseStdioMessages(stream, onMessage, formatHolder) {
   let buffer = Buffer.alloc(0);
   let contentLength = -1;
+  let latched = false;
+  const latch = (f) => {
+    if (formatHolder && !latched) {
+      formatHolder.format = f;
+      latched = true;
+    }
+  };
   stream.on("data", (chunk) => {
     buffer = Buffer.concat([buffer, typeof chunk === "string" ? Buffer.from(chunk) : chunk]);
     while (true) {
-      if (contentLength === -1) {
-        const headerEnd = buffer.indexOf("\r\n\r\n");
-        if (headerEnd === -1) break;
-        const header = buffer.subarray(0, headerEnd).toString();
-        const match = header.match(/Content-Length:\s*(\d+)/i);
-        if (!match) {
-          const line = buffer.subarray(0, headerEnd).toString().trim();
-          buffer = buffer.subarray(headerEnd + 4);
-          if (line) onMessage(line);
-          continue;
-        }
-        contentLength = parseInt(match[1], 10);
-        buffer = buffer.subarray(headerEnd + 4);
-      }
-      if (contentLength >= 0 && buffer.length >= contentLength) {
+      if (contentLength !== -1) {
+        if (buffer.length < contentLength) break;
         const json = buffer.subarray(0, contentLength).toString();
         buffer = buffer.subarray(contentLength);
         contentLength = -1;
+        latch("lsp");
         onMessage(json);
-      } else {
-        break;
+        continue;
+      }
+      let i = 0;
+      while (i < buffer.length && (buffer[i] === 10 || buffer[i] === 13 || buffer[i] === 32 || buffer[i] === 9)) i++;
+      if (i > 0) buffer = buffer.subarray(i);
+      if (buffer.length === 0) break;
+      if (buffer[0] === 123 || buffer[0] === 91) {
+        const nl = buffer.indexOf(10);
+        if (nl === -1) break;
+        const line = buffer.subarray(0, nl).toString().replace(/\r$/, "");
+        buffer = buffer.subarray(nl + 1);
+        if (line) {
+          latch("ndjson");
+          onMessage(line);
+        }
+        continue;
+      }
+      const headerEnd = buffer.indexOf("\r\n\r\n");
+      if (headerEnd === -1) break;
+      const header = buffer.subarray(0, headerEnd).toString();
+      const m = header.match(/Content-Length:\s*(\d+)/i);
+      buffer = buffer.subarray(headerEnd + 4);
+      if (m) {
+        contentLength = parseInt(m[1], 10);
       }
     }
   });
@@ -8222,30 +8245,50 @@ probe.on("error", () => {
   const ws = new import_websocket.default(`ws://127.0.0.1:${PORT}?role=mcp`);
   const pending = [];
   let wsReady = false;
+  let stdioFormat = "ndjson";
+  let formatLatched = false;
+  const latch = (f) => {
+    if (!formatLatched) {
+      stdioFormat = f;
+      formatLatched = true;
+    }
+  };
   let parseBuf = Buffer.alloc(0);
   let contentLength = -1;
   function feedParser(chunk) {
     parseBuf = Buffer.concat([parseBuf, chunk]);
     while (true) {
-      if (contentLength === -1) {
-        const headerEnd = parseBuf.indexOf("\r\n\r\n");
-        if (headerEnd === -1) break;
-        const header = parseBuf.subarray(0, headerEnd).toString();
-        const match = header.match(/Content-Length:\s*(\d+)/i);
-        if (!match) {
-          parseBuf = parseBuf.subarray(headerEnd + 4);
-          continue;
-        }
-        contentLength = parseInt(match[1], 10);
-        parseBuf = parseBuf.subarray(headerEnd + 4);
-      }
-      if (contentLength >= 0 && parseBuf.length >= contentLength) {
+      if (contentLength !== -1) {
+        if (parseBuf.length < contentLength) break;
         const json = parseBuf.subarray(0, contentLength).toString();
         parseBuf = parseBuf.subarray(contentLength);
         contentLength = -1;
+        latch("lsp");
         if (wsReady) ws.send(json);
-      } else {
-        break;
+        continue;
+      }
+      let i = 0;
+      while (i < parseBuf.length && (parseBuf[i] === 10 || parseBuf[i] === 13 || parseBuf[i] === 32 || parseBuf[i] === 9)) i++;
+      if (i > 0) parseBuf = parseBuf.subarray(i);
+      if (parseBuf.length === 0) break;
+      if (parseBuf[0] === 123 || parseBuf[0] === 91) {
+        const nl = parseBuf.indexOf(10);
+        if (nl === -1) break;
+        const line = parseBuf.subarray(0, nl).toString().replace(/\r$/, "");
+        parseBuf = parseBuf.subarray(nl + 1);
+        if (line) {
+          latch("ndjson");
+          if (wsReady) ws.send(line);
+        }
+        continue;
+      }
+      const headerEnd = parseBuf.indexOf("\r\n\r\n");
+      if (headerEnd === -1) break;
+      const header = parseBuf.subarray(0, headerEnd).toString();
+      const match = header.match(/Content-Length:\s*(\d+)/i);
+      parseBuf = parseBuf.subarray(headerEnd + 4);
+      if (match) {
+        contentLength = parseInt(match[1], 10);
       }
     }
   }
@@ -8263,9 +8306,14 @@ probe.on("error", () => {
     pending.length = 0;
     ws.on("message", (data) => {
       const body = data.toString();
-      process.stdout.write(`Content-Length: ${Buffer.byteLength(body)}\r
+      if (stdioFormat === "lsp") {
+        process.stdout.write(`Content-Length: ${Buffer.byteLength(body)}\r
 \r
 ${body}`);
+      } else {
+        process.stdout.write(`${body}
+`);
+      }
     });
   });
   ws.on("close", () => process.exit(0));

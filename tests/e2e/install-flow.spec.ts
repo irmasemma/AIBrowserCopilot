@@ -2,8 +2,10 @@
  * Install / Uninstall / Multi-Client Lifecycle — Real E2E Tests.
  *
  * Spawns the real compiled native-host .exe, drives the installer/uninstaller
- * directly, and exercises a real Chrome+extension via Playwright. All MCP
- * traffic uses the actual Content-Length-framed JSON-RPC stdio protocol.
+ * directly, and exercises a real Chrome+extension via Playwright. MCP traffic
+ * here uses LSP-style Content-Length framing, which the host accepts
+ * alongside the MCP-spec NDJSON format (it auto-detects per session). NDJSON
+ * is verified separately in `packages/native-host/src/smoke.test.ts`.
  *
  * Scenarios covered:
  *   3.1 Uninstall removes binary, manifests, registry key, lock file, configs.

@@ -32,7 +32,7 @@ This document describes how multiple MCP clients (Claude Desktop, Claude Code, V
                     │                                                     │
  stdio MCP ───────► │  SECONDARY (later spawns)                           │
  (other clients)    │   ├─ port 7483 taken → connect ws://127.0.0.1:7483  │
-                    │   └─ proxy own stdio ↔ WS (Content-Length framed)   │
+                    │   └─ proxy own stdio ↔ WS (auto-detect framing)      │
                     └─────────────────────────────────────────────────────┘
                               ▲                            ▲
                   ws://…?browserId=chrome     ws://…?browserId=edge
@@ -61,7 +61,7 @@ probe.listen(PORT, '127.0.0.1', () => {
 probe.on('error', () => {
   // Port taken → connect as WS MCP client; proxy stdio↔WS
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}?role=mcp`);
-  // …Content-Length framing both directions
+  // …auto-detects NDJSON or Content-Length framing
 });
 ```
 
@@ -162,9 +162,12 @@ service module.
 
 ### 6.1 Stdio MCP (primary + secondary)
 
-JSON-RPC 2.0 messages framed with **`Content-Length: N\r\n\r\n` + body** — the
-LSP-style framing required by MCP stdio transports. Both directions use the
-same framing. The secondary client implements parsing in
+JSON-RPC 2.0 messages over stdio. Per the MCP spec the on-the-wire format is
+**newline-delimited JSON** (`JSON.stringify(msg) + "\n"`); for legacy/test
+parity the parser also accepts LSP-style **`Content-Length: N\r\n\r\n` + body**
+framing. Format is auto-detected on the first valid message and latched for
+the rest of the stdio session; replies use the same format the client sent.
+The secondary client implements parsing in
 `packages/native-host/src/index.ts`; the server implements it in
 `parseStdioMessages` inside `service.ts`.
 
@@ -198,7 +201,7 @@ node -e "
 const cp = require('child_process');
 const c = cp.spawn(process.env.LOCALAPPDATA + '/ai-browser-copilot/ai-browser-copilot-win-x64.exe', [], { stdio: ['pipe','pipe','pipe'] });
 let buf = Buffer.alloc(0), cl = -1;
-c.stdout.on('data', chunk => { /* parse Content-Length frames, send initialize then tools/call list_tabs */ });
+c.stdout.on('data', chunk => { /* parse NDJSON lines, send initialize then tools/call list_tabs */ });
 "
 ```
 
