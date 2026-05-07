@@ -8,6 +8,7 @@ import { getManifestPath } from './host-registrar.js';
 import { removeConfigEntry } from './config-merger.js';
 import { registerAllDetectors, getAll, clear } from '../detectors/index.js';
 import { detectBrowsers, HELPER_HOST_NAME } from './browser-registrar.js';
+import { killRunningNativeHost } from './process-killer.js';
 
 export interface UninstallResult {
   binaryRemoved: boolean;
@@ -171,6 +172,10 @@ const removeMultiBrowserRegistrations = (platform: PlatformInfo): string[] => {
  */
 export const uninstall = async (platform: PlatformInfo): Promise<UninstallResult> => {
   const errors: string[] = [];
+
+  // Stop any running native host first so its .exe file isn't locked
+  // when we try to delete it. Idempotent: no-op if nothing is running.
+  await killRunningNativeHost(platform);
 
   const binaryResult = removeBinary(platform);
   if (binaryResult.error) errors.push(binaryResult.error);

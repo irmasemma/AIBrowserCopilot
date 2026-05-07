@@ -1,10 +1,11 @@
-import { createWriteStream, existsSync, mkdirSync, unlinkSync, renameSync, chmodSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, unlinkSync, renameSync, chmodSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { get as httpsGet } from 'node:https';
 import { get as httpGet, type IncomingMessage } from 'node:http';
 import type { PlatformInfo } from '../shared/platform.js';
-import { getAssetName, getDownloadUrl } from '../shared/constants.js';
+import { getAssetName, getDownloadUrl, getHelperAssetName } from '../shared/constants.js';
 import { withRetry } from '../shared/retry.js';
+import { killRunningNativeHost, NATIVE_HOST_PORT } from './process-killer.js';
 
 export interface DownloadProgress {
   bytesReceived: number;
@@ -99,6 +100,7 @@ export const downloadBinary = async (
   installDir: string,
   onProgress?: (progress: DownloadProgress) => void,
   onRetry?: (attempt: number, error: Error, delayMs: number) => void,
+  localSourceDir?: string,
 ): Promise<InstallResult> => {
   const assetName = getAssetName(platform.os, platform.arch);
   const url = getDownloadUrl(platform.os, platform.arch);
@@ -108,6 +110,25 @@ export const downloadBinary = async (
   // Create install directory if needed
   if (!existsSync(installDir)) {
     mkdirSync(installDir, { recursive: true });
+  }
+
+  // Stop any running native host so the binary file can be replaced.
+  // On Windows the running .exe holds an exclusive lock; without this step
+  // a "rerun the installer" flow fails with EPERM/EBUSY on rename.
+  if (platform.os === 'windows' && existsSync(targetPath)) {
+    const lock = checkBinaryLocked(installDir, platform);
+    if (lock.locked) {
+      await killRunningNativeHost(platform, NATIVE_HOST_PORT);
+    }
+  } else {
+    // POSIX: a running binary doesn't lock the file, but we still want to
+    // free up the port for the freshly installed version.
+    await killRunningNativeHost(platform, NATIVE_HOST_PORT);
+  }
+
+  // --from-local: skip network, copy from local path
+  if (localSourceDir) {
+    return installFromLocal(platform, installDir, localSourceDir);
   }
 
   let attempts = 0;
@@ -157,6 +178,95 @@ const cleanupFile = (path: string): void => {
 export const isBinaryInstalled = (installDir: string, platform: PlatformInfo): boolean => {
   const assetName = getAssetName(platform.os, platform.arch);
   return existsSync(join(installDir, assetName));
+};
+
+export interface LocalBinaryResolution {
+  binaryPath: string;
+  helperPath: string | null;
+  error?: string;
+}
+
+/**
+ * Resolve local binary paths for --from-local. Supports two layouts:
+ *   1. Flat folder: <dir>/<assetName> + <dir>/<helperAssetName>
+ *   2. Project root: <dir>/packages/native-host/bin/<assetName> +
+ *      <dir>/packages/native-host-helper/bin/<helperAssetName>
+ * Helper is optional (returns null if missing — caller decides whether to fail).
+ */
+export const resolveLocalBinaries = (
+  localSourceDir: string,
+  platform: PlatformInfo,
+): LocalBinaryResolution => {
+  const assetName = getAssetName(platform.os, platform.arch);
+  const helperAsset = getHelperAssetName(platform.os, platform.arch);
+
+  const layouts = [
+    {
+      binary: join(localSourceDir, assetName),
+      helper: join(localSourceDir, helperAsset),
+    },
+    {
+      binary: join(localSourceDir, 'packages', 'native-host', 'bin', assetName),
+      helper: join(localSourceDir, 'packages', 'native-host-helper', 'bin', helperAsset),
+    },
+  ];
+
+  for (const layout of layouts) {
+    if (existsSync(layout.binary)) {
+      return {
+        binaryPath: layout.binary,
+        helperPath: existsSync(layout.helper) ? layout.helper : null,
+      };
+    }
+  }
+
+  return {
+    binaryPath: '',
+    helperPath: null,
+    error:
+      `Local binary "${assetName}" not found in "${localSourceDir}". ` +
+      `Looked for it directly in the folder and at packages/native-host/bin/${assetName}.`,
+  };
+};
+
+const installFromLocal = (
+  platform: PlatformInfo,
+  installDir: string,
+  localSourceDir: string,
+): InstallResult => {
+  const assetName = getAssetName(platform.os, platform.arch);
+  const helperAsset = getHelperAssetName(platform.os, platform.arch);
+  const targetPath = join(installDir, assetName);
+  const helperTargetPath = join(installDir, helperAsset);
+
+  const resolved = resolveLocalBinaries(localSourceDir, platform);
+  if (resolved.error) {
+    return { success: false, binaryPath: targetPath, error: resolved.error, attempts: 0 };
+  }
+
+  try {
+    copyFileSync(resolved.binaryPath, targetPath);
+    if (platform.os !== 'windows') {
+      chmodSync(targetPath, 0o755);
+    }
+
+    if (resolved.helperPath) {
+      copyFileSync(resolved.helperPath, helperTargetPath);
+      if (platform.os !== 'windows') {
+        chmodSync(helperTargetPath, 0o755);
+      }
+    }
+
+    return { success: true, binaryPath: targetPath, attempts: 1 };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      success: false,
+      binaryPath: targetPath,
+      error: `Local install failed: ${message}`,
+      attempts: 1,
+    };
+  }
 };
 
 export interface BinaryLockCheck {

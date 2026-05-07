@@ -35,6 +35,7 @@ export interface CliFlags {
   update: boolean;
   uninstall: boolean;
   extensionId?: string;
+  fromLocal?: string;
 }
 
 export interface AppProps {
@@ -172,6 +173,8 @@ export const App: React.FC<AppProps> = ({
           (p: DownloadProgress) => {
             if (!cancelled) setProgress(p);
           },
+          undefined,
+          flags.fromLocal,
         );
 
         if (cancelled) return;
@@ -197,7 +200,7 @@ export const App: React.FC<AppProps> = ({
 
     run();
     return () => { cancelled = true; };
-  }, [platform, phase, downloadFn, exit]);
+  }, [platform, phase, downloadFn, flags.fromLocal, exit]);
 
   // Phase 3: Register
   React.useEffect(() => {

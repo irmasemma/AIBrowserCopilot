@@ -53,6 +53,12 @@ export interface ConnectionContext {
   reconnectsThisSession: number;
   diagnosticReason: DiagnosticReason | null;
   lastVerifiedAt: number;
+  /**
+   * 'outdated' when the connected native-host version is older than
+   * MIN_NATIVE_HOST_VERSION; 'ok' when current; null when not yet evaluated
+   * (e.g. no server_info has been received yet).
+   */
+  versionStatus: 'ok' | 'outdated' | null;
 }
 
 export type DisplayState = ConnectionState | 'stale';

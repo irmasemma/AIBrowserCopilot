@@ -1,8 +1,9 @@
 import net from 'node:net';
 import { WebSocket } from 'ws';
 import { startServer } from './service.js';
+import { VERSION } from './version.js';
 
-export const VERSION = '0.2.0';
+export { VERSION };
 const PORT = 7483;
 
 if (process.argv.includes('--version')) {

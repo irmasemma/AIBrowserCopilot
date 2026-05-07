@@ -3649,7 +3649,7 @@ var require_websocket_server = __commonJS({
 // src/index.ts
 var index_exports = {};
 __export(index_exports, {
-  VERSION: () => VERSION2
+  VERSION: () => VERSION
 });
 module.exports = __toCommonJS(index_exports);
 var import_node_net = __toESM(require("node:net"), 1);
@@ -7717,9 +7717,6 @@ var getPageContent = {
     url: external_exports.string().optional().describe("Target URL (defaults to active tab)"),
     format: external_exports.enum(["text", "html"]).default("text").describe("Output format"),
     tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
-  },
-  async execute() {
-    return { content: [{ type: "text", text: "[Stub] get_page_content: Not connected to browser. Browser bridge will be added in Story 1.3." }] };
   }
 };
 
@@ -7731,9 +7728,6 @@ var getPageMetadata = {
   inputSchema: {
     url: external_exports.string().optional().describe("Target URL (defaults to active tab)"),
     tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
-  },
-  async execute() {
-    return { content: [{ type: "text", text: "[Stub] get_page_metadata: Not connected to browser." }] };
   }
 };
 
@@ -7746,9 +7740,6 @@ var takeScreenshot = {
     format: external_exports.enum(["png", "jpeg"]).default("png").describe("Image format"),
     quality: external_exports.number().min(0).max(100).default(80).describe("JPEG quality (0-100)"),
     tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
-  },
-  async execute() {
-    return { content: [{ type: "text", text: "[Stub] take_screenshot: Not connected to browser." }] };
   }
 };
 
@@ -7759,9 +7750,6 @@ var listTabs = {
   tier: "free",
   inputSchema: {
     query: external_exports.string().optional().describe("Filter tabs by title or URL match")
-  },
-  async execute() {
-    return { content: [{ type: "text", text: "[Stub] list_tabs: Not connected to browser." }] };
   }
 };
 
@@ -7773,9 +7761,6 @@ var navigate = {
   inputSchema: {
     url: external_exports.string().describe("Target URL to navigate to"),
     tab_id: external_exports.number().optional().describe("Specific tab ID (defaults to active tab)")
-  },
-  async execute() {
-    return { content: [{ type: "text", text: "[Stub] navigate: Not connected to browser." }] };
   }
 };
 
@@ -7795,9 +7780,6 @@ var fillForm = {
     })).describe("Array of form fields to fill"),
     iframe: external_exports.string().optional().describe("CSS selector for iframe to target (for forms inside iframes)"),
     tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
-  },
-  async execute() {
-    return { content: [{ type: "text", text: "[Stub] fill_form: Not connected to browser." }] };
   }
 };
 
@@ -7811,9 +7793,6 @@ var clickElement = {
     text: external_exports.string().optional().describe("Visible text of the button or link to click. Prefers clickable elements (buttons, links) over plain text."),
     index: external_exports.number().optional().default(0).describe("Which match to click when multiple elements match (0 = first). Use when there are duplicate buttons."),
     tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
-  },
-  async execute() {
-    return { content: [{ type: "text", text: "[Stub] click_element: Not connected to browser." }] };
   }
 };
 
@@ -7826,9 +7805,6 @@ var extractTable = {
     selector: external_exports.string().optional().describe("CSS selector for a specific table"),
     index: external_exports.number().default(0).describe("Table index if multiple tables exist (default: first)"),
     tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
-  },
-  async execute() {
-    return { content: [{ type: "text", text: "[Stub] extract_table: Not connected to browser." }] };
   }
 };
 
@@ -7840,9 +7816,6 @@ var readForm = {
   inputSchema: {
     selector: external_exports.string().optional().describe("Optional CSS selector to target a specific form"),
     tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
-  },
-  async execute() {
-    return { content: [{ type: "text", text: "[Stub] read_form: Not connected to browser." }] };
   }
 };
 
@@ -7858,9 +7831,6 @@ var extractData = {
     max_rows: external_exports.number().default(100).describe("Maximum number of rows to extract (default: 100)"),
     include_links: external_exports.boolean().default(false).describe("Include href URLs in extracted data"),
     tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
-  },
-  async execute() {
-    return { content: [{ type: "text", text: "[Stub] extract_data: Not connected to browser." }] };
   }
 };
 
@@ -7876,9 +7846,6 @@ var scrollPage = {
     text: external_exports.string().optional().describe("Find text on page (case-insensitive) and scroll to it."),
     wait_for_content: external_exports.boolean().optional().default(true).describe("Wait for lazy-loaded content to settle after scroll. Default: true."),
     tab_id: external_exports.number().optional().describe("Specific tab ID (defaults to active tab)")
-  },
-  async execute() {
-    return { content: [{ type: "text", text: "[Stub] scroll_page: Not connected to browser." }] };
   }
 };
 
@@ -7890,9 +7857,6 @@ var goBack = {
   inputSchema: {
     wait_until: external_exports.enum(["load", "domcontentloaded"]).optional().default("domcontentloaded").describe('When to consider navigation complete. Default: "domcontentloaded".'),
     tab_id: external_exports.number().optional().describe("Specific tab ID (defaults to active tab)")
-  },
-  async execute() {
-    return { content: [{ type: "text", text: "[Stub] go_back: Not connected to browser." }] };
   }
 };
 
@@ -7904,9 +7868,6 @@ var goForward = {
   inputSchema: {
     wait_until: external_exports.enum(["load", "domcontentloaded"]).optional().default("domcontentloaded").describe('When to consider navigation complete. Default: "domcontentloaded".'),
     tab_id: external_exports.number().optional().describe("Specific tab ID (defaults to active tab)")
-  },
-  async execute() {
-    return { content: [{ type: "text", text: "[Stub] go_forward: Not connected to browser." }] };
   }
 };
 
@@ -7917,9 +7878,6 @@ var snapshot = {
   tier: "free",
   inputSchema: {
     tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab)")
-  },
-  async execute() {
-    return { content: [{ type: "text", text: "[Stub] snapshot: Not connected to browser." }] };
   }
 };
 
@@ -7941,8 +7899,63 @@ var toolRegistry = [
   goForward
 ];
 
-// src/service.ts
+// src/version.ts
 var VERSION = "0.2.0";
+
+// src/lock-file-manager.ts
+var import_node_fs = require("node:fs");
+var import_node_path = require("node:path");
+var import_node_os = require("node:os");
+function getLockDir() {
+  switch ((0, import_node_os.platform)()) {
+    case "win32":
+      return (0, import_node_path.join)(process.env.LOCALAPPDATA ?? (0, import_node_path.join)((0, import_node_os.homedir)(), "AppData", "Local"), "ai-browser-copilot");
+    case "darwin":
+      return (0, import_node_path.join)((0, import_node_os.homedir)(), "Library", "Application Support", "ai-browser-copilot");
+    default:
+      return (0, import_node_path.join)((0, import_node_os.homedir)(), ".local", "share", "ai-browser-copilot");
+  }
+}
+function getLockFilePath() {
+  return (0, import_node_path.join)(getLockDir(), "server.lock");
+}
+function writeLockFile(data, lockPath) {
+  const filePath = lockPath ?? getLockFilePath();
+  const dir = (0, import_node_path.join)(filePath, "..");
+  if (!(0, import_node_fs.existsSync)(dir)) {
+    (0, import_node_fs.mkdirSync)(dir, { recursive: true });
+  }
+  (0, import_node_fs.writeFileSync)(filePath, JSON.stringify(data, null, 2), "utf-8");
+}
+function deleteLockFile(lockPath) {
+  const filePath = lockPath ?? getLockFilePath();
+  try {
+    (0, import_node_fs.unlinkSync)(filePath);
+  } catch {
+  }
+}
+function registerCleanupHandlers(lockPath) {
+  const cleanup = () => deleteLockFile(lockPath);
+  process.on("exit", cleanup);
+  process.on("SIGTERM", () => {
+    cleanup();
+    process.exit(0);
+  });
+  process.on("SIGINT", () => {
+    cleanup();
+    process.exit(0);
+  });
+  process.on("uncaughtException", (err) => {
+    cleanup();
+    throw err;
+  });
+  process.on("unhandledRejection", (reason) => {
+    cleanup();
+    throw reason;
+  });
+}
+
+// src/service.ts
 var REQUEST_TIMEOUT_MS = 3e4;
 var browserSockets = /* @__PURE__ */ new Map();
 var mcpClients = /* @__PURE__ */ new Map();
@@ -8028,19 +8041,20 @@ function handleMcpClient(ws) {
     }
   });
 }
-function sendToolRequest(clientId, requestId, tool, params, browserId) {
+function sendToolRequest(clientId, originalId, tool, params, browserId) {
   return new Promise((resolve, reject) => {
     const ws = browserSockets.get(browserId) || browserSockets.get("default") || Array.from(browserSockets.values()).find((s) => s.readyState === import_websocket.default.OPEN);
     if (!ws || ws.readyState !== import_websocket.default.OPEN) {
       reject(new Error("No browser extension connected"));
       return;
     }
+    const browserBoundId = `b_${(0, import_node_crypto.randomUUID)()}`;
     const timer = setTimeout(() => {
-      pendingRequests.delete(requestId);
+      pendingRequests.delete(browserBoundId);
       reject(new Error("Tool request timed out"));
     }, REQUEST_TIMEOUT_MS);
-    pendingRequests.set(requestId, { clientId, resolve, reject, timer });
-    ws.send(JSON.stringify({ type: "tool_request", id: requestId, tool, params }));
+    pendingRequests.set(browserBoundId, { clientId, originalId, resolve, reject, timer });
+    ws.send(JSON.stringify({ type: "tool_request", id: browserBoundId, tool, params }));
   });
 }
 function handleMcpMessage(clientId, raw, reply) {
@@ -8079,8 +8093,8 @@ function handleMcpMessage(clientId, raw, reply) {
       const toolName = msg.params?.name;
       const toolArgs = msg.params?.arguments ?? {};
       const browserId = toolArgs.browser || "default";
-      const requestId = msg.id?.toString() ?? (0, import_node_crypto.randomUUID)();
-      sendToolRequest(clientId, requestId, toolName, toolArgs, browserId).then((response) => {
+      const originalId = msg.id ?? null;
+      sendToolRequest(clientId, originalId, toolName, toolArgs, browserId).then((response) => {
         const resp = response;
         reply({ jsonrpc: "2.0", id: msg.id, result: resp.result ?? resp });
       }).catch((err) => {
@@ -8123,6 +8137,21 @@ function zodToJsonSchema(z) {
 function startServer(port) {
   serverPort = port;
   const wss = new import_websocket_server.default({ host: "127.0.0.1", port });
+  try {
+    writeLockFile({
+      pid: process.pid,
+      port,
+      token: "",
+      ipcPath: "",
+      startedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      version: VERSION,
+      startedBy: "service"
+    });
+    registerCleanupHandlers();
+  } catch (err) {
+    process.stderr.write(`Failed to write lock file: ${err.message}
+`);
+  }
   wss.on("connection", (ws, req) => {
     const params = parseQuery(req.url);
     if (params.get("role") === "mcp") {
@@ -8139,7 +8168,10 @@ function startServer(port) {
 ${body}`);
     });
   });
-  process.stderr.write(`Server started on 127.0.0.1:${port}
+  if (typeof process.stdin.resume === "function") {
+    process.stdin.resume();
+  }
+  process.stderr.write(`Server started on 127.0.0.1:${port} (pid=${process.pid})
 `);
 }
 function parseStdioMessages(stream, onMessage) {
@@ -8175,10 +8207,9 @@ function parseStdioMessages(stream, onMessage) {
 }
 
 // src/index.ts
-var VERSION2 = "0.2.0";
 var PORT = 7483;
 if (process.argv.includes("--version")) {
-  process.stdout.write(`${VERSION2}
+  process.stdout.write(`${VERSION}
 `);
   process.exit(0);
 }

@@ -13,8 +13,13 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
 import { toolRegistry } from './tools/index.js';
+import { VERSION } from './version.js';
+import {
+  writeLockFile,
+  deleteLockFile,
+  registerCleanupHandlers,
+} from './lock-file-manager.js';
 
-const VERSION = '0.2.0';
 const REQUEST_TIMEOUT_MS = 30_000;
 
 // ── Browser extension connections ─────────────────────────────────────────
@@ -24,8 +29,13 @@ const browserSockets = new Map<string, WebSocket>();
 const mcpClients = new Map<string, WebSocket>();
 
 // ── In-flight tool requests ───────────────────────────────────────────────
+// Keyed by a server-generated browser-bound id (b_<uuid>) so that two MCP
+// clients issuing the same JSON-RPC id (commonly 1) cannot clobber each
+// other's pending entry. The original client-supplied id is preserved in
+// `originalId` and used when replying to the MCP client.
 interface PendingRequest {
   clientId: string;
+  originalId: string | number | null;
   resolve: (response: unknown) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -121,7 +131,13 @@ function handleMcpClient(ws: WebSocket): void {
 }
 
 // ── Send tool request to browser extension ────────────────────────────────
-function sendToolRequest(clientId: string, requestId: string, tool: string, params: Record<string, unknown>, browserId: string): Promise<unknown> {
+function sendToolRequest(
+  clientId: string,
+  originalId: string | number | null,
+  tool: string,
+  params: Record<string, unknown>,
+  browserId: string,
+): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const ws = browserSockets.get(browserId)
       || browserSockets.get('default')
@@ -132,13 +148,17 @@ function sendToolRequest(clientId: string, requestId: string, tool: string, para
       return;
     }
 
+    // Server-generated id, unique across all MCP clients, used as the
+    // routing key in pendingRequests and as the id sent to the extension.
+    const browserBoundId = `b_${randomUUID()}`;
+
     const timer = setTimeout(() => {
-      pendingRequests.delete(requestId);
+      pendingRequests.delete(browserBoundId);
       reject(new Error('Tool request timed out'));
     }, REQUEST_TIMEOUT_MS);
 
-    pendingRequests.set(requestId, { clientId, resolve, reject, timer });
-    ws.send(JSON.stringify({ type: 'tool_request', id: requestId, tool, params }));
+    pendingRequests.set(browserBoundId, { clientId, originalId, resolve, reject, timer });
+    ws.send(JSON.stringify({ type: 'tool_request', id: browserBoundId, tool, params }));
   });
 }
 
@@ -182,9 +202,9 @@ function handleMcpMessage(clientId: string, raw: string, reply: (msg: unknown) =
       const toolName = msg.params?.name as string;
       const toolArgs = (msg.params?.arguments ?? {}) as Record<string, unknown>;
       const browserId = (toolArgs.browser as string) || 'default';
-      const requestId = msg.id?.toString() ?? randomUUID();
+      const originalId = (msg.id ?? null) as string | number | null;
 
-      sendToolRequest(clientId, requestId, toolName, toolArgs, browserId)
+      sendToolRequest(clientId, originalId, toolName, toolArgs, browserId)
         .then((response: unknown) => {
           const resp = response as { result?: unknown };
           reply({ jsonrpc: '2.0', id: msg.id, result: resp.result ?? resp });
@@ -225,6 +245,23 @@ export function startServer(port: number): void {
   serverPort = port;
   const wss = new WebSocketServer({ host: '127.0.0.1', port });
 
+  // Write lock file with current PID/port so the installer can find and
+  // terminate this process before reinstalling. Cleaned up on exit.
+  try {
+    writeLockFile({
+      pid: process.pid,
+      port,
+      token: '',
+      ipcPath: '',
+      startedAt: new Date().toISOString(),
+      version: VERSION,
+      startedBy: 'service',
+    });
+    registerCleanupHandlers();
+  } catch (err) {
+    process.stderr.write(`Failed to write lock file: ${(err as Error).message}\n`);
+  }
+
   wss.on('connection', (ws, req) => {
     const params = parseQuery(req.url);
     if (params.get('role') === 'mcp') {
@@ -236,14 +273,24 @@ export function startServer(port: number): void {
 
   // Primary MCP client: read JSON-RPC from own stdio (Content-Length framed)
   // When stdin closes (client exits), server keeps running for other clients + extensions.
+  // Note: index.ts paused stdin during the port probe to avoid losing data;
+  // explicitly resume after the data listener is wired up.
   parseStdioMessages(process.stdin, (json) => {
     handleMcpMessage('stdio', json, (msg) => {
       const body = JSON.stringify(msg);
       process.stdout.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
     });
   });
+  if (typeof (process.stdin as NodeJS.ReadStream).resume === 'function') {
+    (process.stdin as NodeJS.ReadStream).resume();
+  }
 
-  process.stderr.write(`Server started on 127.0.0.1:${port}\n`);
+  process.stderr.write(`Server started on 127.0.0.1:${port} (pid=${process.pid})\n`);
+}
+
+/** Stop the WS server and clean up the lock file. Used by tests. */
+export function shutdownServer(): void {
+  deleteLockFile();
 }
 
 // ── Content-Length framed stdio parser ─────────────────────────────────────

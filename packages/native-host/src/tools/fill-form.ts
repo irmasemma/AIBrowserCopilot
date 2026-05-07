@@ -17,7 +17,4 @@ export const fillForm: ToolPlugin = {
     iframe: z.string().optional().describe('CSS selector for iframe to target (for forms inside iframes)'),
     tab_id: z.number().optional().describe('Specific tab ID to target (defaults to active tab). The tab will be activated automatically.'),
   },
-  async execute() {
-    return { content: [{ type: 'text' as const, text: '[Stub] fill_form: Not connected to browser.' }] };
-  },
 };

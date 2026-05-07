@@ -8,7 +8,4 @@ export const listTabs: ToolPlugin = {
   inputSchema: {
     query: z.string().optional().describe('Filter tabs by title or URL match'),
   },
-  async execute() {
-    return { content: [{ type: 'text' as const, text: '[Stub] list_tabs: Not connected to browser.' }] };
-  },
 };

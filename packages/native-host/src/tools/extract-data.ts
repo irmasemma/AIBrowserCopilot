@@ -13,7 +13,4 @@ export const extractData: ToolPlugin = {
     include_links: z.boolean().default(false).describe('Include href URLs in extracted data'),
     tab_id: z.number().optional().describe('Specific tab ID to target (defaults to active tab). The tab will be activated automatically.'),
   },
-  async execute() {
-    return { content: [{ type: 'text' as const, text: '[Stub] extract_data: Not connected to browser.' }] };
-  },
 };

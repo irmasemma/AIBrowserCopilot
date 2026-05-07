@@ -11,7 +11,4 @@ export const clickElement: ToolPlugin = {
     index: z.number().optional().default(0).describe('Which match to click when multiple elements match (0 = first). Use when there are duplicate buttons.'),
     tab_id: z.number().optional().describe('Specific tab ID to target (defaults to active tab). The tab will be activated automatically.'),
   },
-  async execute() {
-    return { content: [{ type: 'text' as const, text: '[Stub] click_element: Not connected to browser.' }] };
-  },
 };

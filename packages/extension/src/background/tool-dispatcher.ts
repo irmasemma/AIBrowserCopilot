@@ -77,10 +77,50 @@ const getTab = async (tabId?: number, checkBlocked = true): Promise<chrome.tabs.
 };
 
 const executeContentScript = async <T>(tabId: number, func: () => T): Promise<T> => {
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    func,
-  });
+  let results;
+  try {
+    results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Chrome/Edge emits this exact wording when the user has set per-tab
+    // "Site access: On click" (the default for sideloaded unpacked extensions),
+    // even though the manifest declares <all_urls>. Translate it into an
+    // actionable instruction so MCP clients (VS Code, Claude, etc.) can
+    // surface it to the user.
+    if (/Cannot access contents of the page|Extension manifest must request permission/i.test(message)) {
+      // Surface a UI signal for the side panel banner — but ONLY if the
+      // <all_urls> permission isn't already granted. If it IS granted and
+      // we're STILL hitting this error, it's a per-tab issue (e.g., the
+      // tab's URL doesn't match any granted origin, or Edge's per-extension
+      // runtime "Site access" override is still in "On click" mode for
+      // this specific tab). Setting the banner flag in those cases would
+      // make the banner re-appear after the user already clicked grant,
+      // which is the bug we're fixing.
+      try {
+        const allUrlsGranted = await chrome.permissions
+          .contains({ origins: ['<all_urls>'] })
+          .catch(() => false);
+        if (!allUrlsGranted) {
+          await chrome.storage.local.set({ siteAccessBlocked: true, siteAccessBlockedAt: Date.now() });
+        }
+      } catch {
+        // best-effort; ignore storage errors
+      }
+      throw Object.assign(
+        new Error(
+          'This tab is blocked by the browser\'s per-extension Site Access setting. ' +
+          'Open the AI Browser CoPilot side panel and click "Grant access to all sites", ' +
+          'or open edge://extensions, click "Details" on AI Browser CoPilot, and set ' +
+          '"Site access" to "On all sites". Then retry.',
+        ),
+        { code: 'SITE_ACCESS_BLOCKED' },
+      );
+    }
+    throw err;
+  }
   if (!results?.[0]) throw Object.assign(new Error('Content script returned no result'), { code: 'CONTENT_UNAVAILABLE' });
   return results[0].result as T;
 };

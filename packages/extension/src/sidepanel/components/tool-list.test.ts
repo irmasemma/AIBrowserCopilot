@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { getToolStatus, getToolStatusLabel, getToolStatusIcon } from './tool-list.js';
-import { getSetupMessage } from './setup-prompt.js';
 import type { ToolScanResult } from '../../shared/types.js';
 
 const tool = (slug: string, installed: boolean, configured: boolean): ToolScanResult => ({
@@ -43,27 +42,6 @@ describe('tool-list', () => {
       expect(getToolStatusIcon('active')).toBe('✅');
       expect(getToolStatusIcon('configured')).toBe('✓');
       expect(getToolStatusIcon('unconfigured')).toBe('⚠️');
-    });
-  });
-});
-
-describe('setup-prompt', () => {
-  describe('getSetupMessage', () => {
-    it('returns empty string for no tools', () => {
-      expect(getSetupMessage([])).toBe('');
-    });
-
-    it('returns single tool message', () => {
-      expect(getSetupMessage([tool('cursor', true, false)])).toBe(
-        'Cursor detected but not configured.',
-      );
-    });
-
-    it('returns multi-tool message', () => {
-      const tools = [tool('cursor', true, false), tool('windsurf', true, false)];
-      expect(getSetupMessage(tools)).toContain('2 tools detected');
-      expect(getSetupMessage(tools)).toContain('Cursor');
-      expect(getSetupMessage(tools)).toContain('Windsurf');
     });
   });
 });

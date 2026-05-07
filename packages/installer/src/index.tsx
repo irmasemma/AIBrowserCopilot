@@ -29,6 +29,9 @@ const main = (): void => {
       --update       Update existing installation
       --uninstall    Remove installation and configs
       --extension-id Chrome extension ID (for development)
+      --from-local   Install from a local folder instead of GitHub releases.
+                     Accepts either a folder containing the binaries directly
+                     or the project root (looks in packages/*/bin/).
 
     Examples
       $ ai-browser-copilot-setup
@@ -36,6 +39,7 @@ const main = (): void => {
       $ ai-browser-copilot-setup --tools vscode,cursor
       $ ai-browser-copilot-setup --update
       $ ai-browser-copilot-setup --uninstall
+      $ ai-browser-copilot-setup --from-local . --extension-id <id>
   `,
     {
       importMeta: import.meta,
@@ -45,6 +49,7 @@ const main = (): void => {
         update: { type: 'boolean', default: false },
         uninstall: { type: 'boolean', default: false },
         extensionId: { type: 'string' },
+        fromLocal: { type: 'string' },
       },
     },
   );

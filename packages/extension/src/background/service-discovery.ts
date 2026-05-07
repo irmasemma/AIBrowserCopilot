@@ -1,7 +1,6 @@
 import type { DiagnosticReason } from '../shared/types';
 
 const NM_HELPER_NAME = 'com.copilot.native_host_helper';
-const DEFAULT_URL = 'ws://127.0.0.1:7483';
 
 function detectBrowserId(): string {
   if (typeof navigator === 'undefined') return 'unknown';

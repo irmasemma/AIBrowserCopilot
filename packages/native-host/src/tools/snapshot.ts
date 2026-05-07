@@ -8,7 +8,4 @@ export const snapshot: ToolPlugin = {
   inputSchema: {
     tab_id: z.number().optional().describe('Specific tab ID to target (defaults to active tab)'),
   },
-  async execute() {
-    return { content: [{ type: 'text' as const, text: '[Stub] snapshot: Not connected to browser.' }] };
-  },
 };

@@ -10,7 +10,4 @@ export const extractTable: ToolPlugin = {
     index: z.number().default(0).describe('Table index if multiple tables exist (default: first)'),
     tab_id: z.number().optional().describe('Specific tab ID to target (defaults to active tab). The tab will be activated automatically.'),
   },
-  async execute() {
-    return { content: [{ type: 'text' as const, text: '[Stub] extract_table: Not connected to browser.' }] };
-  },
 };

@@ -9,7 +9,4 @@ export const readForm: ToolPlugin = {
     selector: z.string().optional().describe('Optional CSS selector to target a specific form'),
     tab_id: z.number().optional().describe('Specific tab ID to target (defaults to active tab). The tab will be activated automatically.'),
   },
-  async execute() {
-    return { content: [{ type: 'text' as const, text: '[Stub] read_form: Not connected to browser.' }] };
-  },
 };

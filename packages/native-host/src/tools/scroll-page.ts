@@ -13,7 +13,4 @@ export const scrollPage: ToolPlugin = {
     wait_for_content: z.boolean().optional().default(true).describe('Wait for lazy-loaded content to settle after scroll. Default: true.'),
     tab_id: z.number().optional().describe('Specific tab ID (defaults to active tab)'),
   },
-  async execute() {
-    return { content: [{ type: 'text' as const, text: '[Stub] scroll_page: Not connected to browser.' }] };
-  },
 };

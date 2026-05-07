@@ -7,6 +7,7 @@ import type { HeartbeatMonitor } from './heartbeat-monitor';
 import { createRelay } from './relay-client';
 import type { Relay } from './relay-client';
 import type { DiscoveryResult } from './service-discovery';
+import { checkBridgeVersion } from '../shared/version-check';
 
 const DEFAULT_URL = 'ws://127.0.0.1:7483';
 const SERVER_INFO_TIMEOUT_MS = 10_000;
@@ -127,7 +128,14 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
           clearTimeout(serverInfoTimer);
           serverInfoTimer = null;
         }
-        context = { ...context, serverInfo: info, lastConnectedAt: Date.now(), lastVerifiedAt: Date.now() };
+        const versionStatus = checkBridgeVersion(info.version);
+        context = {
+          ...context,
+          serverInfo: info,
+          lastConnectedAt: Date.now(),
+          lastVerifiedAt: Date.now(),
+          versionStatus,
+        };
         dispatch({ type: 'WS_OPEN' });
         startHeartbeat();
       },

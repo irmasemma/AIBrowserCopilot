@@ -7,8 +7,11 @@ import { ActivityEntryComponent } from '../../sidepanel/components/activity-entr
 import { SetupWizard } from '../../sidepanel/components/setup-wizard.js';
 import { ChatTab } from '../../sidepanel/components/chat-tab.js';
 import { SettingsTab } from '../../sidepanel/components/settings-tab.js';
+import { OutdatedBridgeBanner } from '../../sidepanel/components/outdated-bridge-banner.js';
+import { SiteAccessBanner } from '../../sidepanel/components/site-access-banner.js';
 import { useLicense } from '../../sidepanel/hooks/use-license.js';
 import { TOOL_DEFINITIONS } from '../../shared/tool-definitions.js';
+import { MIN_NATIVE_HOST_VERSION } from '../../shared/version-check.js';
 
 type TabId = 'chat' | 'tools' | 'settings';
 
@@ -125,6 +128,13 @@ const App = () => {
   return (
     <div class="flex flex-col h-screen bg-neutral-50">
       <ConnectionHeader />
+      <SiteAccessBanner />
+      {connectionContext.versionStatus === 'outdated' && (
+        <OutdatedBridgeBanner
+          installedVersion={connectionContext.serverInfo?.version ?? null}
+          minimumVersion={MIN_NATIVE_HOST_VERSION}
+        />
+      )}
       <TabStrip active={activeTab} onChange={setActiveTab} />
       <div class="flex-1 min-h-0">
         {activeTab === 'chat' && <ChatTab onOpenSettings={() => setActiveTab('settings')} />}
