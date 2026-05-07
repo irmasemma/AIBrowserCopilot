@@ -7900,7 +7900,7 @@ var toolRegistry = [
 ];
 
 // src/version.ts
-var VERSION = "0.2.0";
+var VERSION = "0.2.1";
 
 // src/lock-file-manager.ts
 var import_node_fs = require("node:fs");
