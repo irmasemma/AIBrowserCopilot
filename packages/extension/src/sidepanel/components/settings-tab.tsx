@@ -3,6 +3,8 @@ import { useEffect, useState } from 'preact/hooks';
 import { useStore } from '../store.js';
 import { getDisplayState } from '../../shared/types.js';
 import { HowToConnect } from './how-to-connect.js';
+import { PROVIDER_META } from '../models.js';
+import type { ProviderId } from '../providers/types.js';
 
 const SUPPORT_URL = 'https://github.com/irmasemma/AIBrowserCopilot/issues';
 const FAQ_URL = 'https://github.com/irmasemma/AIBrowserCopilot/wiki/FAQ';
@@ -17,10 +19,20 @@ interface McpStatus {
   binaryExists: boolean;
 }
 
-export const SettingsTab: FunctionalComponent = () => {
-  const connectionContext = useStore((s) => s.connectionContext);
-  const displayState = getDisplayState(connectionContext);
+const PROVIDER_ORDER: ProviderId[] = ['openai', 'anthropic', 'gemini'];
 
+interface ApiKeySectionProps {
+  provider: ProviderId;
+}
+
+const maskKey = (key: string): string => {
+  if (!key) return 'not set';
+  if (key.length <= 8) return '••••';
+  return `${key.slice(0, 4)}…${key.slice(-4)}`;
+};
+
+const ApiKeySection: FunctionalComponent<ApiKeySectionProps> = ({ provider }) => {
+  const meta = PROVIDER_META[provider];
   const [apiKey, setApiKey] = useState('');
   const [draft, setDraft] = useState('');
   const [reveal, setReveal] = useState(false);
@@ -28,88 +40,114 @@ export const SettingsTab: FunctionalComponent = () => {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    chrome.storage.local.get('openaiApiKey', (data) => {
-      const key = typeof data.openaiApiKey === 'string' ? data.openaiApiKey : '';
+    chrome.storage.local.get(meta.storageKey, (data) => {
+      const key = typeof data[meta.storageKey] === 'string' ? data[meta.storageKey] : '';
       setApiKey(key);
       setDraft(key);
       setLoaded(true);
     });
-  }, []);
+    const onChange = (changes: Record<string, chrome.storage.StorageChange>) => {
+      if (changes[meta.storageKey]) {
+        const next = (changes[meta.storageKey].newValue as string) ?? '';
+        setApiKey(next);
+        setDraft(next);
+      }
+    };
+    chrome.storage.onChanged.addListener(onChange);
+    return () => chrome.storage.onChanged.removeListener(onChange);
+  }, [meta.storageKey]);
 
   const save = async () => {
     const trimmed = draft.trim();
-    await chrome.storage.local.set({ openaiApiKey: trimmed });
+    await chrome.storage.local.set({ [meta.storageKey]: trimmed });
     setApiKey(trimmed);
     setSavedAt(Date.now());
     setTimeout(() => setSavedAt(null), 2000);
   };
 
   const clear = async () => {
-    await chrome.storage.local.set({ openaiApiKey: '' });
+    await chrome.storage.local.set({ [meta.storageKey]: '' });
     setApiKey('');
     setDraft('');
   };
 
-  const masked = apiKey ? `sk-…${apiKey.slice(-4)}` : 'not set';
+  return (
+    <div>
+      <h4 class="text-sm font-medium text-neutral-800">{meta.label}</h4>
+      <p class="text-xs text-neutral-500 mt-0.5 mb-2">
+        {meta.description}{' '}
+        <a
+          href={meta.keyDocsUrl}
+          target="_blank"
+          rel="noopener"
+          class="text-brand-primary hover:underline"
+        >
+          Get a key →
+        </a>
+      </p>
+
+      <div class="text-xs text-neutral-500 mb-2">
+        Currently: <span class="font-mono text-neutral-700">{loaded ? maskKey(apiKey) : '…'}</span>
+      </div>
+
+      <div class="flex gap-2 mb-2">
+        <input
+          type={reveal ? 'text' : 'password'}
+          class="flex-1 rounded border border-neutral-300 px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-brand-primary"
+          placeholder={meta.keyPlaceholder}
+          value={draft}
+          onInput={(e) => setDraft((e.target as HTMLInputElement).value)}
+          autocomplete="off"
+          spellcheck={false}
+        />
+        <button
+          class="text-xs text-neutral-600 px-2 hover:text-neutral-900"
+          onClick={() => setReveal((r) => !r)}
+          aria-label={reveal ? 'Hide key' : 'Show key'}
+        >
+          {reveal ? 'Hide' : 'Show'}
+        </button>
+      </div>
+
+      <div class="flex gap-2 items-center">
+        <button
+          class="text-sm font-medium text-white bg-brand-primary px-3 py-1.5 rounded hover:bg-brand-primary-dark disabled:opacity-50"
+          onClick={() => void save()}
+          disabled={draft.trim() === apiKey}
+        >
+          Save
+        </button>
+        {apiKey && (
+          <button
+            class="text-sm text-red-600 px-3 py-1.5 rounded hover:bg-red-50"
+            onClick={() => void clear()}
+          >
+            Clear
+          </button>
+        )}
+        {savedAt && <span class="text-xs text-green-600">Saved</span>}
+      </div>
+    </div>
+  );
+};
+
+export const SettingsTab: FunctionalComponent = () => {
+  const connectionContext = useStore((s) => s.connectionContext);
+  const displayState = getDisplayState(connectionContext);
 
   return (
     <div class="px-4 py-4 space-y-6 text-sm">
       <section>
-        <h3 class="font-semibold text-neutral-800 mb-1">OpenAI API Key</h3>
-        <p class="text-xs text-neutral-500 mb-2">
+        <h3 class="font-semibold text-neutral-800 mb-1">AI Provider Keys</h3>
+        <p class="text-xs text-neutral-500 mb-3">
           Used by the Chat tab. Stored locally on this device only — never sent to our servers.
-          Get a key at{' '}
-          <a
-            href="https://platform.openai.com/api-keys"
-            target="_blank"
-            rel="noopener"
-            class="text-brand-primary hover:underline"
-          >
-            platform.openai.com/api-keys
-          </a>
-          .
         </p>
-
-        <div class="text-xs text-neutral-500 mb-2">
-          Currently: <span class="font-mono text-neutral-700">{loaded ? masked : '…'}</span>
-        </div>
-
-        <div class="flex gap-2 mb-2">
-          <input
-            type={reveal ? 'text' : 'password'}
-            class="flex-1 rounded border border-neutral-300 px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-brand-primary"
-            placeholder="sk-…"
-            value={draft}
-            onInput={(e) => setDraft((e.target as HTMLInputElement).value)}
-            autocomplete="off"
-            spellcheck={false}
-          />
-          <button
-            class="text-xs text-neutral-600 px-2 hover:text-neutral-900"
-            onClick={() => setReveal((r) => !r)}
-            aria-label={reveal ? 'Hide key' : 'Show key'}
-          >
-            {reveal ? 'Hide' : 'Show'}
-          </button>
-        </div>
-
-        <div class="flex gap-2 items-center">
-          <button
-            class="text-sm font-medium text-white bg-brand-primary px-3 py-1.5 rounded hover:bg-brand-primary-dark disabled:opacity-50"
-            onClick={() => void save()}
-            disabled={draft.trim() === apiKey}
-          >
-            Save
-          </button>
-          {apiKey && (
-            <button
-              class="text-sm text-red-600 px-3 py-1.5 rounded hover:bg-red-50"
-              onClick={() => void clear()}
-            >
-              Clear
-            </button>
-          )}
-          {savedAt && <span class="text-xs text-green-600">Saved</span>}
+        <div class="space-y-5 divide-y divide-neutral-100">
+          {PROVIDER_ORDER.map((p, i) => (
+            <div key={p} class={i === 0 ? '' : 'pt-5'}>
+              <ApiKeySection provider={p} />
+            </div>
+          ))}
         </div>
       </section>
 
@@ -195,11 +233,8 @@ const ClaudeCodeRegistrationCard: FunctionalComponent = () => {
     }
   };
 
-  // Don't render anything until we know the status — keeps the UI quiet when
-  // the helper isn't installed.
   if (!status || !status.available) return null;
 
-  // Happy path: registered at user scope, nothing to do. Show a quiet confirmation.
   if (status.registered && status.scope === 'user') {
     return (
       <div class="mt-3 text-xs text-neutral-500">
@@ -208,7 +243,6 @@ const ClaudeCodeRegistrationCard: FunctionalComponent = () => {
     );
   }
 
-  // Project scope works but is fragile — encourage moving it to user scope.
   if (status.registered && status.scope === 'project') {
     return (
       <div class="mt-3 p-2 rounded border border-amber-200 bg-amber-50">
@@ -235,7 +269,6 @@ const ClaudeCodeRegistrationCard: FunctionalComponent = () => {
     );
   }
 
-  // Not registered, but Claude Code's config exists → offer one-click re-add.
   if (status.configExists) {
     return (
       <div class="mt-3 p-2 rounded border-l-4 border-amber-300 bg-amber-50">
@@ -249,16 +282,10 @@ const ClaudeCodeRegistrationCard: FunctionalComponent = () => {
         <button
           class="text-xs font-medium text-white bg-amber-500 px-2 py-1 rounded hover:bg-amber-600 disabled:opacity-50"
           onClick={() => void onRepair()}
-          disabled={busy || !status.binaryExists}
-          title={!status.binaryExists ? 'Native host binary not found — run installer first' : ''}
+          disabled={busy}
         >
-          {busy ? 'Adding…' : 'Re-add to Claude Code'}
+          {busy ? 'Adding…' : 'Re-register at user scope'}
         </button>
-        {!status.binaryExists && (
-          <p class="text-xs text-red-700 mt-2">
-            Native host binary not found at {status.binaryPath}. Run the installer first.
-          </p>
-        )}
         {message && (
           <p class={`text-xs mt-2 ${message.kind === 'success' ? 'text-green-700' : 'text-red-700'}`}>
             {message.text}
@@ -268,7 +295,5 @@ const ClaudeCodeRegistrationCard: FunctionalComponent = () => {
     );
   }
 
-  // Config doesn't exist at all → user hasn't run Claude Code yet. Stay quiet —
-  // showing "Claude Code not detected" everywhere would be noise.
   return null;
 };
