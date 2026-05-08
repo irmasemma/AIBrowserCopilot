@@ -16,26 +16,37 @@ afterEach(() => {
 });
 
 describe('isBinaryInstalled', () => {
-  it('returns false when binary does not exist', () => {
+  it('returns false when neither binary nor helper exists', () => {
     const platform = detectPlatform('win32', 'x64', 'C:\\Users\\test');
     expect(isBinaryInstalled(TEST_DIR, platform)).toBe(false);
   });
 
-  it('returns true when binary exists for Windows', () => {
+  it('returns false when only the bridge is installed (helper missing)', () => {
     const platform = detectPlatform('win32', 'x64', 'C:\\Users\\test');
     writeFileSync(join(TEST_DIR, 'ai-browser-copilot-win-x64.exe'), 'fake-binary');
+    // Helper missing → install is incomplete; the extension would report
+    // "Setup incomplete" because it can't reach the native messaging endpoint.
+    expect(isBinaryInstalled(TEST_DIR, platform)).toBe(false);
+  });
+
+  it('returns true when both bridge and helper exist for Windows', () => {
+    const platform = detectPlatform('win32', 'x64', 'C:\\Users\\test');
+    writeFileSync(join(TEST_DIR, 'ai-browser-copilot-win-x64.exe'), 'fake-binary');
+    writeFileSync(join(TEST_DIR, 'ai-browser-copilot-helper-win-x64.exe'), 'fake-helper');
     expect(isBinaryInstalled(TEST_DIR, platform)).toBe(true);
   });
 
-  it('returns true when binary exists for macOS', () => {
+  it('returns true when both bridge and helper exist for macOS', () => {
     const platform = detectPlatform('darwin', 'arm64', '/Users/test');
     writeFileSync(join(TEST_DIR, 'ai-browser-copilot-macos-arm64'), 'fake-binary');
+    writeFileSync(join(TEST_DIR, 'ai-browser-copilot-helper-macos-arm64'), 'fake-helper');
     expect(isBinaryInstalled(TEST_DIR, platform)).toBe(true);
   });
 
-  it('returns true when binary exists for Linux', () => {
+  it('returns true when both bridge and helper exist for Linux', () => {
     const platform = detectPlatform('linux', 'x64', '/home/test');
     writeFileSync(join(TEST_DIR, 'ai-browser-copilot-linux-x64'), 'fake-binary');
+    writeFileSync(join(TEST_DIR, 'ai-browser-copilot-helper-linux-x64'), 'fake-helper');
     expect(isBinaryInstalled(TEST_DIR, platform)).toBe(true);
   });
 });

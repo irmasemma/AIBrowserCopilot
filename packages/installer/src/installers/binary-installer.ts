@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { get as httpsGet } from 'node:https';
 import { get as httpGet, type IncomingMessage } from 'node:http';
 import type { PlatformInfo } from '../shared/platform.js';
-import { getAssetName, getDownloadUrl, getHelperAssetName } from '../shared/constants.js';
+import { getAssetName, getDownloadUrl, getHelperAssetName, getHelperDownloadUrl } from '../shared/constants.js';
 import { withRetry } from '../shared/retry.js';
 import { killRunningNativeHost, NATIVE_HOST_PORT } from './process-killer.js';
 
@@ -107,6 +107,11 @@ export const downloadBinary = async (
   const targetPath = join(installDir, assetName);
   const tempPath = `${targetPath}.tmp`;
 
+  const helperAsset = getHelperAssetName(platform.os, platform.arch);
+  const helperUrl = getHelperDownloadUrl(platform.os, platform.arch);
+  const helperTargetPath = join(installDir, helperAsset);
+  const helperTempPath = `${helperTargetPath}.tmp`;
+
   // Create install directory if needed
   if (!existsSync(installDir)) {
     mkdirSync(installDir, { recursive: true });
@@ -134,10 +139,10 @@ export const downloadBinary = async (
   let attempts = 0;
 
   try {
+    // Main bridge binary
     await withRetry(
       async () => {
         attempts++;
-        // Clean up any partial temp file from a previous attempt
         cleanupFile(tempPath);
         await downloadOnce(url, targetPath, tempPath, platform, onProgress);
       },
@@ -149,11 +154,31 @@ export const downloadBinary = async (
       },
     );
 
+    // Helper binary — Chrome native-messaging endpoint the extension uses for
+    // diagnostics (service status, MCP registration check, native-host spawn).
+    // Must ship next to the bridge or the side panel reports "Setup incomplete"
+    // even after a successful install.
+    await withRetry(
+      async () => {
+        attempts++;
+        cleanupFile(helperTempPath);
+        await downloadOnce(helperUrl, helperTargetPath, helperTempPath, platform, onProgress);
+      },
+      {
+        maxAttempts: 3,
+        baseDelayMs: 1000,
+        maxDelayMs: 10000,
+        onRetry,
+      },
+    );
+
     return { success: true, binaryPath: targetPath, attempts };
   } catch (err) {
-    // Clean up partial/temp files
+    // Clean up partial/temp files for both binaries
     cleanupFile(tempPath);
-    cleanupFile(targetPath);
+    cleanupFile(helperTempPath);
+    // Don't delete targetPath if main binary already succeeded — keep what
+    // worked so the user can retry the helper download in isolation later.
 
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -177,7 +202,9 @@ const cleanupFile = (path: string): void => {
 
 export const isBinaryInstalled = (installDir: string, platform: PlatformInfo): boolean => {
   const assetName = getAssetName(platform.os, platform.arch);
-  return existsSync(join(installDir, assetName));
+  const helperAsset = getHelperAssetName(platform.os, platform.arch);
+  // Both must be present — extension's diagnostics fail without the helper.
+  return existsSync(join(installDir, assetName)) && existsSync(join(installDir, helperAsset));
 };
 
 export interface LocalBinaryResolution {
