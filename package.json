@@ -11,7 +11,9 @@
     "build:native-host": "npm run build -w packages/native-host",
     "dev": "npm run dev -w packages/extension",
     "typecheck": "npm run typecheck --workspaces",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "edge:debug": "node scripts/launch-edge-debug.mjs",
+    "test:real-edge": "playwright test --project=real-edge-via-cdp"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

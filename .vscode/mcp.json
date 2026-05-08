@@ -3,6 +3,10 @@
     "ai-browser-copilot": {
       "command": "${env:LOCALAPPDATA}/ai-browser-copilot/ai-browser-copilot-win-x64.exe",
       "args": []
+    },
+    "browsermcp": {
+      "command": "npx",
+      "args": ["@browsermcp/mcp@latest"]
     }
   }
 }
