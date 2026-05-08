@@ -37,6 +37,7 @@ export function createRelay(callbacks: RelayCallbacks): Relay {
             pid: data.pid,
             port: data.port,
             version: data.version,
+            buildId: data.buildId,
             startedBy: data.startedBy,
             capabilities: data.capabilities,
             uptime: data.uptime,

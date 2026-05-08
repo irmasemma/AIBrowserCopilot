@@ -10,7 +10,7 @@ export type NativeHostMessage =
   | { type: 'tool_error'; id: string; error: { message: string; code: string } }
   | { type: 'mcp_status'; connected: boolean; host: string }
   | { type: 'pong' }
-  | { type: 'server_info'; pid: number; port: number; version: string; startedBy: string; capabilities: string[]; uptime: number; connectedBrowsers?: string[]; connectedStubs?: number }
+  | { type: 'server_info'; pid: number; port: number; version: string; buildId?: string; startedBy: string; capabilities: string[]; uptime: number; connectedBrowsers?: string[]; connectedStubs?: number }
   | { type: 'tool_scan'; tools: ToolScanResult[] };
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'degraded' | 'reconnecting';
@@ -18,7 +18,9 @@ export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'deg
 export type DiagnosticReason =
   | 'connecting'
   | 'no_lock_file'
+  | 'bridge_not_started'
   | 'server_not_responding'
+  | 'protocol_timeout'
   | 'helper_unavailable'
   | 'was_connected';
 
@@ -36,6 +38,7 @@ export interface ServerInfo {
   pid: number;
   port: number;
   version: string;
+  buildId?: string;
   startedBy: string;
   capabilities: string[];
   uptime: number;

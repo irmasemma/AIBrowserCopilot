@@ -1,5 +1,8 @@
 import { scanAITools } from './tool-scanner.js';
 import { checkClaudeCodeRegistration, repairClaudeCodeRegistration } from './mcp-registrar.js';
+import { getServiceStatus } from './service-status.js';
+import { startNativeHost } from './process-spawner.js';
+import { HELPER_VERSION } from './version.js';
 
 // Chrome Native Messaging protocol: 4-byte LE length prefix + JSON
 
@@ -77,6 +80,39 @@ async function main(): Promise<void> {
       case 'repair_mcp_registration': {
         const result = repairClaudeCodeRegistration();
         writeMessage(result);
+        break;
+      }
+
+      case 'get_service_status': {
+        const browserId = typeof message.browserId === 'string' ? message.browserId : undefined;
+        const status = await getServiceStatus({ helperVersion: HELPER_VERSION, browserId });
+        writeMessage(status);
+        break;
+      }
+
+      case 'start_native_host': {
+        // Cheap pre-check: avoid spawning a duplicate when the bridge is already healthy.
+        const isAlreadyRunning = async (): Promise<boolean> => {
+          const status = await getServiceStatus({ helperVersion: HELPER_VERSION });
+          return status.wsHealthy;
+        };
+        const result = await startNativeHost({ isAlreadyRunning });
+        writeMessage(result);
+        break;
+      }
+
+      case 'restart_native_host': {
+        // For "restart" we want to start fresh — skip the alreadyRunning guard so
+        // a stale-but-listening bridge doesn't make us a no-op. Caller is expected
+        // to have killed any prior instance first (or the new bridge will become a
+        // proxy via the port-probe path).
+        const result = await startNativeHost({ skipAlreadyRunningCheck: true });
+        writeMessage(result);
+        break;
+      }
+
+      case 'helper_version': {
+        writeMessage({ version: HELPER_VERSION });
         break;
       }
 

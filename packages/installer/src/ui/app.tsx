@@ -11,6 +11,9 @@ import { registerAllBrowsers } from '../installers/browser-registrar.js';
 import { checkBinaryHealth } from '../installers/health-check.js';
 import { getHelperAssetName } from '../shared/constants.js';
 import { uninstall, type UninstallResult } from '../installers/uninstaller.js';
+import { registerAutostart, unregisterAutostart } from '../installers/autostart-registrar.js';
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { getInstallDir } from '../shared/platform.js';
 import { getAssetName } from '../shared/constants.js';
 import { join } from 'node:path';
@@ -231,6 +234,29 @@ export const App: React.FC<AppProps> = ({
         if (regResult.success) {
           setManifestPath(regResult.manifestPath);
           setRegisterStatus('complete');
+
+          // Register Windows autostart so the bridge runs from login onward.
+          // Failures are non-fatal (corp policy may block HKCU writes).
+          try {
+            registerAutostart(binPath, platform);
+          } catch {
+            // Best effort — fall back to on-demand spawn via the helper.
+          }
+
+          // Spawn the bridge immediately so the user doesn't have to log out/in
+          // to get a running bridge. Detached so it survives the installer exit.
+          if (binPath && existsSync(binPath)) {
+            try {
+              const child = spawn(binPath, ['--service'], {
+                detached: true,
+                stdio: 'ignore',
+                windowsHide: true,
+              });
+              child.unref();
+            } catch {
+              // Best effort — bridge will start at next login or on-demand.
+            }
+          }
         } else {
           setRegisterError(regResult.error);
           setRegisterStatus('error');

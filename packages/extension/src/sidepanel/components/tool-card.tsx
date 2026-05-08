@@ -6,27 +6,22 @@ interface ToolCardProps {
   displayName: string;
   description: string;
   icon: string;
-  tier: 'free' | 'pro';
   enabled: boolean;
-  hasLicense: boolean;
   onToggle: () => void;
 }
 
 export const ToolCard: FunctionalComponent<ToolCardProps> = ({
-  displayName, description, icon, tier, enabled, hasLicense, onToggle,
+  displayName, description, icon, enabled, onToggle,
 }) => {
-  const isLocked = tier === 'pro' && !hasLicense;
-
   return (
-    <div class={`flex items-center gap-2 px-3 py-2 rounded ${isLocked ? 'opacity-60' : ''}`}>
-      <span class="text-base" aria-hidden="true">{icon}</span>
+    <div class="flex items-center gap-3 px-4 py-2.5 hover:bg-neutral-50 transition-colors">
+      <span class="text-lg leading-none flex-shrink-0" aria-hidden="true">{icon}</span>
       <div class="flex-1 min-w-0">
         <div class="text-sm font-medium text-neutral-900 truncate">{displayName}</div>
         <div class="text-xs text-neutral-500 truncate">{description}</div>
       </div>
       <PermissionToggle
-        enabled={enabled && !isLocked}
-        locked={isLocked}
+        enabled={enabled}
         onToggle={onToggle}
         label={displayName}
       />

@@ -1,6 +1,6 @@
 {
   "name": "@copilot/native-host-helper",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,9 +12,12 @@
     "compile:linux": "npm run bundle && pkg bin/bundle.cjs --targets node18-linux-x64 --output bin/ai-browser-copilot-helper-linux-x64",
     "test": "vitest run"
   },
-  "dependencies": {},
+  "dependencies": {
+    "ws": "^8.20.0"
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
     "esbuild": "^0.27.4",
     "typescript": "^5.7.0",
     "vitest": "^4.1.2"

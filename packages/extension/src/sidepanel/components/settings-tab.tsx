@@ -2,6 +2,7 @@ import type { FunctionalComponent } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { useStore } from '../store.js';
 import { getDisplayState } from '../../shared/types.js';
+import { HowToConnect } from './how-to-connect.js';
 
 const SUPPORT_URL = 'https://github.com/irmasemma/AIBrowserCopilot/issues';
 const FAQ_URL = 'https://github.com/irmasemma/AIBrowserCopilot/wiki/FAQ';
@@ -135,6 +136,8 @@ export const SettingsTab: FunctionalComponent = () => {
         )}
         <ClaudeCodeRegistrationCard />
       </section>
+
+      <HowToConnect />
 
       <section class="border-t border-neutral-200 pt-4">
         <h3 class="font-semibold text-neutral-800 mb-1">Help</h3>

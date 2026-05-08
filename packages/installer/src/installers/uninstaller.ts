@@ -10,6 +10,7 @@ import { registerAllDetectors, getAll, clear } from '../detectors/index.js';
 import { removeAiBrowserCopilotFromVscode } from '../detectors/vscode.js';
 import { detectBrowsers, HELPER_HOST_NAME } from './browser-registrar.js';
 import { killRunningNativeHost } from './process-killer.js';
+import { unregisterAutostart } from './autostart-registrar.js';
 
 export interface UninstallResult {
   binaryRemoved: boolean;
@@ -197,6 +198,18 @@ export const uninstall = async (platform: PlatformInfo): Promise<UninstallResult
   // Stop any running native host first so its .exe file isn't locked
   // when we try to delete it. Idempotent: no-op if nothing is running.
   await killRunningNativeHost(platform);
+
+  // Remove autostart entry so we don't try to relaunch a deleted binary
+  // at the user's next login. Best effort — failure is non-fatal.
+  try {
+    const autostartResult = unregisterAutostart(platform);
+    if (!autostartResult.ok && autostartResult.error) {
+      errors.push(`Autostart: ${autostartResult.error}`);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    errors.push(`Autostart: ${message}`);
+  }
 
   const binaryResult = removeBinary(platform);
   if (binaryResult.error) errors.push(binaryResult.error);

@@ -11,6 +11,17 @@ if (process.argv.includes('--version')) {
   process.exit(0);
 }
 
+// `--service` flag: the bridge is running as the always-on background service
+// (launched from autostart or detached spawn). Behaviour is identical to the
+// no-flag case today (probe → listen → start), but the explicit flag lets us
+// distinguish service-launched bridges in `startedBy` and gives us a hook for
+// any future service-only behaviour. We do NOT treat the flag as "skip the
+// stdio MCP attach" because that path is harmless when stdin is /dev/null.
+const isServiceMode = process.argv.includes('--service');
+if (isServiceMode) {
+  process.env.AI_BROWSER_COPILOT_STARTED_BY = 'autostart';
+}
+
 // Pause stdin so no data is lost during the port probe
 process.stdin.pause();
 

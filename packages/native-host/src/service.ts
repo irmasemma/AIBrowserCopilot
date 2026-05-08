@@ -12,8 +12,11 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { homedir, platform as osPlatform } from 'node:os';
 import { toolRegistry } from './tools/index.js';
-import { VERSION } from './version.js';
+import { VERSION, BUILD_ID } from './version.js';
 import {
   writeLockFile,
   deleteLockFile,
@@ -51,7 +54,8 @@ function getServerInfo() {
     pid: process.pid,
     port: serverPort,
     version: VERSION,
-    startedBy: 'service',
+    buildId: BUILD_ID,
+    startedBy: process.env.AI_BROWSER_COPILOT_STARTED_BY ?? 'service',
     capabilities: toolRegistry.map((t) => t.name),
     uptime: Math.floor((Date.now() - startTime) / 1000),
     connectedBrowsers: Array.from(browserSockets.keys()),
@@ -240,6 +244,30 @@ function zodToJsonSchema(z: unknown): Record<string, unknown> {
   }
 }
 
+// ── Crash-log location ────────────────────────────────────────────────────
+function getBridgeLogPath(): string {
+  switch (osPlatform()) {
+    case 'win32':
+      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'ai-browser-copilot', 'bridge.log');
+    case 'darwin':
+      return join(homedir(), 'Library', 'Application Support', 'ai-browser-copilot', 'bridge.log');
+    default:
+      return join(homedir(), '.local', 'share', 'ai-browser-copilot', 'bridge.log');
+  }
+}
+
+function appendBridgeLog(line: string): void {
+  try {
+    const path = getBridgeLogPath();
+    const dir = dirname(path);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString();
+    appendFileSync(path, `[${stamp}] [pid ${process.pid}] ${line}\n`, 'utf-8');
+  } catch {
+    // Don't let a logging failure stop the bridge.
+  }
+}
+
 // ── Start server ──────────────────────────────────────────────────────────
 export function startServer(port: number): void {
   serverPort = port;
@@ -255,12 +283,29 @@ export function startServer(port: number): void {
       ipcPath: '',
       startedAt: new Date().toISOString(),
       version: VERSION,
-      startedBy: 'service',
+      startedBy: process.env.AI_BROWSER_COPILOT_STARTED_BY ?? 'service',
     });
     registerCleanupHandlers();
   } catch (err) {
     process.stderr.write(`Failed to write lock file: ${(err as Error).message}\n`);
   }
+
+  // Crash visibility: when launched detached or via autostart there is no
+  // attached console, so any uncaught exception exits silently. Logging to a
+  // file under the install dir gives users (and us) something to inspect.
+  // The cleanup handlers registered above still run on process.exit and tear
+  // down the lock file.
+  process.on('uncaughtException', (err) => {
+    appendBridgeLog(`uncaughtException: ${err?.stack ?? err}`);
+    // Re-throw so the default handler still tears the process down — autostart
+    // / detached-spawn callers should restart it on the next event.
+    setTimeout(() => { throw err; }, 0);
+  });
+  process.on('unhandledRejection', (reason) => {
+    appendBridgeLog(`unhandledRejection: ${reason instanceof Error ? reason.stack : String(reason)}`);
+  });
+
+  appendBridgeLog(`Server started on 127.0.0.1:${port} v${VERSION} buildId=${BUILD_ID} startedBy=${process.env.AI_BROWSER_COPILOT_STARTED_BY ?? 'service'}`);
 
   wss.on('connection', (ws, req) => {
     const params = parseQuery(req.url);

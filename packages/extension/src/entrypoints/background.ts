@@ -1,20 +1,32 @@
 import { createConnectionManager } from '../background/connection-manager';
 import { createServiceDiscovery } from '../background/service-discovery';
 import { dispatchTool } from '../background/tool-dispatcher';
+import { createStartCoordinator } from '../background/start-coordinator';
 import {
   processScanResults,
   createInitialScanState,
   getUnconfiguredTools,
   updateBadge,
 } from '../background/tool-scanner';
-import type { ToolScanResult } from '../shared/types';
+import type { ToolScanResult, DiagnosticReason } from '../shared/types';
 
 const ALARM_NAME = 'connection-check';
 const ALARM_PERIOD_MINUTES = 0.5; // 30s — Chrome minimum for periodic alarms
 
+const RECOVERABLE_REASONS: DiagnosticReason[] = [
+  'no_lock_file',
+  'bridge_not_started',
+  'server_not_responding',
+  'protocol_timeout',
+];
+
 export default defineBackground(() => {
   let scanState = createInitialScanState();
   const discovery = createServiceDiscovery();
+
+  const startCoordinator = createStartCoordinator({
+    attempt: () => discovery.startNativeHost(),
+  });
 
   const manager = createConnectionManager({
     discoverUrl: () => discovery.discoverEndpoint(),
@@ -54,6 +66,24 @@ export default defineBackground(() => {
   manager.onStateChange((ctx) => {
     const unconfigured = getUnconfiguredTools(scanState.current);
     updateBadge(unconfigured.length, ctx.state === 'degraded');
+
+    // Auto-recover: if we're stuck in a recoverable broken state, ask the
+    // coordinator to start the bridge. The coordinator handles deduplication
+    // (single-flight + cooldown + max-attempts cap).
+    if (
+      (ctx.state === 'reconnecting' || ctx.state === 'disconnected')
+      && ctx.diagnosticReason
+      && RECOVERABLE_REASONS.includes(ctx.diagnosticReason)
+    ) {
+      startCoordinator.tryStart().then((result) => {
+        if (result.ok) {
+          // Bridge spawn fired — give it a moment and reconnect.
+          setTimeout(() => manager.retry(), 500);
+        }
+      }).catch(() => {
+        // Coordinator handles its own logging; nothing to do here.
+      });
+    }
   });
 
   try {
@@ -73,13 +103,10 @@ export default defineBackground(() => {
     }
   });
 
-  // AD-16: SW startup — re-establish the connection from scratch.
-  // When the SW restarts (after termination, extension reload, or Chrome restart) the
-  // in-memory relay is always null and the in-memory context starts as 'disconnected'.
-  // The persisted `connectionContext` may still claim 'connected', but that's stale —
-  // the only way to know if the native host is still up is to actually try connecting.
-  // We always call connect(); discovery + WS will either succeed (state→connected) or
-  // fail quickly (state→reconnecting, alarm retries via backoff).
+  // SW startup — re-establish the connection from scratch.
+  // The persisted `connectionContext` may claim 'connected' but the bridge
+  // could have died while the SW was asleep. We always re-discover and let
+  // the result drive the UI (instead of trusting persisted state).
   (async () => {
     try {
       await manager.connect();
@@ -89,7 +116,7 @@ export default defineBackground(() => {
     }
   })();
 
-  // Listen for retry/reconnect/verify requests from UI
+  // Listen for retry/reconnect/verify/start requests from UI
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === 'retry_connection' || message?.type === 'reconnect') {
       manager.retry();
@@ -103,6 +130,40 @@ export default defineBackground(() => {
         .then(() => sendResponse({ done: true }))
         .catch(() => sendResponse({ done: false }));
       return true; // async response
+    }
+
+    // User clicked "Start CoPilot service" in the popup/sidepanel.
+    if (message?.type === 'start_service') {
+      startCoordinator.tryStart({ userInitiated: true })
+        .then((result) => {
+          // After spawn, immediately re-attempt the connection so the user sees
+          // status flip without waiting for the next alarm.
+          if (result.ok) {
+            setTimeout(() => manager.retry(), 500);
+          }
+          sendResponse(result);
+        })
+        .catch((err) => sendResponse({ ok: false, error: String(err) }));
+      return true;
+    }
+
+    // User clicked "Restart CoPilot service" in the popup/sidepanel.
+    if (message?.type === 'restart_service') {
+      discovery.restartNativeHost()
+        .then((result) => {
+          if (result.ok) setTimeout(() => manager.retry(), 1000);
+          sendResponse(result);
+        })
+        .catch((err) => sendResponse({ ok: false, error: String(err) }));
+      return true;
+    }
+
+    // Diagnostics panel asks for a fresh service-status snapshot.
+    if (message?.type === 'get_service_status') {
+      discovery.getServiceStatus()
+        .then((status) => sendResponse({ status }))
+        .catch((err) => sendResponse({ status: null, error: String(err) }));
+      return true;
     }
 
     // In-extension chat agent dispatches tools via the same handler that MCP uses.

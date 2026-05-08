@@ -5,7 +5,7 @@
  * is updated to require new bridge functionality, this constant is bumped and
  * the extension UI prompts users to re-run the installer.
  */
-export const MIN_NATIVE_HOST_VERSION = '0.2.0';
+export const MIN_NATIVE_HOST_VERSION = '0.3.0';
 
 /** Compare two semver-like dotted version strings. -1, 0, or 1. */
 export const compareVersions = (a: string, b: string): number => {

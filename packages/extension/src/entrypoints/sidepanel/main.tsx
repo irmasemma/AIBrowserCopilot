@@ -9,7 +9,6 @@ import { ChatTab } from '../../sidepanel/components/chat-tab.js';
 import { SettingsTab } from '../../sidepanel/components/settings-tab.js';
 import { OutdatedBridgeBanner } from '../../sidepanel/components/outdated-bridge-banner.js';
 import { SiteAccessBanner } from '../../sidepanel/components/site-access-banner.js';
-import { useLicense } from '../../sidepanel/hooks/use-license.js';
 import { TOOL_DEFINITIONS } from '../../shared/tool-definitions.js';
 import { MIN_NATIVE_HOST_VERSION } from '../../shared/version-check.js';
 
@@ -45,39 +44,50 @@ const TabStrip = ({ active, onChange }: { active: TabId; onChange: (id: TabId) =
   );
 };
 
-const ToolsTab = ({ hasLicense }: { hasLicense: boolean }) => {
+const ToolsTab = () => {
   const activityLog = useStore((s) => s.activityLog);
   const toolPermissions = useStore((s) => s.toolPermissions);
   const toggleTool = useStore((s) => s.toggleTool);
 
   return (
     <div class="h-full overflow-y-auto">
-      <section class="py-3">
-        <h2 class="px-3 text-sm font-semibold text-neutral-500 mb-1">Tools</h2>
-        {TOOL_DEFINITIONS.map((tool) => (
-          <ToolCard
-            key={tool.name}
-            name={tool.name}
-            displayName={tool.displayName}
-            description={tool.description}
-            icon={tool.icon}
-            tier={tool.tier}
-            enabled={toolPermissions[tool.name] ?? true}
-            hasLicense={hasLicense}
-            onToggle={() => toggleTool(tool.name)}
-          />
-        ))}
+      <section class="py-4">
+        <h2 class="px-4 text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-2">
+          Tools
+        </h2>
+        <p class="px-4 text-xs text-neutral-500 mb-2">
+          Toggle which browser actions external AI tools (and the Chat tab) are
+          allowed to use. All tools are free.
+        </p>
+        <div class="divide-y divide-neutral-100">
+          {TOOL_DEFINITIONS.map((tool) => (
+            <ToolCard
+              key={tool.name}
+              name={tool.name}
+              displayName={tool.displayName}
+              description={tool.description}
+              icon={tool.icon}
+              enabled={toolPermissions[tool.name] ?? true}
+              onToggle={() => toggleTool(tool.name)}
+            />
+          ))}
+        </div>
       </section>
-      <section class="py-3 border-t border-neutral-200">
-        <h2 class="px-3 text-sm font-semibold text-neutral-500 mb-1">Activity</h2>
+      <section class="py-4 border-t border-neutral-200">
+        <h2 class="px-4 text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-2">
+          Activity
+        </h2>
         {activityLog.length === 0 ? (
-          <p class="px-3 text-xs text-neutral-400 py-4">
-            No activity yet. Ask CoPilot to do something or connect an MCP tool.
+          <p class="px-4 text-xs text-neutral-400 py-4">
+            No activity yet — try asking CoPilot to do something, or connect an
+            MCP-capable AI tool.
           </p>
         ) : (
-          activityLog.slice(0, 50).map((entry) => (
-            <ActivityEntryComponent key={entry.id} entry={entry} />
-          ))
+          <div class="divide-y divide-neutral-100">
+            {activityLog.slice(0, 50).map((entry) => (
+              <ActivityEntryComponent key={entry.id} entry={entry} />
+            ))}
+          </div>
         )}
       </section>
     </div>
@@ -88,7 +98,6 @@ const App = () => {
   const connectionContext = useStore((s) => s.connectionContext);
   const [setupComplete, setSetupComplete] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>('chat');
-  const license = useLicense();
 
   useEffect(() => {
     initStoreFromStorage();
@@ -103,7 +112,6 @@ const App = () => {
     chrome.storage.local.set({ setupComplete: true });
   };
 
-  const hasLicense = license.hasLicense;
   const { state, diagnosticReason, lastConnectedAt } = connectionContext;
 
   // First-launch onboarding: only override if user has never connected MCP and the helper
@@ -138,23 +146,13 @@ const App = () => {
       <TabStrip active={activeTab} onChange={setActiveTab} />
       <div class="flex-1 min-h-0">
         {activeTab === 'chat' && <ChatTab onOpenSettings={() => setActiveTab('settings')} />}
-        {activeTab === 'tools' && <ToolsTab hasLicense={hasLicense} />}
+        {activeTab === 'tools' && <ToolsTab />}
         {activeTab === 'settings' && (
           <div class="h-full overflow-y-auto">
             <SettingsTab />
           </div>
         )}
       </div>
-      {!hasLicense && (
-        <div class="border-t border-neutral-200 px-3 py-2 bg-white">
-          <button
-            class="w-full text-sm font-medium text-white bg-brand-primary py-2 rounded hover:bg-brand-primary-dark"
-            onClick={() => chrome.tabs.create({ url: 'https://github.com/irmasemma/AIBrowserCopilot/wiki/Pro' })}
-          >
-            Upgrade to Pro
-          </button>
-        </div>
-      )}
     </div>
   );
 };
