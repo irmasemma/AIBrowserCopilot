@@ -7,6 +7,7 @@ import { getAssetName, NATIVE_HOST_NAME } from '../shared/constants.js';
 import { getManifestPath } from './host-registrar.js';
 import { removeConfigEntry } from './config-merger.js';
 import { registerAllDetectors, getAll, clear } from '../detectors/index.js';
+import { removeAiBrowserCopilotFromVscode } from '../detectors/vscode.js';
 import { detectBrowsers, HELPER_HOST_NAME } from './browser-registrar.js';
 import { killRunningNativeHost } from './process-killer.js';
 
@@ -99,6 +100,13 @@ const removeConfigs = async (platform: PlatformInfo): Promise<ConfigRemovalResul
   const results: ConfigRemovalResult[] = [];
 
   for (const detector of detectors) {
+    // VS Code is handled separately below: its uninstall touches both
+    // mcp.json (top-level `servers.{key}`, not handled by removeConfigEntry)
+    // and legacy settings.json (where the `mcp` block must be pruned even
+    // if our entry is already gone, to silence VS Code's deprecation
+    // notification).
+    if (detector.slug === 'vscode') continue;
+
     try {
       const detection = await detector.detect(platform);
       if (!detection.configPath || !detection.hasExistingMcp) {
@@ -117,6 +125,19 @@ const removeConfigs = async (platform: PlatformInfo): Promise<ConfigRemovalResul
       const message = err instanceof Error ? err.message : String(err);
       results.push({ tool: detector.name, removed: false, error: message });
     }
+  }
+
+  try {
+    const vscodeResult = removeAiBrowserCopilotFromVscode(platform);
+    results.push({
+      tool: 'VS Code',
+      removed: vscodeResult.removed || vscodeResult.errors.length === 0,
+      backupPath: vscodeResult.backupPaths[0],
+      error: vscodeResult.errors.length > 0 ? vscodeResult.errors.join('; ') : undefined,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    results.push({ tool: 'VS Code', removed: false, error: message });
   }
 
   return results;

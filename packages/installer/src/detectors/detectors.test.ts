@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { detectPlatform } from '../shared/platform.js';
 import { claudeDesktopDetector, getConfigPath as getDesktopConfigPath } from './claude-desktop.js';
 import { claudeCodeDetector, getConfigPath as getCodeConfigPath } from './claude-code.js';
-import { vscodeDetector, getSettingsPath as getVscodeSettingsPath } from './vscode.js';
+import { vscodeDetector, getSettingsPath as getVscodeSettingsPath, getConfigPath as getVscodeConfigPath, cleanupLegacyVscodeSettings, removeAiBrowserCopilotFromVscode } from './vscode.js';
 import { cursorDetector, getSettingsPath as getCursorSettingsPath } from './cursor.js';
 import { windsurfDetector, getSettingsPath as getWindsurfSettingsPath } from './windsurf.js';
 import { jetbrainsDetector, getConfigPath as getJetbrainsConfigPath } from './jetbrains.js';
@@ -186,7 +186,7 @@ describe('VS Code Detector', () => {
     // If `code` command is available, installed=true even without settings dir
     // Otherwise installed=false
     if (result.installed) {
-      expect(result.configPath).toContain('settings.json');
+      expect(result.configPath).toContain('mcp.json');
     } else {
       expect(result.installed).toBe(false);
     }
@@ -198,54 +198,240 @@ describe('VS Code Detector', () => {
 
     const result = await vscodeDetector.detect(platform);
     expect(result.installed).toBe(true);
-    expect(result.configPath).toContain('settings.json');
+    expect(result.configPath).toContain('mcp.json');
+    expect(result.configPath).not.toMatch(/settings\.json$/);
   });
 
-  it('uses mcp.servers format (not mcpServers)', async () => {
+  it('writes to mcp.json with top-level servers (not settings.json mcp.servers)', async () => {
     const platform = testPlatform('linux');
     const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(settingsDir, { recursive: true });
 
     await vscodeDetector.writeConfig(platform, '/binary');
 
-    const written = JSON.parse(readFileSync(join(settingsDir, 'settings.json'), 'utf-8'));
-    expect(written.mcp.servers['ai-browser-copilot']).toBeDefined();
-    expect(written.mcpServers).toBeUndefined();
+    const mcpJsonPath = getVscodeConfigPath(platform);
+    expect(existsSync(mcpJsonPath)).toBe(true);
+    const written = JSON.parse(readFileSync(mcpJsonPath, 'utf-8'));
+    expect(written.servers['ai-browser-copilot'].command).toBe('/binary');
+    expect(written.servers['ai-browser-copilot'].type).toBe('stdio');
+    expect(written.inputs).toEqual([]);
+    // Must NOT touch settings.json `mcp.servers` shape
+    const settingsPath = getVscodeSettingsPath(platform);
+    if (existsSync(settingsPath)) {
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+      expect(settings.mcp?.servers?.['ai-browser-copilot']).toBeUndefined();
+    }
   });
 
-  it('preserves existing VS Code settings during merge', async () => {
+  it('preserves existing mcp.json entries during merge', async () => {
     const platform = testPlatform('linux');
     const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(settingsDir, { recursive: true });
 
-    const existingSettings: Record<string, unknown> = {
-      'editor.fontSize': 14,
-      'editor.tabSize': 2,
-      'workbench.colorTheme': 'Monokai',
-      mcp: { servers: { 'other-tool': { command: 'other' } } },
-    };
-    writeFileSync(join(settingsDir, 'settings.json'), JSON.stringify(existingSettings, null, 2) + '\n');
+    const mcpJsonPath = getVscodeConfigPath(platform);
+    writeFileSync(mcpJsonPath, JSON.stringify({
+      servers: { 'other-tool': { command: 'other', args: [] } },
+      inputs: [{ id: 'token', type: 'promptString' }],
+    }, null, 2) + '\n');
 
     await vscodeDetector.writeConfig(platform, '/binary');
 
-    const written = JSON.parse(readFileSync(join(settingsDir, 'settings.json'), 'utf-8'));
-    expect(written['editor.fontSize']).toBe(14);
-    expect(written['workbench.colorTheme']).toBe('Monokai');
-    expect(written.mcp.servers['other-tool']).toEqual({ command: 'other' });
-    expect(written.mcp.servers['ai-browser-copilot'].command).toBe('/binary');
+    const written = JSON.parse(readFileSync(mcpJsonPath, 'utf-8'));
+    expect(written.servers['other-tool']).toEqual({ command: 'other', args: [] });
+    expect(written.servers['ai-browser-copilot'].command).toBe('/binary');
+    expect(written.inputs).toEqual([{ id: 'token', type: 'promptString' }]);
   });
 
-  it('detects existing ai-browser-copilot in mcp.servers', async () => {
+  it('replaces (not deep-merges) the ai-browser-copilot entry', async () => {
+    const platform = testPlatform('linux');
+    const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
+    mkdirSync(settingsDir, { recursive: true });
+
+    const mcpJsonPath = getVscodeConfigPath(platform);
+    writeFileSync(mcpJsonPath, JSON.stringify({
+      servers: {
+        'ai-browser-copilot': {
+          command: '/old/path',
+          args: ['--legacy-flag'],
+          env: { OLD: '1' },
+          disabled: true,
+        },
+      },
+      inputs: [],
+    }, null, 2) + '\n');
+
+    await vscodeDetector.writeConfig(platform, '/new/binary');
+
+    const written = JSON.parse(readFileSync(mcpJsonPath, 'utf-8'));
+    expect(written.servers['ai-browser-copilot'].command).toBe('/new/binary');
+    expect(written.servers['ai-browser-copilot'].args).toEqual([]);
+    expect(written.servers['ai-browser-copilot'].env).toBeUndefined();
+    expect(written.servers['ai-browser-copilot'].disabled).toBeUndefined();
+  });
+
+  it('detects existing ai-browser-copilot in new mcp.json (top-level servers)', async () => {
     const platform = testPlatform('linux');
     const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(settingsDir, { recursive: true });
     writeFileSync(
-      join(settingsDir, 'settings.json'),
+      getVscodeConfigPath(platform),
+      JSON.stringify({ servers: { 'ai-browser-copilot': {} }, inputs: [] }),
+    );
+
+    const result = await vscodeDetector.detect(platform);
+    expect(result.hasExistingMcp).toBe(true);
+  });
+
+  it('detects existing ai-browser-copilot in legacy settings.json (mcp.servers)', async () => {
+    const platform = testPlatform('linux');
+    const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
+    mkdirSync(settingsDir, { recursive: true });
+    writeFileSync(
+      getVscodeSettingsPath(platform),
       JSON.stringify({ mcp: { servers: { 'ai-browser-copilot': {} } } }),
     );
 
     const result = await vscodeDetector.detect(platform);
     expect(result.hasExistingMcp).toBe(true);
+  });
+
+  it('migrates legacy entry: install removes ai-browser-copilot from settings.json', async () => {
+    const platform = testPlatform('linux');
+    const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
+    mkdirSync(settingsDir, { recursive: true });
+    writeFileSync(getVscodeSettingsPath(platform), JSON.stringify({
+      'editor.fontSize': 14,
+      mcp: { servers: { 'ai-browser-copilot': { command: '/old' } } },
+    }, null, 2) + '\n');
+
+    await vscodeDetector.writeConfig(platform, '/new');
+
+    const settings = JSON.parse(readFileSync(getVscodeSettingsPath(platform), 'utf-8'));
+    expect(settings['editor.fontSize']).toBe(14);
+    // mcp.servers was emptied, then mcp itself pruned (no other keys)
+    expect(settings.mcp).toBeUndefined();
+    // New entry lives in mcp.json
+    const newJson = JSON.parse(readFileSync(getVscodeConfigPath(platform), 'utf-8'));
+    expect(newJson.servers['ai-browser-copilot'].command).toBe('/new');
+  });
+
+  it('cleanupLegacyVscodeSettings prunes empty mcp block (entry already absent)', () => {
+    const platform = testPlatform('linux');
+    const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
+    mkdirSync(settingsDir, { recursive: true });
+    writeFileSync(getVscodeSettingsPath(platform), JSON.stringify({
+      'editor.fontSize': 14,
+      mcp: { servers: {} },
+    }, null, 2) + '\n');
+
+    const result = cleanupLegacyVscodeSettings(platform);
+    expect(result.cleaned).toBe(true);
+    expect(result.error).toBeUndefined();
+
+    const settings = JSON.parse(readFileSync(getVscodeSettingsPath(platform), 'utf-8'));
+    expect(settings.mcp).toBeUndefined();
+    expect(settings['editor.fontSize']).toBe(14);
+  });
+
+  it('cleanupLegacyVscodeSettings preserves non-server keys under mcp', () => {
+    const platform = testPlatform('linux');
+    const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
+    mkdirSync(settingsDir, { recursive: true });
+    writeFileSync(getVscodeSettingsPath(platform), JSON.stringify({
+      'editor.fontSize': 14,
+      mcp: {
+        servers: { 'ai-browser-copilot': {}, 'keep-me': { command: 'k' } },
+        'gallery.enabled': true,
+      },
+    }, null, 2) + '\n');
+
+    const result = cleanupLegacyVscodeSettings(platform);
+    expect(result.cleaned).toBe(true);
+
+    const settings = JSON.parse(readFileSync(getVscodeSettingsPath(platform), 'utf-8'));
+    expect(settings.mcp.servers['ai-browser-copilot']).toBeUndefined();
+    expect(settings.mcp.servers['keep-me']).toEqual({ command: 'k' });
+    expect(settings.mcp['gallery.enabled']).toBe(true);
+  });
+
+  it('cleanupLegacyVscodeSettings is idempotent and a no-op when nothing to clean', () => {
+    const platform = testPlatform('linux');
+    const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
+    mkdirSync(settingsDir, { recursive: true });
+    writeFileSync(getVscodeSettingsPath(platform), JSON.stringify({
+      'editor.fontSize': 14,
+    }, null, 2) + '\n');
+
+    const result = cleanupLegacyVscodeSettings(platform);
+    expect(result.cleaned).toBe(false);
+    expect(result.backupPath).toBeUndefined();
+  });
+
+  it('cleanupLegacyVscodeSettings preserves mcp block with non-empty servers map having other entries (still prunes our key)', () => {
+    const platform = testPlatform('linux');
+    const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
+    mkdirSync(settingsDir, { recursive: true });
+    writeFileSync(getVscodeSettingsPath(platform), JSON.stringify({
+      mcp: { servers: { 'ai-browser-copilot': {}, other: { command: 'o' } } },
+    }, null, 2) + '\n');
+
+    const result = cleanupLegacyVscodeSettings(platform);
+    expect(result.cleaned).toBe(true);
+
+    const settings = JSON.parse(readFileSync(getVscodeSettingsPath(platform), 'utf-8'));
+    expect(settings.mcp.servers['ai-browser-copilot']).toBeUndefined();
+    expect(settings.mcp.servers.other).toEqual({ command: 'o' });
+  });
+
+  it('cleanupLegacyVscodeSettings reports error on malformed settings.json', () => {
+    const platform = testPlatform('linux');
+    const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
+    mkdirSync(settingsDir, { recursive: true });
+    writeFileSync(getVscodeSettingsPath(platform), '{ broken !!!');
+
+    const result = cleanupLegacyVscodeSettings(platform);
+    expect(result.cleaned).toBe(false);
+    expect(result.error).toContain('malformed');
+  });
+
+  it('removeAiBrowserCopilotFromVscode handles both new mcp.json and legacy settings.json', () => {
+    const platform = testPlatform('linux');
+    const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
+    mkdirSync(settingsDir, { recursive: true });
+    writeFileSync(getVscodeConfigPath(platform), JSON.stringify({
+      servers: { 'ai-browser-copilot': { command: '/x' }, 'other': {} },
+      inputs: [],
+    }, null, 2) + '\n');
+    writeFileSync(getVscodeSettingsPath(platform), JSON.stringify({
+      'editor.fontSize': 14,
+      mcp: { servers: { 'ai-browser-copilot': {} } },
+    }, null, 2) + '\n');
+
+    const result = removeAiBrowserCopilotFromVscode(platform);
+    expect(result.removed).toBe(true);
+    expect(result.errors).toEqual([]);
+
+    const newJson = JSON.parse(readFileSync(getVscodeConfigPath(platform), 'utf-8'));
+    expect(newJson.servers['ai-browser-copilot']).toBeUndefined();
+    expect(newJson.servers.other).toEqual({});
+
+    const settings = JSON.parse(readFileSync(getVscodeSettingsPath(platform), 'utf-8'));
+    expect(settings.mcp).toBeUndefined();
+    expect(settings['editor.fontSize']).toBe(14);
+  });
+
+  it('removeAiBrowserCopilotFromVscode is idempotent', () => {
+    const platform = testPlatform('linux');
+    const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
+    mkdirSync(settingsDir, { recursive: true });
+
+    const r1 = removeAiBrowserCopilotFromVscode(platform);
+    expect(r1.removed).toBe(false);
+    expect(r1.errors).toEqual([]);
+
+    const r2 = removeAiBrowserCopilotFromVscode(platform);
+    expect(r2.removed).toBe(false);
+    expect(r2.errors).toEqual([]);
   });
 });
 

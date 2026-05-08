@@ -138,11 +138,11 @@ describe('uninstall', () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  it('removes MCP entry from VS Code settings (mcp.servers format)', async () => {
+  it('removes MCP entry from VS Code legacy settings.json (mcp.servers format)', async () => {
     const platform = testPlatform('linux');
     setupFullInstall(platform);
 
-    // Also set up VS Code with MCP entry
+    // Also set up VS Code with legacy MCP entry
     const vscodeDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(vscodeDir, { recursive: true });
     writeFileSync(
@@ -166,6 +166,59 @@ describe('uninstall', () => {
     const updated = JSON.parse(readFileSync(join(vscodeDir, 'settings.json'), 'utf-8'));
     expect(updated.mcp.servers['ai-browser-copilot']).toBeUndefined();
     expect(updated.mcp.servers['other-server']).toBeDefined();
+    expect(updated['editor.fontSize']).toBe(14);
+  });
+
+  it('removes MCP entry from VS Code dedicated mcp.json', async () => {
+    const platform = testPlatform('linux');
+    setupFullInstall(platform);
+
+    const vscodeDir = join(TEST_DIR, '.config', 'Code', 'User');
+    mkdirSync(vscodeDir, { recursive: true });
+    writeFileSync(
+      join(vscodeDir, 'mcp.json'),
+      JSON.stringify({
+        servers: {
+          'ai-browser-copilot': { command: '/path', args: [], type: 'stdio' },
+          'other-server': { command: 'other' },
+        },
+        inputs: [],
+      }, null, 2) + '\n',
+    );
+
+    const result = await uninstall(platform);
+
+    const vscodeResult = result.configsRemoved.find((c) => c.tool === 'VS Code');
+    expect(vscodeResult?.removed).toBe(true);
+
+    const updated = JSON.parse(readFileSync(join(vscodeDir, 'mcp.json'), 'utf-8'));
+    expect(updated.servers['ai-browser-copilot']).toBeUndefined();
+    expect(updated.servers['other-server']).toBeDefined();
+  });
+
+  it('prunes empty mcp block in settings.json even when our entry is already gone', async () => {
+    // This is the exact case the user hit: previous installer wrote
+    // `mcp.servers.ai-browser-copilot`, then something migrated the entry
+    // to mcp.json, leaving `{ "mcp": { "servers": {} } }` in settings.json.
+    // VS Code shows a deprecation notification for that empty block until
+    // it's fully pruned.
+    const platform = testPlatform('linux');
+    setupFullInstall(platform);
+
+    const vscodeDir = join(TEST_DIR, '.config', 'Code', 'User');
+    mkdirSync(vscodeDir, { recursive: true });
+    writeFileSync(
+      join(vscodeDir, 'settings.json'),
+      JSON.stringify({
+        'editor.fontSize': 14,
+        mcp: { servers: {} },
+      }, null, 2) + '\n',
+    );
+
+    await uninstall(platform);
+
+    const updated = JSON.parse(readFileSync(join(vscodeDir, 'settings.json'), 'utf-8'));
+    expect(updated.mcp).toBeUndefined();
     expect(updated['editor.fontSize']).toBe(14);
   });
 
