@@ -193,6 +193,167 @@ only works on the active tab). For `click_element`, `fill_form`,
 works on background tabs without activation. Separate small story —
 filed independently.
 
+## Related symptom: connection drops during agent runs
+
+### Reported symptom
+
+User reports: when an agent is operating on a specific tab (with explicit
+`tabId`), if the user switches to a different tab or window mid-run, the
+agent's connection appears to drop. The next tool call fails. The
+extension reconnects shortly after, but the in-flight work is lost.
+
+This is real and reproducible. Tab switching is not the *cause* — it
+correlates with conditions that trigger Manifest V3 service worker
+eviction.
+
+### Root cause: MV3 service worker eviction
+
+The WebSocket to the bridge lives inside the extension's service worker
+([packages/extension/src/background/connection-manager.ts](../packages/extension/src/background/connection-manager.ts)).
+Chrome MV3 evicts service workers after ~30 seconds of inactivity.
+"Inactivity" means no events, no messages, no alarms, no WS traffic.
+
+When the SW dies:
+
+1. The WebSocket closes.
+2. The bridge logs `Browser disconnected: <browserId>`
+   ([packages/native-host/src/service.ts:104](../packages/native-host/src/service.ts#L104)).
+3. Any in-flight tool request (one the bridge has forwarded but not yet
+   received a response for) times out after 30 s with
+   `Tool request timed out`
+   ([packages/native-host/src/service.ts:159-162](../packages/native-host/src/service.ts#L159-L162)).
+4. From the MCP client's perspective, the tool call returns an error.
+
+Self-heal: the extension's reconciliation alarm fires every 30 s
+([packages/extension/src/entrypoints/background.ts:96](../packages/extension/src/entrypoints/background.ts#L96)),
+which respawns the SW, reconnects, logs `Browser connected: <browserId>`
+([packages/native-host/src/service.ts:75](../packages/native-host/src/service.ts#L75)).
+The agent appears to "come back" — but the lost request is gone.
+
+### Existing keepalives (and why they aren't enough)
+
+Two mechanisms try to keep the SW alive:
+
+- **Reconciliation alarm** — every 30 s
+  ([packages/extension/src/entrypoints/background.ts:13-14](../packages/extension/src/entrypoints/background.ts#L13-L14)):
+  ```ts
+  const ALARM_NAME = 'connection-check';
+  const ALARM_PERIOD_MINUTES = 0.5; // 30s — Chrome minimum for periodic alarms
+  ```
+- **Heartbeat** — every 20 s with 3 missed = dead
+  ([packages/extension/src/background/heartbeat-monitor.ts:7-11](../packages/extension/src/background/heartbeat-monitor.ts#L7-L11)):
+  ```ts
+  export const DEFAULT_HEARTBEAT_CONFIG: HeartbeatConfig = {
+    intervalMs: 20_000,
+    timeoutMs: 5_000,
+    maxMissed: 3,
+  };
+  ```
+
+These keep the SW alive in steady state. The risky window is when the
+agent is **thinking** (LLM has not yet decided the next tool). During
+that pause, no tool dispatches fire. Only the heartbeat is keeping the
+SW warm. If anything else tips the balance — for example, the user
+switches windows and the side panel closes, removing one more anchor —
+Chrome reaps the SW between alarm ticks.
+
+### What correlates with eviction (the "tab/window switch" trigger)
+
+User actions that increase eviction probability:
+
+- **Switch to a different Chrome window** — side panels are per-window.
+  The original side panel closes, dropping its `chrome.runtime.sendMessage`
+  channel with the SW. One less anchor.
+- **Switch to a different Chrome profile** — that profile has its own
+  extension SW; the original profile's SW is now in an "idle profile"
+  Chrome aggressively reaps.
+- **Side panel collapse / window minimize** during an agent run.
+- **OS sleep / lid close** for any duration > heartbeat dead threshold.
+
+Tab switching *within the same window* is mostly safe — the side panel
+stays attached and at least one anchor remains.
+
+### Confirming evidence
+
+The diagnostics panel (side panel → Connection diagnostics) exposes the
+fields that confirm this is happening:
+
+- `Reconnects this session` — increments each time the WS dies and is
+  restored. A jump after a window switch confirms eviction.
+- `Missed heartbeats` — spikes from 0 to 1, 2, or 3 right before the
+  WS is declared dead. If this hits 3 mid-agent-run, that is the SW
+  going down.
+
+Both are surfaced in the diagnostics text report (Copy report button) at
+[packages/extension/src/sidepanel/components/diagnostics-panel.tsx:158-159](../packages/extension/src/sidepanel/components/diagnostics-panel.tsx#L158-L159):
+
+```ts
+`Reconnects this session: ${ctx.reconnectsThisSession}`,
+`Missed heartbeats: ${ctx.missedHeartbeats}`,
+```
+
+Bridge stderr (visible if the user runs the bridge from a terminal
+manually instead of via autostart) shows the matching disconnect/reconnect
+pair:
+
+```
+Browser disconnected: chrome
+Browser connected: chrome
+```
+
+### Example reproduction
+
+1. Open extension side panel in Chrome window A.
+2. Verify `Reconnects: 0`, `Missed heartbeats: 0` in diagnostics.
+3. Start a long-running agent task (one that requires the LLM to think
+   between tool calls — e.g., "summarize this page then click each link
+   and tell me what each section is about").
+4. While the LLM is thinking (no tools dispatched for >20 s), switch to
+   Chrome window B (different window, not just a different tab).
+5. Wait ~30 s.
+6. Switch back to window A; reopen diagnostics.
+7. Expected: `Reconnects` is now 1+, the agent reports a tool failure
+   for whatever was in flight at the moment of eviction.
+
+### Mitigation paths (not part of this story)
+
+Three options, ordered by cost:
+
+1. **Tighten the alarm during in-flight requests.** When a tool is
+   pending response, switch the alarm period to its tightest setting and
+   send a self-message every 10 s to keep the SW awake. Cheapest, but
+   only protects active dispatches, not LLM-thinking pauses.
+
+2. **Persistent keepalive port from the side panel.** Side panel opens
+   a `chrome.runtime.connect` port to the SW and holds it. As long as
+   the panel is open, the SW cannot be evicted (Chrome treats a connected
+   port as activity). Doesn't help when the panel is closed (window
+   switch, multi-window setups), but covers the common single-window
+   case.
+
+3. **Move the WebSocket out of the SW into an offscreen document.**
+   Offscreen documents have their own lifecycle — they live as long as
+   they have a reason to live (audio playback, IFrame, WebRTC, etc.).
+   The `BLOBS` reason allows long-lived connections. WS survives SW
+   eviction. Most robust, but biggest change. Requires
+   `offscreen` permission and a refactor of the relay-client +
+   connection-manager to communicate across the SW/offscreen boundary.
+
+Option 3 is the right long-term answer. Option 2 is a near-term patch
+worth doing first.
+
+### Story sizing (for the SW-eviction work)
+
+| Item | Where | Size |
+|---|---|---|
+| Side panel keepalive port | `packages/extension/src/sidepanel/main.tsx` + `packages/extension/src/entrypoints/background.ts` | Small |
+| In-flight-tool alarm tightening | `packages/extension/src/background/tool-dispatcher.ts` + `packages/extension/src/entrypoints/background.ts` | Small |
+| Move WS to offscreen document | `packages/extension/src/offscreen/` (new) + connection-manager refactor + manifest permissions | Large |
+| Tests (eviction simulation, reconnect flow) | new e2e | Medium |
+
+Recommend doing options 1+2 as a single small story; option 3 as a
+follow-up if symptoms persist.
+
 ## Decisions (settled)
 
 1. **Profile-unique `browserId` derivation** — per-install UUID stored in
