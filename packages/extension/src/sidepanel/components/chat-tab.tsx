@@ -16,6 +16,8 @@ import {
   type ModelOption,
 } from '../models.js';
 import type { ProviderId } from '../providers/types.js';
+import { getBrowserInstanceId } from '../../shared/browser-instance-id.js';
+import { composeTabId } from '../../shared/tab-id.js';
 
 interface ChatTabProps {
   onOpenSettings: () => void;
@@ -220,6 +222,21 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) =
       ]);
     };
 
+    // Capture the tab the user is looking at right now and bind it for
+    // this chat turn. Replaces the old extension-level active-tab fallback,
+    // which silently re-targeted when the user switched windows mid-task.
+    // If the user moves on, the agent stays on the originally-bound tab
+    // (and errors with TAB_NOT_FOUND if they close it). See
+    // docs/multi-profile-tab-fanout-design.md decision §2.
+    let boundTabId: string | undefined;
+    try {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (activeTab?.id != null) {
+        const browserId = await getBrowserInstanceId();
+        boundTabId = composeTabId(browserId, activeTab.id);
+      }
+    } catch { /* in test envs chrome.tabs may not exist */ }
+
     try {
       const result = await runChat({
         provider,
@@ -229,6 +246,7 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) =
         toolPermissions,
         signal: ac.signal,
         onToolCall,
+        boundTabId,
       });
       transcriptRef.current.push(...result.appendedMessages);
       if (result.finalText) {

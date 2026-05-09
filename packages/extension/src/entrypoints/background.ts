@@ -92,6 +92,20 @@ export default defineBackground(() => {
     // sidePanel API may not be available in all contexts
   }
 
+  // Side panel keepalive port. While the panel is open it holds a
+  // chrome.runtime.connect port; messages flowing across that port count as
+  // SW activity, preventing Chrome from evicting the SW during long
+  // LLM-thinking pauses. See docs/multi-profile-tab-fanout-design.md
+  // "Related symptom: connection drops during agent runs".
+  chrome.runtime.onConnect.addListener((port) => {
+    if (port.name !== 'panel-keepalive') return;
+    const pingHandler = () => { /* presence is the signal */ };
+    port.onMessage.addListener(pingHandler);
+    port.onDisconnect.addListener(() => {
+      port.onMessage.removeListener(pingHandler);
+    });
+  });
+
   // AD-12: Register alarm for periodic reconciliation (survives SW suspension)
   chrome.alarms.create(ALARM_NAME, { periodInMinutes: ALARM_PERIOD_MINUTES });
 

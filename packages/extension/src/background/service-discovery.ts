@@ -1,19 +1,8 @@
 import type { DiagnosticReason } from '../shared/types';
+import { getBrowserInstanceId } from '../shared/browser-instance-id';
 
 const NM_HELPER_NAME = 'com.copilot.native_host_helper';
 const DEFAULT_PORT = 7483;
-
-function detectBrowserId(): string {
-  if (typeof navigator === 'undefined') return 'unknown';
-  const ua = navigator.userAgent;
-  if (ua.includes('Edg/')) return 'edge';
-  if (ua.includes('Brave')) return 'brave';
-  if (ua.includes('Vivaldi')) return 'vivaldi';
-  if (ua.includes('OPR/') || ua.includes('Opera')) return 'opera';
-  if (ua.includes('Arc')) return 'arc';
-  if (ua.includes('Chrome/')) return 'chrome';
-  return 'unknown';
-}
 
 export interface LockFileInfo {
   exists: boolean;
@@ -128,8 +117,8 @@ export function createServiceDiscovery(): ServiceDiscovery {
 
   return {
     async discoverEndpoint(): Promise<DiscoveryResult> {
-      const browserId = detectBrowserId();
-      const fallbackUrl = `ws://127.0.0.1:${DEFAULT_PORT}?browserId=${browserId}`;
+      const browserId = await getBrowserInstanceId();
+      const fallbackUrl = `ws://127.0.0.1:${DEFAULT_PORT}?browserId=${encodeURIComponent(browserId)}`;
 
       const status = await fetchServiceStatus(browserId);
       if (!status) {
@@ -209,7 +198,7 @@ export function createServiceDiscovery(): ServiceDiscovery {
     },
 
     async getServiceStatus(): Promise<ServiceStatus | null> {
-      return fetchServiceStatus(detectBrowserId());
+      return fetchServiceStatus(await getBrowserInstanceId());
     },
 
     async startNativeHost(): Promise<StartNativeHostResult> {

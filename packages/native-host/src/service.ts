@@ -26,7 +26,64 @@ import {
 const REQUEST_TIMEOUT_MS = 30_000;
 
 // ── Browser extension connections ─────────────────────────────────────────
+// Keyed by the full composite browserId (e.g. "chrome:abc-123"). Multiple
+// Chrome profiles each get their own slot — no more last-connect-wins.
 const browserSockets = new Map<string, WebSocket>();
+
+// Brand → set of full browserIds. Lets us answer "give me every connected
+// Chrome" when the caller specifies a brand-only target (legacy clients) or
+// when fan-out tools (list_tabs) want to broadcast to all instances.
+const brandIndex = new Map<string, Set<string>>();
+
+// Extract the brand portion from a composite browserId. "chrome:abc-123" →
+// "chrome". Legacy values without a colon ("chrome", "edge") return as-is.
+export function parseBrand(browserId: string): string {
+  const colon = browserId.indexOf(':');
+  return colon === -1 ? browserId : browserId.slice(0, colon);
+}
+
+/**
+ * Pull the routing browserId out of a possibly-namespaced tab id.
+ *
+ * "chrome:abc-123:622786441"  → "chrome:abc-123"   (namespaced — full route)
+ * "chrome:622"                → "chrome"           (legacy brand-only namespace)
+ * "622786441" or 622786441    → ""                 (raw int — caller falls back)
+ * anything else / undefined   → ""                 (caller falls back)
+ *
+ * Splits on the LAST colon so a uuid/profile id containing a colon stays
+ * within the browserId portion. Mirrors `parseTabId` in the extension.
+ */
+export function extractBrowserIdFromTabId(input: unknown): string {
+  if (typeof input !== 'string') return '';
+  const s = input.trim();
+  if (!s || /^[0-9]+$/.test(s)) return '';
+  const lastColon = s.lastIndexOf(':');
+  if (lastColon <= 0 || lastColon === s.length - 1) return '';
+  const rawSuffix = s.slice(lastColon + 1);
+  if (!/^[0-9]+$/.test(rawSuffix)) return '';
+  return s.slice(0, lastColon);
+}
+
+function indexBrowser(browserId: string, ws: WebSocket): void {
+  browserSockets.set(browserId, ws);
+  const brand = parseBrand(browserId);
+  let set = brandIndex.get(brand);
+  if (!set) {
+    set = new Set<string>();
+    brandIndex.set(brand, set);
+  }
+  set.add(browserId);
+}
+
+function unindexBrowser(browserId: string): void {
+  browserSockets.delete(browserId);
+  const brand = parseBrand(browserId);
+  const set = brandIndex.get(brand);
+  if (set) {
+    set.delete(browserId);
+    if (set.size === 0) brandIndex.delete(brand);
+  }
+}
 
 // ── MCP client connections (secondary binaries over WS) ───────────────────
 const mcpClients = new Map<string, WebSocket>();
@@ -71,16 +128,35 @@ function parseQuery(url: string | undefined): URLSearchParams {
 }
 
 // ── Handle browser extension connection ───────────────────────────────────
+// Bridge sends server_ping every 20s. Each ping arrival in the extension
+// fires a WS onmessage event in the service worker, which counts as SW
+// activity and resets Chrome's eviction timer. This keeps the WS alive
+// even when the extension's own setInterval-based heartbeat dies along
+// with the SW (chicken-and-egg). See docs/multi-profile-tab-fanout-design.md
+// "Related symptom: connection drops during agent runs".
+const SERVER_PING_INTERVAL_MS = 20_000;
+
 function handleExtension(ws: WebSocket, browserId: string): void {
   process.stderr.write(`Browser connected: ${browserId}\n`);
-  browserSockets.set(browserId, ws);
+  indexBrowser(browserId, ws);
   ws.send(JSON.stringify(getServerInfo()));
+
+  const serverPingTimer = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'server_ping', timestamp: Date.now() }));
+    }
+  }, SERVER_PING_INTERVAL_MS);
 
   ws.on('message', (data) => {
     try {
       const msg = JSON.parse(data.toString());
       if (msg.type === 'ping') {
         ws.send(JSON.stringify({ type: 'pong', timestamp: msg.timestamp }));
+        return;
+      }
+      if (msg.type === 'server_pong') {
+        // Extension replied to our keepalive ping. No bookkeeping needed —
+        // arrival of any message is what keeps the SW awake on its end.
         return;
       }
       if (msg.type === 'request_tool_scan') {
@@ -99,8 +175,9 @@ function handleExtension(ws: WebSocket, browserId: string): void {
   });
 
   ws.on('close', () => {
+    clearInterval(serverPingTimer);
     if (browserSockets.get(browserId) === ws) {
-      browserSockets.delete(browserId);
+      unindexBrowser(browserId);
       process.stderr.write(`Browser disconnected: ${browserId}\n`);
     }
   });
@@ -134,6 +211,40 @@ function handleMcpClient(ws: WebSocket): void {
   });
 }
 
+/**
+ * Resolve a routing target to a single open socket.
+ *
+ *  - Composite id ("chrome:abc-123")  → exact match in browserSockets
+ *  - Brand-only ("chrome")            → first open socket in brandIndex["chrome"]
+ *  - "default" / empty / unmatched    → any open socket (preserves single-
+ *                                        browser legacy behavior)
+ *
+ * Returns null when no open socket is available.
+ */
+function resolveSocket(target: string): WebSocket | null {
+  // 1. Exact composite match
+  const exact = browserSockets.get(target);
+  if (exact && exact.readyState === WebSocket.OPEN) return exact;
+
+  // 2. Brand-only — pick any open socket of that brand
+  if (!target.includes(':')) {
+    const ids = brandIndex.get(target);
+    if (ids) {
+      for (const id of ids) {
+        const s = browserSockets.get(id);
+        if (s && s.readyState === WebSocket.OPEN) return s;
+      }
+    }
+  }
+
+  // 3. Fallback — any open socket. Used for legacy clients that pass nothing
+  //    or "default" and only have one browser connected.
+  for (const s of browserSockets.values()) {
+    if (s.readyState === WebSocket.OPEN) return s;
+  }
+  return null;
+}
+
 // ── Send tool request to browser extension ────────────────────────────────
 function sendToolRequest(
   clientId: string,
@@ -143,11 +254,9 @@ function sendToolRequest(
   browserId: string,
 ): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    const ws = browserSockets.get(browserId)
-      || browserSockets.get('default')
-      || Array.from(browserSockets.values()).find((s) => s.readyState === WebSocket.OPEN);
+    const ws = resolveSocket(browserId);
 
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
+    if (!ws) {
       reject(new Error('No browser extension connected'));
       return;
     }
@@ -164,6 +273,116 @@ function sendToolRequest(
     pendingRequests.set(browserBoundId, { clientId, originalId, resolve, reject, timer });
     ws.send(JSON.stringify({ type: 'tool_request', id: browserBoundId, tool, params }));
   });
+}
+
+// Per-browser timeout for fan-out tools. Shorter than REQUEST_TIMEOUT_MS so
+// one slow browser doesn't stall the aggregate response.
+const FAN_OUT_TIMEOUT_MS = 2_000;
+
+export interface FanOutResult {
+  browserId: string;
+  ok: true;
+  response: unknown;
+}
+export interface FanOutError {
+  browserId: string;
+  ok: false;
+  error: string;
+}
+
+/**
+ * Send the same tool_request to every connected extension matching the
+ * brand filter (or all extensions if no filter). Returns per-browser
+ * results — never rejects on a single browser's failure. Used by tools
+ * that need to gather across all profiles (currently `list_tabs`).
+ */
+function fanOutToolRequest(
+  clientId: string,
+  tool: string,
+  params: Record<string, unknown>,
+  brandFilter: string | null,
+): Promise<Array<FanOutResult | FanOutError>> {
+  const targets: Array<{ browserId: string; ws: WebSocket }> = [];
+
+  if (brandFilter && brandFilter !== 'default') {
+    // Filter by brand. Composite ids are checked via parseBrand; legacy
+    // brand-only ids ("chrome") match the brand exactly.
+    for (const [id, ws] of browserSockets.entries()) {
+      if (parseBrand(id) === brandFilter && ws.readyState === WebSocket.OPEN) {
+        targets.push({ browserId: id, ws });
+      }
+    }
+  } else {
+    for (const [id, ws] of browserSockets.entries()) {
+      if (ws.readyState === WebSocket.OPEN) targets.push({ browserId: id, ws });
+    }
+  }
+
+  if (targets.length === 0) {
+    return Promise.resolve([]);
+  }
+
+  return Promise.all(
+    targets.map(({ browserId, ws }) =>
+      new Promise<FanOutResult | FanOutError>((resolve) => {
+        const browserBoundId = `b_${randomUUID()}`;
+        const timer = setTimeout(() => {
+          pendingRequests.delete(browserBoundId);
+          resolve({ browserId, ok: false, error: 'timeout' });
+        }, FAN_OUT_TIMEOUT_MS);
+
+        pendingRequests.set(browserBoundId, {
+          clientId,
+          originalId: null,
+          resolve: (response) => resolve({ browserId, ok: true, response }),
+          reject: (err) => resolve({ browserId, ok: false, error: err.message }),
+          timer,
+        });
+        ws.send(JSON.stringify({ type: 'tool_request', id: browserBoundId, tool, params }));
+      }),
+    ),
+  );
+}
+
+/**
+ * Merge per-browser list_tabs responses into a single MCP tool result.
+ * Each extension returns `{ content: [{ type: 'text', text: JSON.stringify(tabs[]) }] }`
+ * with already-namespaced ids. This concatenates the tabs arrays and
+ * appends an `errors` field for any browsers that failed/timed out.
+ */
+export function mergeFanOutListTabs(results: Array<FanOutResult | FanOutError>): {
+  content: Array<{ type: string; text: string }>;
+  isError?: boolean;
+} {
+  const allTabs: unknown[] = [];
+  const errors: Array<{ browserId: string; error: string }> = [];
+
+  for (const r of results) {
+    if (!r.ok) {
+      errors.push({ browserId: r.browserId, error: r.error });
+      continue;
+    }
+    try {
+      const resp = r.response as { result?: { content?: Array<{ type: string; text?: string }> } };
+      const text = resp?.result?.content?.[0]?.text ?? '[]';
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) allTabs.push(...parsed);
+    } catch (err) {
+      errors.push({
+        browserId: r.browserId,
+        error: `parse_failed: ${(err as Error).message}`,
+      });
+    }
+  }
+
+  const payload: { tabs: unknown[]; errors?: Array<{ browserId: string; error: string }> } = {
+    tabs: allTabs,
+  };
+  if (errors.length > 0) payload.errors = errors;
+
+  return {
+    content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
+  };
 }
 
 // ── MCP JSON-RPC handler (shared by stdio + WS clients) ──────────────────
@@ -205,8 +424,39 @@ function handleMcpMessage(clientId: string, raw: string, reply: (msg: unknown) =
     if (msg.method === 'tools/call') {
       const toolName = msg.params?.name as string;
       const toolArgs = (msg.params?.arguments ?? {}) as Record<string, unknown>;
-      const browserId = (toolArgs.browser as string) || 'default';
+      // Route precedence:
+      //   1. Namespaced tab_id prefix (most specific — picks the exact profile).
+      //   2. Explicit `browser` param (brand or composite id).
+      //   3. "default" (single-browser legacy fallback).
+      const tabIdRoute = extractBrowserIdFromTabId(toolArgs.tab_id);
+      const browserId = tabIdRoute || (toolArgs.browser as string) || 'default';
       const originalId = (msg.id ?? null) as string | number | null;
+
+      // list_tabs is a fan-out tool: aggregate tabs across every connected
+      // extension instance, regardless of profile, so users with multiple
+      // Chrome profiles see one unified view. Optional `browser` param
+      // narrows the broadcast to a single brand.
+      if (toolName === 'list_tabs') {
+        const brandFilter = browserId === 'default' ? null : browserId;
+        fanOutToolRequest(clientId, toolName, toolArgs, brandFilter)
+          .then((results) => {
+            if (results.length === 0) {
+              reply({
+                jsonrpc: '2.0', id: msg.id,
+                result: { content: [{ type: 'text', text: 'No browser extension connected' }], isError: true },
+              });
+              return;
+            }
+            reply({ jsonrpc: '2.0', id: msg.id, result: mergeFanOutListTabs(results) });
+          })
+          .catch((err: Error) => {
+            reply({
+              jsonrpc: '2.0', id: msg.id,
+              result: { content: [{ type: 'text', text: `list_tabs fan-out failed: ${err.message}` }], isError: true },
+            });
+          });
+        return;
+      }
 
       sendToolRequest(clientId, originalId, toolName, toolArgs, browserId)
         .then((response: unknown) => {

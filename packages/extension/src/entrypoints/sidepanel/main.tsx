@@ -105,6 +105,32 @@ const App = () => {
     chrome.storage.local.get('setupComplete', (data) => {
       if (data.setupComplete) setSetupComplete(true);
     });
+
+    // Keepalive port — prevents the background SW from being evicted while
+    // this panel is open. The SW is the only thing that owns the WebSocket
+    // to the bridge, so eviction = lost connection mid-agent-run. While this
+    // port is connected, port message activity counts as SW activity.
+    let keepalivePort: chrome.runtime.Port | null = null;
+    let keepaliveTimer: number | null = null;
+    try {
+      keepalivePort = chrome.runtime.connect({ name: 'panel-keepalive' });
+      keepaliveTimer = window.setInterval(() => {
+        try {
+          keepalivePort?.postMessage({ ping: Date.now() });
+        } catch {
+          // Port may have been disconnected — let the SW respawn handle it.
+        }
+      }, 25_000);
+    } catch {
+      // chrome.runtime may not be available in some test contexts.
+    }
+
+    return () => {
+      if (keepaliveTimer !== null) window.clearInterval(keepaliveTimer);
+      try {
+        keepalivePort?.disconnect();
+      } catch { /* ignore */ }
+    };
   }, []);
 
   const handleSetupComplete = () => {

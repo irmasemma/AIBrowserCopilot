@@ -5,6 +5,8 @@ import { withPlaywrightPage } from './playwright-bridge.js';
 import type { Page } from 'playwright-crx/test';
 import { readFormFields } from '../content/form-reader.js';
 import { detectAndExtractData } from '../content/data-detector.js';
+import { getBrowserInstanceId } from '../shared/browser-instance-id.js';
+import { composeTabId, parseTabId } from '../shared/tab-id.js';
 
 /**
  * Walk the DOM, assign a stable `data-ai-ref="eN"` to every interactive
@@ -189,19 +191,38 @@ const logActivity = async (entry: ActivityEntry): Promise<void> => {
   });
 };
 
-const getTab = async (tabId?: number, checkBlocked = true): Promise<chrome.tabs.Tab> => {
-  let tab: chrome.tabs.Tab;
+/**
+ * Resolve a `tab_id` parameter (which may be a raw int from a legacy caller
+ * or a namespaced string like "chrome:abc:622786441") to a `chrome.tabs.Tab`.
+ *
+ * Namespaced ids are produced by `list_tabs` and are how the LLM references
+ * a specific tab across profile/browser boundaries. The bridge routes the
+ * call to the right extension based on the prefix; by the time we reach
+ * here, the rawId is what `chrome.tabs.get()` needs.
+ *
+ * Active-tab fallback was removed: with multiple windows or profiles, the
+ * "current window" semantics silently re-targeted mid-task when the user
+ * switched windows. Callers must now pass an explicit `tab_id`. The side
+ * panel chat captures-and-binds the active tab at message-send time and
+ * passes it explicitly; external MCP clients must call `list_tabs` first.
+ */
+const getTab = async (tabIdParam: unknown, checkBlocked = true): Promise<chrome.tabs.Tab> => {
+  const parsed = parseTabId(tabIdParam);
+  if (!parsed || parsed.rawId === 0) {
+    throw Object.assign(
+      new Error('tab_id is required. Call list_tabs first to get a tab id.'),
+      { code: 'TAB_NOT_FOUND' },
+    );
+  }
 
-  if (tabId) {
-    tab = await chrome.tabs.get(tabId);
-    // Activate the targeted tab inside its window (needed for captureVisibleTab and so
-    // the right tab is showing when the user looks at Chrome). Do NOT focus the window —
-    // that would steal OS focus from whatever app the user is currently in.
-    await chrome.tabs.update(tab.id!, { active: true });
-  } else {
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!activeTab?.id) throw Object.assign(new Error('No active tab found'), { code: 'TAB_NOT_FOUND' });
-    tab = activeTab;
+  let tab: chrome.tabs.Tab;
+  try {
+    tab = await chrome.tabs.get(parsed.rawId);
+  } catch {
+    throw Object.assign(
+      new Error(`Tab ${parsed.rawId} not found — it may have been closed.`),
+      { code: 'TAB_NOT_FOUND' },
+    );
   }
 
   if (checkBlocked && tab.url && isBlockedDomain(tab.url)) {
@@ -298,7 +319,6 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
     const format = (params.format as string) ?? 'png';
     const quality = (params.quality as number) ?? 80;
 
-    // If tab_id provided, activate it first (captureVisibleTab captures the active tab)
     const tab = await getTab(params.tab_id as number | undefined);
     if (tab.url?.startsWith('chrome://')) {
       throw Object.assign(
@@ -306,6 +326,10 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
         { code: 'CONTENT_UNAVAILABLE' },
       );
     }
+
+    // captureVisibleTab only captures the active tab in the window, so we
+    // must activate the target. This is the only tool that needs to.
+    await chrome.tabs.update(tab.id!, { active: true });
 
     // Use the tab's window ID (more reliable than getCurrent() in service workers)
     const windowId = tab.windowId ?? (await chrome.windows.getCurrent()).id;
@@ -348,8 +372,12 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
       );
     }
 
+    // Namespace each tab id with this browser's instance id so the bridge
+    // (which fans out list_tabs across N connected browsers) can route any
+    // subsequent tool call back to the correct profile.
+    const browserId = await getBrowserInstanceId();
     const result = tabs.map(t => ({
-      id: t.id,
+      id: t.id != null ? composeTabId(browserId, t.id) : null,
       title: t.title ?? '',
       url: t.url ?? '',
       active: t.active ?? false,

@@ -48,6 +48,12 @@ export function createRelay(callbacks: RelayCallbacks): Relay {
         case 'pong':
           callbacks.onPong(data.timestamp);
           break;
+        case 'server_ping':
+          // Bridge-initiated keepalive. The fact that this onmessage handler
+          // ran means the SW just woke up — that alone is the goal. Reply
+          // with server_pong so the bridge can monitor liveness if it wants.
+          safeSend({ type: 'server_pong', timestamp: data.timestamp });
+          break;
         case 'tool_request':
           callbacks.onToolRequest(data.id, data.tool, data.params ?? {});
           break;

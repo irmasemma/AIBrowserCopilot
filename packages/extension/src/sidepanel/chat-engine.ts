@@ -41,6 +41,14 @@ export interface RunChatOptions {
   toolPermissions: Record<string, boolean>;
   signal?: AbortSignal;
   onToolCall?: (event: ToolCallEvent) => void;
+  /**
+   * Tab the user is talking about. Captured by the side panel at
+   * message-send time and injected into every tool call's `tab_id` arg if
+   * the LLM didn't supply one. This replaces the old extension-level
+   * "active tab" fallback, which silently re-targeted when the user
+   * switched windows mid-task.
+   */
+  boundTabId?: string;
 }
 
 export interface RunChatResult {
@@ -78,7 +86,7 @@ const toolResultToString = (result: unknown): string => {
 };
 
 export const runChat = async (options: RunChatOptions): Promise<RunChatResult> => {
-  const { provider, apiKey, model, messages, toolPermissions, signal, onToolCall } = options;
+  const { provider, apiKey, model, messages, toolPermissions, signal, onToolCall, boundTabId } = options;
 
   if (!apiKey) {
     throw new Error('No API key configured for the selected provider.');
@@ -116,7 +124,7 @@ export const runChat = async (options: RunChatOptions): Promise<RunChatResult> =
 
     for (const call of response.toolCalls) {
       if (signal?.aborted) throw new Error('Cancelled');
-      await runOneTool(call, conversation, appended, onToolCall);
+      await runOneTool(call, conversation, appended, onToolCall, boundTabId);
     }
 
     if (iteration === MAX_TOOL_ITERATIONS - 1) {
@@ -132,9 +140,19 @@ const runOneTool = async (
   conversation: CanonicalMessage[],
   appended: CanonicalMessage[],
   onToolCall?: (event: ToolCallEvent) => void,
+  boundTabId?: string,
 ): Promise<void> => {
   const start = Date.now();
-  const dispatched = await dispatchToolViaBackground(call.name, call.args);
+
+  // Inject the panel-bound tab id when the LLM didn't supply one. We only
+  // fill in tab_id (and only for tools other than list_tabs, which is a
+  // global query). Replaces the old extension-level active-tab fallback.
+  const args: Record<string, unknown> = { ...call.args };
+  if (boundTabId && call.name !== 'list_tabs' && (args.tab_id === undefined || args.tab_id === null || args.tab_id === '')) {
+    args.tab_id = boundTabId;
+  }
+
+  const dispatched = await dispatchToolViaBackground(call.name, args);
   const durationMs = Date.now() - start;
 
   const toolMessage: CanonicalMessage = {

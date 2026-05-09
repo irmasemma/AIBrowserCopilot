@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { WebSocketServer, WebSocket } from 'ws';
+import {
+  parseBrand,
+  extractBrowserIdFromTabId,
+  mergeFanOutListTabs,
+  type FanOutResult,
+  type FanOutError,
+} from './service.js';
 
 describe('browserId parsing', () => {
   function parseQuery(url: string | undefined): URLSearchParams {
@@ -68,6 +75,104 @@ describe('multi-browser WS', () => {
     expect(roles).toContain('mcp');
 
     ext.close(); mcp.close(); wss.close();
+  });
+});
+
+describe('parseBrand', () => {
+  it('returns brand portion of composite browserId', () => {
+    expect(parseBrand('chrome:abc-123')).toBe('chrome');
+    expect(parseBrand('edge:profile-A')).toBe('edge');
+  });
+
+  it('returns the input as-is for legacy brand-only ids', () => {
+    expect(parseBrand('chrome')).toBe('chrome');
+    expect(parseBrand('edge')).toBe('edge');
+  });
+
+  it('handles ids with multiple colons (splits on the first one)', () => {
+    expect(parseBrand('chrome:a:b')).toBe('chrome');
+  });
+});
+
+describe('extractBrowserIdFromTabId', () => {
+  it('extracts composite browserId from a namespaced tab id', () => {
+    expect(extractBrowserIdFromTabId('chrome:abc-123:622786441')).toBe('chrome:abc-123');
+  });
+
+  it('extracts brand-only browserId from a legacy namespaced tab id', () => {
+    expect(extractBrowserIdFromTabId('chrome:42')).toBe('chrome');
+  });
+
+  it('returns empty for raw integer tab ids (caller falls back)', () => {
+    expect(extractBrowserIdFromTabId('622786441')).toBe('');
+    expect(extractBrowserIdFromTabId(622786441)).toBe('');
+  });
+
+  it('returns empty for missing or non-string non-number input', () => {
+    expect(extractBrowserIdFromTabId(undefined)).toBe('');
+    expect(extractBrowserIdFromTabId(null)).toBe('');
+    expect(extractBrowserIdFromTabId({})).toBe('');
+  });
+
+  it('returns empty for malformed strings', () => {
+    expect(extractBrowserIdFromTabId('chrome:abc:notnum')).toBe('');
+    expect(extractBrowserIdFromTabId('chrome:abc:')).toBe('');
+    expect(extractBrowserIdFromTabId(':42')).toBe('');
+  });
+
+  it('preserves multi-colon browserIds (splits on the LAST colon)', () => {
+    expect(extractBrowserIdFromTabId('chrome:a:b:42')).toBe('chrome:a:b');
+  });
+});
+
+describe('mergeFanOutListTabs', () => {
+  const mockResp = (tabs: unknown[]) =>
+    ({ result: { content: [{ type: 'text', text: JSON.stringify(tabs) }] } });
+
+  it('concatenates tabs across multiple successful browsers', () => {
+    const results: Array<FanOutResult | FanOutError> = [
+      { browserId: 'chrome:A', ok: true, response: mockResp([{ id: 'chrome:A:1', title: 'a1' }]) },
+      { browserId: 'chrome:B', ok: true, response: mockResp([{ id: 'chrome:B:2', title: 'b2' }]) },
+    ];
+    const merged = mergeFanOutListTabs(results);
+    const payload = JSON.parse(merged.content[0].text);
+    expect(payload.tabs).toHaveLength(2);
+    expect(payload.tabs[0].id).toBe('chrome:A:1');
+    expect(payload.tabs[1].id).toBe('chrome:B:2');
+    expect(payload.errors).toBeUndefined();
+  });
+
+  it('reports errors per-browser without dropping the successes', () => {
+    const results: Array<FanOutResult | FanOutError> = [
+      { browserId: 'chrome:A', ok: true, response: mockResp([{ id: 'chrome:A:1' }]) },
+      { browserId: 'chrome:B', ok: false, error: 'timeout' },
+    ];
+    const merged = mergeFanOutListTabs(results);
+    const payload = JSON.parse(merged.content[0].text);
+    expect(payload.tabs).toHaveLength(1);
+    expect(payload.errors).toEqual([{ browserId: 'chrome:B', error: 'timeout' }]);
+  });
+
+  it('reports parse_failed when a browser returns malformed text', () => {
+    const results: Array<FanOutResult | FanOutError> = [
+      { browserId: 'chrome:A', ok: true, response: { result: { content: [{ type: 'text', text: 'not-json' }] } } },
+    ];
+    const merged = mergeFanOutListTabs(results);
+    const payload = JSON.parse(merged.content[0].text);
+    expect(payload.tabs).toEqual([]);
+    expect(payload.errors).toHaveLength(1);
+    expect(payload.errors[0].error).toMatch(/^parse_failed:/);
+  });
+
+  it('returns an empty tabs array when all browsers fail', () => {
+    const results: Array<FanOutResult | FanOutError> = [
+      { browserId: 'chrome:A', ok: false, error: 'timeout' },
+      { browserId: 'chrome:B', ok: false, error: 'closed' },
+    ];
+    const merged = mergeFanOutListTabs(results);
+    const payload = JSON.parse(merged.content[0].text);
+    expect(payload.tabs).toEqual([]);
+    expect(payload.errors).toHaveLength(2);
   });
 });
 

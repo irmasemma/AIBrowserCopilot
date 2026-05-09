@@ -3666,6 +3666,9 @@ var import_websocket_server = __toESM(require_websocket_server(), 1);
 
 // src/service.ts
 var import_node_crypto = require("node:crypto");
+var import_node_fs2 = require("node:fs");
+var import_node_path2 = require("node:path");
+var import_node_os2 = require("node:os");
 
 // ../../node_modules/zod/v3/external.js
 var external_exports = {};
@@ -7919,7 +7922,8 @@ var toolRegistry = [
 ];
 
 // src/version.ts
-var VERSION = "0.2.1";
+var VERSION = "0.3.0";
+var BUILD_ID = process.env.BUILD_ID ?? "dev";
 
 // src/lock-file-manager.ts
 var import_node_fs = require("node:fs");
@@ -7977,6 +7981,40 @@ function registerCleanupHandlers(lockPath) {
 // src/service.ts
 var REQUEST_TIMEOUT_MS = 3e4;
 var browserSockets = /* @__PURE__ */ new Map();
+var brandIndex = /* @__PURE__ */ new Map();
+function parseBrand(browserId) {
+  const colon = browserId.indexOf(":");
+  return colon === -1 ? browserId : browserId.slice(0, colon);
+}
+function extractBrowserIdFromTabId(input) {
+  if (typeof input !== "string") return "";
+  const s = input.trim();
+  if (!s || /^[0-9]+$/.test(s)) return "";
+  const lastColon = s.lastIndexOf(":");
+  if (lastColon <= 0 || lastColon === s.length - 1) return "";
+  const rawSuffix = s.slice(lastColon + 1);
+  if (!/^[0-9]+$/.test(rawSuffix)) return "";
+  return s.slice(0, lastColon);
+}
+function indexBrowser(browserId, ws) {
+  browserSockets.set(browserId, ws);
+  const brand = parseBrand(browserId);
+  let set = brandIndex.get(brand);
+  if (!set) {
+    set = /* @__PURE__ */ new Set();
+    brandIndex.set(brand, set);
+  }
+  set.add(browserId);
+}
+function unindexBrowser(browserId) {
+  browserSockets.delete(browserId);
+  const brand = parseBrand(browserId);
+  const set = brandIndex.get(brand);
+  if (set) {
+    set.delete(browserId);
+    if (set.size === 0) brandIndex.delete(brand);
+  }
+}
 var mcpClients = /* @__PURE__ */ new Map();
 var pendingRequests = /* @__PURE__ */ new Map();
 var startTime = Date.now();
@@ -7987,7 +8025,8 @@ function getServerInfo() {
     pid: process.pid,
     port: serverPort,
     version: VERSION,
-    startedBy: "service",
+    buildId: BUILD_ID,
+    startedBy: process.env.AI_BROWSER_COPILOT_STARTED_BY ?? "service",
     capabilities: toolRegistry.map((t) => t.name),
     uptime: Math.floor((Date.now() - startTime) / 1e3),
     connectedBrowsers: Array.from(browserSockets.keys()),
@@ -7999,16 +8038,25 @@ function parseQuery(url) {
   const qi = url.indexOf("?");
   return qi === -1 ? new URLSearchParams() : new URLSearchParams(url.slice(qi + 1));
 }
+var SERVER_PING_INTERVAL_MS = 2e4;
 function handleExtension(ws, browserId) {
   process.stderr.write(`Browser connected: ${browserId}
 `);
-  browserSockets.set(browserId, ws);
+  indexBrowser(browserId, ws);
   ws.send(JSON.stringify(getServerInfo()));
+  const serverPingTimer = setInterval(() => {
+    if (ws.readyState === import_websocket.default.OPEN) {
+      ws.send(JSON.stringify({ type: "server_ping", timestamp: Date.now() }));
+    }
+  }, SERVER_PING_INTERVAL_MS);
   ws.on("message", (data) => {
     try {
       const msg = JSON.parse(data.toString());
       if (msg.type === "ping") {
         ws.send(JSON.stringify({ type: "pong", timestamp: msg.timestamp }));
+        return;
+      }
+      if (msg.type === "server_pong") {
         return;
       }
       if (msg.type === "request_tool_scan") {
@@ -8027,8 +8075,9 @@ function handleExtension(ws, browserId) {
     }
   });
   ws.on("close", () => {
+    clearInterval(serverPingTimer);
     if (browserSockets.get(browserId) === ws) {
-      browserSockets.delete(browserId);
+      unindexBrowser(browserId);
       process.stderr.write(`Browser disconnected: ${browserId}
 `);
     }
@@ -8060,10 +8109,27 @@ function handleMcpClient(ws) {
     }
   });
 }
+function resolveSocket(target) {
+  const exact = browserSockets.get(target);
+  if (exact && exact.readyState === import_websocket.default.OPEN) return exact;
+  if (!target.includes(":")) {
+    const ids = brandIndex.get(target);
+    if (ids) {
+      for (const id of ids) {
+        const s = browserSockets.get(id);
+        if (s && s.readyState === import_websocket.default.OPEN) return s;
+      }
+    }
+  }
+  for (const s of browserSockets.values()) {
+    if (s.readyState === import_websocket.default.OPEN) return s;
+  }
+  return null;
+}
 function sendToolRequest(clientId, originalId, tool, params, browserId) {
   return new Promise((resolve, reject) => {
-    const ws = browserSockets.get(browserId) || browserSockets.get("default") || Array.from(browserSockets.values()).find((s) => s.readyState === import_websocket.default.OPEN);
-    if (!ws || ws.readyState !== import_websocket.default.OPEN) {
+    const ws = resolveSocket(browserId);
+    if (!ws) {
       reject(new Error("No browser extension connected"));
       return;
     }
@@ -8075,6 +8141,71 @@ function sendToolRequest(clientId, originalId, tool, params, browserId) {
     pendingRequests.set(browserBoundId, { clientId, originalId, resolve, reject, timer });
     ws.send(JSON.stringify({ type: "tool_request", id: browserBoundId, tool, params }));
   });
+}
+var FAN_OUT_TIMEOUT_MS = 2e3;
+function fanOutToolRequest(clientId, tool, params, brandFilter) {
+  const targets = [];
+  if (brandFilter && brandFilter !== "default") {
+    for (const [id, ws] of browserSockets.entries()) {
+      if (parseBrand(id) === brandFilter && ws.readyState === import_websocket.default.OPEN) {
+        targets.push({ browserId: id, ws });
+      }
+    }
+  } else {
+    for (const [id, ws] of browserSockets.entries()) {
+      if (ws.readyState === import_websocket.default.OPEN) targets.push({ browserId: id, ws });
+    }
+  }
+  if (targets.length === 0) {
+    return Promise.resolve([]);
+  }
+  return Promise.all(
+    targets.map(
+      ({ browserId, ws }) => new Promise((resolve) => {
+        const browserBoundId = `b_${(0, import_node_crypto.randomUUID)()}`;
+        const timer = setTimeout(() => {
+          pendingRequests.delete(browserBoundId);
+          resolve({ browserId, ok: false, error: "timeout" });
+        }, FAN_OUT_TIMEOUT_MS);
+        pendingRequests.set(browserBoundId, {
+          clientId,
+          originalId: null,
+          resolve: (response) => resolve({ browserId, ok: true, response }),
+          reject: (err) => resolve({ browserId, ok: false, error: err.message }),
+          timer
+        });
+        ws.send(JSON.stringify({ type: "tool_request", id: browserBoundId, tool, params }));
+      })
+    )
+  );
+}
+function mergeFanOutListTabs(results) {
+  const allTabs = [];
+  const errors = [];
+  for (const r of results) {
+    if (!r.ok) {
+      errors.push({ browserId: r.browserId, error: r.error });
+      continue;
+    }
+    try {
+      const resp = r.response;
+      const text = resp?.result?.content?.[0]?.text ?? "[]";
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) allTabs.push(...parsed);
+    } catch (err) {
+      errors.push({
+        browserId: r.browserId,
+        error: `parse_failed: ${err.message}`
+      });
+    }
+  }
+  const payload = {
+    tabs: allTabs
+  };
+  if (errors.length > 0) payload.errors = errors;
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }]
+  };
 }
 function handleMcpMessage(clientId, raw, reply) {
   try {
@@ -8111,8 +8242,30 @@ function handleMcpMessage(clientId, raw, reply) {
     if (msg.method === "tools/call") {
       const toolName = msg.params?.name;
       const toolArgs = msg.params?.arguments ?? {};
-      const browserId = toolArgs.browser || "default";
+      const tabIdRoute = extractBrowserIdFromTabId(toolArgs.tab_id);
+      const browserId = tabIdRoute || toolArgs.browser || "default";
       const originalId = msg.id ?? null;
+      if (toolName === "list_tabs") {
+        const brandFilter = browserId === "default" ? null : browserId;
+        fanOutToolRequest(clientId, toolName, toolArgs, brandFilter).then((results) => {
+          if (results.length === 0) {
+            reply({
+              jsonrpc: "2.0",
+              id: msg.id,
+              result: { content: [{ type: "text", text: "No browser extension connected" }], isError: true }
+            });
+            return;
+          }
+          reply({ jsonrpc: "2.0", id: msg.id, result: mergeFanOutListTabs(results) });
+        }).catch((err) => {
+          reply({
+            jsonrpc: "2.0",
+            id: msg.id,
+            result: { content: [{ type: "text", text: `list_tabs fan-out failed: ${err.message}` }], isError: true }
+          });
+        });
+        return;
+      }
       sendToolRequest(clientId, originalId, toolName, toolArgs, browserId).then((response) => {
         const resp = response;
         reply({ jsonrpc: "2.0", id: msg.id, result: resp.result ?? resp });
@@ -8153,6 +8306,27 @@ function zodToJsonSchema(z) {
       return base;
   }
 }
+function getBridgeLogPath() {
+  switch ((0, import_node_os2.platform)()) {
+    case "win32":
+      return (0, import_node_path2.join)(process.env.LOCALAPPDATA ?? (0, import_node_path2.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "ai-browser-copilot", "bridge.log");
+    case "darwin":
+      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "ai-browser-copilot", "bridge.log");
+    default:
+      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".local", "share", "ai-browser-copilot", "bridge.log");
+  }
+}
+function appendBridgeLog(line) {
+  try {
+    const path = getBridgeLogPath();
+    const dir = (0, import_node_path2.dirname)(path);
+    if (!(0, import_node_fs2.existsSync)(dir)) (0, import_node_fs2.mkdirSync)(dir, { recursive: true });
+    const stamp = (/* @__PURE__ */ new Date()).toISOString();
+    (0, import_node_fs2.appendFileSync)(path, `[${stamp}] [pid ${process.pid}] ${line}
+`, "utf-8");
+  } catch {
+  }
+}
 function startServer(port) {
   serverPort = port;
   const wss = new import_websocket_server.default({ host: "127.0.0.1", port });
@@ -8164,13 +8338,23 @@ function startServer(port) {
       ipcPath: "",
       startedAt: (/* @__PURE__ */ new Date()).toISOString(),
       version: VERSION,
-      startedBy: "service"
+      startedBy: process.env.AI_BROWSER_COPILOT_STARTED_BY ?? "service"
     });
     registerCleanupHandlers();
   } catch (err) {
     process.stderr.write(`Failed to write lock file: ${err.message}
 `);
   }
+  process.on("uncaughtException", (err) => {
+    appendBridgeLog(`uncaughtException: ${err?.stack ?? err}`);
+    setTimeout(() => {
+      throw err;
+    }, 0);
+  });
+  process.on("unhandledRejection", (reason) => {
+    appendBridgeLog(`unhandledRejection: ${reason instanceof Error ? reason.stack : String(reason)}`);
+  });
+  appendBridgeLog(`Server started on 127.0.0.1:${port} v${VERSION} buildId=${BUILD_ID} startedBy=${process.env.AI_BROWSER_COPILOT_STARTED_BY ?? "service"}`);
   wss.on("connection", (ws, req) => {
     const params = parseQuery(req.url);
     if (params.get("role") === "mcp") {
@@ -8254,6 +8438,10 @@ if (process.argv.includes("--version")) {
   process.stdout.write(`${VERSION}
 `);
   process.exit(0);
+}
+var isServiceMode = process.argv.includes("--service");
+if (isServiceMode) {
+  process.env.AI_BROWSER_COPILOT_STARTED_BY = "autostart";
 }
 process.stdin.pause();
 var probe = import_node_net.default.createServer();

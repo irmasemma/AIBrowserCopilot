@@ -45,16 +45,22 @@ interface DiagnosticStep {
   status: 'ok' | 'fail' | 'pending';
   detail?: string;
   hint?: string;
+  command?: string;
 }
 
-const buildSteps = (s: ServiceStatusSnapshot | null, ctx: ConnectionContext): DiagnosticStep[] => {
+const buildSteps = (
+  s: ServiceStatusSnapshot | null,
+  ctx: ConnectionContext,
+  installCommand: string,
+): DiagnosticStep[] => {
   const steps: DiagnosticStep[] = [];
   if (!s || s.error) {
     steps.push({
       label: 'Helper available',
       status: 'fail',
       detail: s?.error ?? 'Helper not reachable',
-      hint: 'Re-run the installer so Chrome can talk to the native messaging helper.',
+      hint: 'Run this in any terminal so Chrome can talk to the native messaging helper:',
+      command: installCommand,
     });
     return steps;
   }
@@ -65,7 +71,8 @@ const buildSteps = (s: ServiceStatusSnapshot | null, ctx: ConnectionContext): Di
       label: 'Bridge binary present',
       status: 'fail',
       detail: s.binaryPath,
-      hint: 'Re-run the installer to download the bridge.',
+      hint: 'Run this in any terminal to download the bridge:',
+      command: installCommand,
     });
     return steps;
   }
@@ -168,10 +175,18 @@ const buildDiagnosticsText = (
 };
 
 const StepRow: FunctionalComponent<{ step: DiagnosticStep }> = ({ step }) => {
+  const [copied, setCopied] = useState(false);
   const icon = step.status === 'ok' ? '✓' : step.status === 'fail' ? '✕' : '·';
   const color = step.status === 'ok' ? 'text-emerald-600'
     : step.status === 'fail' ? 'text-red-600'
     : 'text-neutral-400';
+
+  const handleCopy = async (cmd: string): Promise<void> => {
+    await navigator.clipboard.writeText(cmd);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <div class="flex items-start gap-2 py-0.5">
       <span class={`${color} font-mono w-3 flex-shrink-0`} aria-hidden="true">{icon}</span>
@@ -182,6 +197,19 @@ const StepRow: FunctionalComponent<{ step: DiagnosticStep }> = ({ step }) => {
         </div>
         {step.hint && step.status === 'fail' && (
           <div class="text-[11px] text-amber-700 mt-0.5">{step.hint}</div>
+        )}
+        {step.command && step.status === 'fail' && (
+          <div class="relative mt-1">
+            <pre class="text-[11px] bg-neutral-900 text-green-400 p-1.5 pr-12 rounded font-mono overflow-x-auto whitespace-pre-wrap break-all">
+              {step.command}
+            </pre>
+            <button
+              class="absolute top-0.5 right-0.5 text-[10px] text-neutral-300 bg-neutral-800 px-1.5 py-0.5 rounded border border-neutral-700 hover:text-white"
+              onClick={() => void handleCopy(step.command!)}
+            >
+              {copied ? '✓ Copied' : 'Copy'}
+            </button>
+          </div>
         )}
       </div>
     </div>
@@ -197,11 +225,17 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
   const refresh = async () => {
     setRefreshing(true);
     try {
+      // Background wraps the snapshot in { status, error? }, so unwrap here.
+      // Reading res directly leaves every field undefined, which used to surface
+      // as a false "Bridge binary present ✕ Re-run the installer" failure.
       const res = await chrome.runtime.sendMessage({ type: 'get_service_status' });
-      if (res && typeof res === 'object') {
-        setStatus(res as ServiceStatusSnapshot);
+      if (res && typeof res === 'object' && res.status && typeof res.status === 'object') {
+        setStatus(res.status as ServiceStatusSnapshot);
       } else {
-        setStatus({ error: 'Helper returned no data' });
+        const errMsg = res && typeof res === 'object' && typeof res.error === 'string'
+          ? res.error
+          : 'Helper returned no data';
+        setStatus({ error: errMsg });
       }
     } catch (err) {
       setStatus({ error: err instanceof Error ? err.message : String(err) });
@@ -230,7 +264,11 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const steps = buildSteps(status, connectionContext);
+  const extId = chrome.runtime?.id ?? '';
+  const installCommand = extId
+    ? `npx ai-browser-copilot-setup --update --extension-id ${extId}`
+    : 'npx ai-browser-copilot-setup --update';
+  const steps = buildSteps(status, connectionContext, installCommand);
 
   return (
     <div class="px-4 pb-3 text-xs text-neutral-700 border-t border-neutral-100 pt-3 bg-neutral-50/50">
