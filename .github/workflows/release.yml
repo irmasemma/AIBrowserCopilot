@@ -39,7 +39,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: extension-build
-          path: packages/extension/.output/chrome-mv3/
+          path: packages/extension/dist/chrome-mv3/
 
   build-native-host:
     runs-on: ${{ matrix.os }}
@@ -127,7 +127,7 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            release-artifacts/native-host-*/*
+            release-artifacts/native-host-*/**/*
           draft: false
           prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
 
