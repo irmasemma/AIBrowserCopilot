@@ -7996,7 +7996,18 @@ function extractBrowserIdFromTabId(input) {
   if (!/^[0-9]+$/.test(rawSuffix)) return "";
   return s.slice(0, lastColon);
 }
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  return origin.startsWith("chrome-extension://") || origin.startsWith("moz-extension://") || origin.startsWith("safari-web-extension://");
+}
 function indexBrowser(browserId, ws) {
+  const existing = browserSockets.get(browserId);
+  if (existing && existing !== ws) {
+    try {
+      existing.terminate();
+    } catch {
+    }
+  }
   browserSockets.set(browserId, ws);
   const brand = parseBrand(browserId);
   let set = brandIndex.get(brand);
@@ -8187,11 +8198,28 @@ function mergeFanOutListTabs(results) {
       errors.push({ browserId: r.browserId, error: r.error });
       continue;
     }
+    const resp = r.response;
+    if (resp?.error) {
+      errors.push({ browserId: r.browserId, error: resp.error.message ?? "rpc_error" });
+      continue;
+    }
+    if (resp?.result?.isError) {
+      const errText = resp.result.content?.[0]?.text ?? "extension reported tool error";
+      errors.push({ browserId: r.browserId, error: errText });
+      continue;
+    }
+    const text = resp?.result?.content?.[0]?.text;
+    if (typeof text !== "string") {
+      errors.push({ browserId: r.browserId, error: "malformed_envelope" });
+      continue;
+    }
     try {
-      const resp = r.response;
-      const text = resp?.result?.content?.[0]?.text ?? "[]";
       const parsed = JSON.parse(text);
-      if (Array.isArray(parsed)) allTabs.push(...parsed);
+      if (!Array.isArray(parsed)) {
+        errors.push({ browserId: r.browserId, error: "expected_array" });
+        continue;
+      }
+      allTabs.push(...parsed);
     } catch (err) {
       errors.push({
         browserId: r.browserId,
@@ -8329,7 +8357,19 @@ function appendBridgeLog(line) {
 }
 function startServer(port) {
   serverPort = port;
-  const wss = new import_websocket_server.default({ host: "127.0.0.1", port });
+  const wss = new import_websocket_server.default({
+    host: "127.0.0.1",
+    port,
+    verifyClient: (info, done) => {
+      if (isAllowedOrigin(info.origin)) {
+        done(true);
+      } else {
+        process.stderr.write(`Rejected WS upgrade from disallowed origin: ${info.origin}
+`);
+        done(false, 401, "forbidden origin");
+      }
+    }
+  });
   try {
     writeLockFile({
       pid: process.pid,

@@ -61,15 +61,41 @@ export const buildInitialMessages = (userMessage: string): CanonicalMessage[] =>
   { role: 'user', text: userMessage },
 ];
 
+const DISPATCH_TIMEOUT_MS = 30_000;
+
 const dispatchToolViaBackground = async (
   name: string,
   params: Record<string, unknown>,
 ): Promise<{ ok: true; result: unknown } | { ok: false; error: { message: string; code: string } }> => {
-  const response = await chrome.runtime.sendMessage({ type: 'dispatch_tool', name, params });
-  if (!response || typeof response !== 'object') {
-    return { ok: false, error: { message: 'No response from background service worker', code: 'CONTENT_UNAVAILABLE' } };
+  // Race the message round-trip against a hard timeout. A wedged or mid-
+  // eviction service worker can otherwise hang the chat indefinitely with
+  // no way for the user to recover except closing the side panel.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const response = await Promise.race([
+      chrome.runtime.sendMessage({ type: 'dispatch_tool', name, params }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Background dispatch timed out after ${DISPATCH_TIMEOUT_MS}ms`)),
+          DISPATCH_TIMEOUT_MS,
+        );
+      }),
+    ]);
+    if (!response || typeof response !== 'object') {
+      return { ok: false, error: { message: 'No response from background service worker', code: 'CONTENT_UNAVAILABLE' } };
+    }
+    return response as { ok: true; result: unknown } | { ok: false; error: { message: string; code: string } };
+  } catch (err) {
+    return {
+      ok: false,
+      error: {
+        message: (err as Error).message ?? 'Background dispatch failed',
+        code: 'BACKGROUND_TIMEOUT',
+      },
+    };
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
-  return response as { ok: true; result: unknown } | { ok: false; error: { message: string; code: string } };
 };
 
 const toolResultToString = (result: unknown): string => {

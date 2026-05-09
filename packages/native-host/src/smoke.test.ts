@@ -3,6 +3,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import net from 'node:net';
+import { VERSION } from './version';
 
 const BINARY_PATH = join(__dirname, '..', 'bin', 'ai-browser-copilot-win-x64.exe');
 const PORT = 7483;
@@ -27,7 +28,7 @@ describe('compiled binary smoke test', () => {
 
   it('--version outputs correct version', () => {
     const output = execFileSync(BINARY_PATH, ['--version'], { encoding: 'utf-8', timeout: 15000 });
-    expect(output.trim()).toBe('0.2.1');
+    expect(output.trim()).toBe(VERSION);
   }, 20000);
 
   /**

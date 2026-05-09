@@ -64,7 +64,32 @@ export function extractBrowserIdFromTabId(input: unknown): string {
   return s.slice(0, lastColon);
 }
 
+// ── Origin allowlist ─────────────────────────────────────────────────────
+// The WS server binds to 127.0.0.1, but any web page in the user's browser
+// (or any local process) can still open a WebSocket to us. Without this
+// check, an `http://localhost:*` dev server page or a browser-rendered
+// http page could dispatch tools through us with chrome.debugger blast
+// radius. Browser extensions send Origin "chrome-extension://<id>" or
+// "moz-extension://<id>". Headless local clients (Node/Python MCP servers)
+// send no Origin header — those are accepted by absence (the loopback
+// bind keeps remote attackers out of that bucket).
+export function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true;
+  return origin.startsWith('chrome-extension://')
+    || origin.startsWith('moz-extension://')
+    || origin.startsWith('safari-web-extension://');
+}
+
 function indexBrowser(browserId: string, ws: WebSocket): void {
+  // If the same browserId already has a socket, the old one is stale (e.g.
+  // SW eviction left the previous WS in OPEN state from our side, but the
+  // extension reconnected with a new socket). Tear it down so its
+  // serverPing timer fires its 'close' handler and stops leaking memory.
+  const existing = browserSockets.get(browserId);
+  if (existing && existing !== ws) {
+    try { existing.terminate(); } catch { /* noop */ }
+  }
+
   browserSockets.set(browserId, ws);
   const brand = parseBrand(browserId);
   let set = brandIndex.get(brand);
@@ -362,11 +387,38 @@ export function mergeFanOutListTabs(results: Array<FanOutResult | FanOutError>):
       errors.push({ browserId: r.browserId, error: r.error });
       continue;
     }
+    const resp = r.response as {
+      result?: { content?: Array<{ type: string; text?: string }>; isError?: boolean };
+      error?: { message?: string };
+    };
+
+    // JSON-RPC error envelope (extension didn't return a result at all).
+    if (resp?.error) {
+      errors.push({ browserId: r.browserId, error: resp.error.message ?? 'rpc_error' });
+      continue;
+    }
+
+    // MCP-style tool-error envelope: { result: { isError: true, content: [...] } }.
+    // Surface the human-readable text instead of trying to JSON.parse it.
+    if (resp?.result?.isError) {
+      const errText = resp.result.content?.[0]?.text ?? 'extension reported tool error';
+      errors.push({ browserId: r.browserId, error: errText });
+      continue;
+    }
+
+    // Success envelope. text MUST be a string containing a JSON array of tabs.
+    const text = resp?.result?.content?.[0]?.text;
+    if (typeof text !== 'string') {
+      errors.push({ browserId: r.browserId, error: 'malformed_envelope' });
+      continue;
+    }
     try {
-      const resp = r.response as { result?: { content?: Array<{ type: string; text?: string }> } };
-      const text = resp?.result?.content?.[0]?.text ?? '[]';
       const parsed = JSON.parse(text);
-      if (Array.isArray(parsed)) allTabs.push(...parsed);
+      if (!Array.isArray(parsed)) {
+        errors.push({ browserId: r.browserId, error: 'expected_array' });
+        continue;
+      }
+      allTabs.push(...parsed);
     } catch (err) {
       errors.push({
         browserId: r.browserId,
@@ -521,7 +573,23 @@ function appendBridgeLog(line: string): void {
 // ── Start server ──────────────────────────────────────────────────────────
 export function startServer(port: number): void {
   serverPort = port;
-  const wss = new WebSocketServer({ host: '127.0.0.1', port });
+  // Origin check via verifyClient runs DURING the HTTP upgrade, before the
+  // WS handshake completes. This means a disallowed origin sees an HTTP 401,
+  // never gets an `open` event, and cannot send any data. The alternative
+  // (ws.close() inside the connection handler) leaves a sliver of time
+  // during which the WS is open from the client's perspective.
+  const wss = new WebSocketServer({
+    host: '127.0.0.1',
+    port,
+    verifyClient: (info, done) => {
+      if (isAllowedOrigin(info.origin)) {
+        done(true);
+      } else {
+        process.stderr.write(`Rejected WS upgrade from disallowed origin: ${info.origin}\n`);
+        done(false, 401, 'forbidden origin');
+      }
+    },
+  });
 
   // Write lock file with current PID/port so the installer can find and
   // terminate this process before reinstalling. Cleaned up on exit.

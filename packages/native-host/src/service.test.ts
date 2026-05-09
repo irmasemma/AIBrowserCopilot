@@ -4,6 +4,7 @@ import {
   parseBrand,
   extractBrowserIdFromTabId,
   mergeFanOutListTabs,
+  isAllowedOrigin,
   type FanOutResult,
   type FanOutError,
 } from './service.js';
@@ -173,6 +174,96 @@ describe('mergeFanOutListTabs', () => {
     const payload = JSON.parse(merged.content[0].text);
     expect(payload.tabs).toEqual([]);
     expect(payload.errors).toHaveLength(2);
+  });
+
+  it('surfaces extension tool-error envelope as the actual error message (not parse_failed)', () => {
+    const errResp = {
+      result: {
+        isError: true,
+        content: [{ type: 'text', text: 'Tool execution failed: chrome.tabs.query unavailable' }],
+      },
+    };
+    const results: Array<FanOutResult | FanOutError> = [
+      { browserId: 'chrome:A', ok: true, response: { result: { content: [{ type: 'text', text: '[]' }] } } },
+      { browserId: 'chrome:B', ok: true, response: errResp },
+    ];
+    const merged = mergeFanOutListTabs(results);
+    const payload = JSON.parse(merged.content[0].text);
+    expect(payload.tabs).toEqual([]);
+    expect(payload.errors).toEqual([
+      { browserId: 'chrome:B', error: 'Tool execution failed: chrome.tabs.query unavailable' },
+    ]);
+  });
+
+  it('surfaces JSON-RPC error envelope', () => {
+    const results: Array<FanOutResult | FanOutError> = [
+      { browserId: 'chrome:A', ok: true, response: { error: { message: 'method not found' } } },
+    ];
+    const merged = mergeFanOutListTabs(results);
+    const payload = JSON.parse(merged.content[0].text);
+    expect(payload.tabs).toEqual([]);
+    expect(payload.errors).toEqual([{ browserId: 'chrome:A', error: 'method not found' }]);
+  });
+
+  it('reports malformed_envelope when text is missing/non-string', () => {
+    const results: Array<FanOutResult | FanOutError> = [
+      { browserId: 'chrome:A', ok: true, response: { result: { content: [] } } },
+      { browserId: 'chrome:B', ok: true, response: {} },
+    ];
+    const merged = mergeFanOutListTabs(results);
+    const payload = JSON.parse(merged.content[0].text);
+    expect(payload.tabs).toEqual([]);
+    expect(payload.errors).toEqual([
+      { browserId: 'chrome:A', error: 'malformed_envelope' },
+      { browserId: 'chrome:B', error: 'malformed_envelope' },
+    ]);
+  });
+
+  it('reports expected_array when text parses to a non-array (no silent drop)', () => {
+    // Catches contract violations early — previously this case silently
+    // contributed zero tabs with no error reported.
+    const results: Array<FanOutResult | FanOutError> = [
+      { browserId: 'chrome:A', ok: true, response: { result: { content: [{ type: 'text', text: '{"tabs":[]}' }] } } },
+    ];
+    const merged = mergeFanOutListTabs(results);
+    const payload = JSON.parse(merged.content[0].text);
+    expect(payload.tabs).toEqual([]);
+    expect(payload.errors).toEqual([{ browserId: 'chrome:A', error: 'expected_array' }]);
+  });
+});
+
+describe('isAllowedOrigin', () => {
+  it('accepts missing Origin (Node MCP clients send no Origin header)', () => {
+    expect(isAllowedOrigin(undefined)).toBe(true);
+    expect(isAllowedOrigin('')).toBe(true);
+  });
+
+  it('accepts chrome-extension:// origins', () => {
+    expect(isAllowedOrigin('chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef')).toBe(true);
+  });
+
+  it('accepts moz-extension:// and safari-web-extension:// origins', () => {
+    expect(isAllowedOrigin('moz-extension://abc')).toBe(true);
+    expect(isAllowedOrigin('safari-web-extension://abc')).toBe(true);
+  });
+
+  it('rejects http://localhost (the dev-server attack vector)', () => {
+    expect(isAllowedOrigin('http://localhost:5173')).toBe(false);
+    expect(isAllowedOrigin('http://127.0.0.1:8080')).toBe(false);
+  });
+
+  it('rejects https origins (web pages on attacker-controlled domains)', () => {
+    expect(isAllowedOrigin('https://attacker.com')).toBe(false);
+    expect(isAllowedOrigin('https://evil.example')).toBe(false);
+  });
+
+  it('rejects file:// origins', () => {
+    expect(isAllowedOrigin('file://')).toBe(false);
+  });
+
+  it('rejects spoofing attempts (substring matches must be at start)', () => {
+    expect(isAllowedOrigin('https://chrome-extension.attacker.com')).toBe(false);
+    expect(isAllowedOrigin('http://moz-extension.attacker.com')).toBe(false);
   });
 });
 
