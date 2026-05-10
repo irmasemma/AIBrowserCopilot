@@ -33,7 +33,7 @@ test.beforeAll(async () => {
     const timeout = setTimeout(() => reject(new Error('Native host startup timeout')), 15000);
     nativeHost.stderr?.on('data', (data: Buffer) => {
       const msg = data.toString();
-      const match = msg.match(/listening on 127\.0\.0\.1:(\d+)/);
+      const match = msg.match(/(?:listening on|Server started on) 127\.0\.0\.1:(\d+)/);
       if (match) {
         clearTimeout(timeout);
         resolve(parseInt(match[1], 10));
@@ -451,7 +451,7 @@ test('extension reconnects after native host restart', async () => {
     const timeout = setTimeout(() => reject(new Error('Restart timeout')), 15000);
     nativeHost.stderr?.on('data', (data: Buffer) => {
       const msg = data.toString();
-      const match = msg.match(/listening on 127\.0\.0\.1:(\d+)/);
+      const match = msg.match(/(?:listening on|Server started on) 127\.0\.0\.1:(\d+)/);
       if (match) {
         clearTimeout(timeout);
         resolve(parseInt(match[1], 10));
