@@ -3,13 +3,13 @@ import { execSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import type { PlatformInfo } from '../shared/platform.js';
 import { getInstallDir } from '../shared/platform.js';
-import { getAssetName, NATIVE_HOST_NAME } from '../shared/constants.js';
+import { getAssetName, getHelperAssetName, NATIVE_HOST_NAME } from '../shared/constants.js';
 import { getManifestPath } from './host-registrar.js';
 import { removeConfigEntry } from './config-merger.js';
 import { registerAllDetectors, getAll, clear } from '../detectors/index.js';
 import { removeAiBrowserCopilotFromVscode } from '../detectors/vscode.js';
 import { detectBrowsers, HELPER_HOST_NAME } from './browser-registrar.js';
-import { killRunningNativeHost } from './process-killer.js';
+import { killRunningNativeHost, NATIVE_HOST_PORT } from './process-killer.js';
 import { unregisterAutostart } from './autostart-registrar.js';
 
 export interface UninstallResult {
@@ -195,9 +195,13 @@ const removeMultiBrowserRegistrations = (platform: PlatformInfo): string[] => {
 export const uninstall = async (platform: PlatformInfo): Promise<UninstallResult> => {
   const errors: string[] = [];
 
-  // Stop any running native host first so its .exe file isn't locked
-  // when we try to delete it. Idempotent: no-op if nothing is running.
-  await killRunningNativeHost(platform);
+  // Stop every running native host first so the .exe files aren't locked
+  // when we try to delete them. Pass both image names — multiple bridge
+  // instances (one per Chrome profile) and any in-flight helper must all
+  // be terminated, not just the port owner. Idempotent.
+  const bridgeImage = getAssetName(platform.os, platform.arch);
+  const helperImage = getHelperAssetName(platform.os, platform.arch);
+  await killRunningNativeHost(platform, NATIVE_HOST_PORT, [bridgeImage, helperImage]);
 
   // Remove autostart entry so we don't try to relaunch a deleted binary
   // at the user's next login. Best effort — failure is non-fatal.

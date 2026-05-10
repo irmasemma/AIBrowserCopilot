@@ -120,15 +120,13 @@ export const downloadBinary = async (
   // Stop any running native host so the binary file can be replaced.
   // On Windows the running .exe holds an exclusive lock; without this step
   // a "rerun the installer" flow fails with EPERM/EBUSY on rename.
-  if (platform.os === 'windows' && existsSync(targetPath)) {
-    const lock = checkBinaryLocked(installDir, platform);
-    if (lock.locked) {
-      await killRunningNativeHost(platform, NATIVE_HOST_PORT);
-    }
-  } else {
-    // POSIX: a running binary doesn't lock the file, but we still want to
-    // free up the port for the freshly installed version.
-    await killRunningNativeHost(platform, NATIVE_HOST_PORT);
+  // Pass both bridge and helper image names so every instance is killed —
+  // killing only the port owner misses sibling bridges (one per Chrome
+  // profile under multi-profile) and any in-flight helper, and either
+  // sibling can still hold a lock on the .exe we need to overwrite.
+  // Idempotent: with nothing running this is a cheap tasklist/pgrep no-op.
+  if (existsSync(targetPath) || existsSync(helperTargetPath)) {
+    await killRunningNativeHost(platform, NATIVE_HOST_PORT, [assetName, helperAsset]);
   }
 
   // --from-local: skip network, copy from local path
