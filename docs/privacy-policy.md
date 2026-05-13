@@ -1,19 +1,19 @@
-# Privacy Policy — Pilotwave
+# Privacy Policy — AgentHub
 
 **Effective:** 2026-05-12
 **Last updated:** 2026-05-12
 
-Pilotwave is a Chrome extension that connects your browser to AI assistants (an in-extension chat agent, or external AI tools via the Model Context Protocol). This policy explains what data Pilotwave handles and what it does not.
+AgentHub is a Chrome extension that connects your browser to AI assistants (an in-extension chat agent, or external AI tools via the Model Context Protocol). This policy explains what data AgentHub handles and what it does not.
 
 ## TL;DR
 
-- Pilotwave does **not** operate a server that receives your browsing data. Page content, screenshots, and form data go from your browser **directly** to the AI provider you choose (OpenAI for chat; your local AI tool for MCP).
-- Pilotwave does **not** sell, transfer, or share your data with third parties for advertising, profiling, or any purpose unrelated to performing the AI action you invoked.
+- AgentHub does **not** operate a server that receives your browsing data. Page content, screenshots, and form data go from your browser **directly** to the AI provider you choose (OpenAI for chat; your local AI tool for MCP).
+- AgentHub does **not** sell, transfer, or share your data with third parties for advertising, profiling, or any purpose unrelated to performing the AI action you invoked.
 - All settings, your OpenAI API key, and activity logs are stored **locally** in your browser's extension storage.
 
-## 1. Data Pilotwave processes
+## 1. Data AgentHub processes
 
-When you invoke an AI action (via the chat sidebar or an MCP-connected tool), Pilotwave reads data from the **active tab** to fulfill that action:
+When you invoke an AI action (via the chat sidebar or an MCP-connected tool), AgentHub reads data from the **active tab** to fulfill that action:
 
 - Page content (text, HTML, structured data)
 - Page metadata (title, URL of the active tab)
@@ -26,16 +26,16 @@ This data is **only collected at the moment you invoke an action**, and is sent 
 ## 2. Where your data goes
 
 ### Chat sidebar (Phase 1, user-supplied API key)
-- Chat messages and the tool-result snippets the AI needs to answer are sent to **`api.openai.com`** over HTTPS, using **your own OpenAI API key**, which you paste into Settings and which is stored only in your browser's local extension storage. Pilotwave's developer never sees this key or the data it transmits.
+- Chat messages and the tool-result snippets the AI needs to answer are sent to **`api.openai.com`** over HTTPS, using **your own OpenAI API key**, which you paste into Settings and which is stored only in your browser's local extension storage. AgentHub's developer never sees this key or the data it transmits.
 - See [OpenAI's privacy policy](https://openai.com/policies/privacy-policy/) for how OpenAI handles requests.
 
 ### MCP server (external AI clients)
-- When you connect an MCP-capable AI tool (Claude Code, Cursor, VS Code, Windsurf, Continue, JetBrains, Zed, etc.), tool calls flow **locally** between that tool and Pilotwave's local native-messaging host over localhost — no internet hop.
+- When you connect an MCP-capable AI tool (Claude Code, Cursor, VS Code, Windsurf, Continue, JetBrains, Zed, etc.), tool calls flow **locally** between that tool and AgentHub's local native-messaging host over localhost — no internet hop.
 - Page data returned to your AI tool is then transmitted by that AI tool to its own provider (e.g., Anthropic for Claude Code, your configured model provider for Cursor) according to **that tool's** privacy policy.
 
 ## 3. Data stored on your device
 
-The following are stored in Chrome's local extension storage (`chrome.storage.local`) — never transmitted off-device by Pilotwave:
+The following are stored in Chrome's local extension storage (`chrome.storage.local`) — never transmitted off-device by AgentHub:
 
 - Your OpenAI API key (for chat)
 - Per-tool permission toggles
@@ -56,17 +56,17 @@ You can clear all of this at any time by removing the extension or using your br
 - **alarms** — periodic heartbeat for the MCP connection
 - **`<all_urls>` (optional)** — granted only if you opt in via Settings; lets the AI act on any site you visit. Default is per-site (you grant each site individually).
 
-## 5. What Pilotwave never does
+## 5. What AgentHub never does
 
 - ❌ Never sells your data to third parties.
 - ❌ Never uses your data to train AI models.
-- ❌ Never transmits page content to Pilotwave-operated servers (we don't operate any).
+- ❌ Never transmits page content to AgentHub-operated servers (we don't operate any).
 - ❌ Never reads passwords, payment information, or authentication tokens.
 - ❌ Never operates on a site that's in the default blocklist (banking, email) unless you explicitly remove that site from the blocklist.
 
 ## 6. Children's privacy
 
-Pilotwave is not directed at children under 13. We do not knowingly collect data from children.
+AgentHub is not directed at children under 13. We do not knowingly collect data from children.
 
 ## 7. Changes to this policy
 
@@ -78,4 +78,4 @@ Questions about privacy: use **"Report a Problem"** inside the extension, or ema
 
 ---
 
-_Pilotwave is an independent product. "Claude" is a trademark of Anthropic, PBC. "Cursor" is a trademark of Anysphere Inc. "ChatGPT" and "GPT" are trademarks of OpenAI, OpCo, LLC. "VS Code" is a trademark of Microsoft Corporation. These names are used here descriptively, not to imply affiliation._
+_AgentHub is an independent product. "Claude" is a trademark of Anthropic, PBC. "Cursor" is a trademark of Anysphere Inc. "ChatGPT" and "GPT" are trademarks of OpenAI, OpCo, LLC. "VS Code" is a trademark of Microsoft Corporation. These names are used here descriptively, not to imply affiliation._

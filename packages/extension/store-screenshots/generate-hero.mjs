@@ -1,15 +1,15 @@
 // Capture the hero screenshot (01-chat-hero.png) using a REAL LinkedIn
 // profile in REAL Edge with the user's logged-in session, then overlay the
-// Pilotwave side panel mockup on the right 360px. Output: out/01-chat-hero.png
+// AgentHub side panel mockup on the right 360px. Output: out/01-chat-hero.png
 // at 1280×800.
 //
 // Setup:
 //   * Closes any running msedge.exe (user-data-dir is locked otherwise).
 //   * Mounts %LOCALAPPDATA%\Microsoft\Edge\User Data via a junction at
-//     %TEMP%\pilotwave-real-edge-userdata so Chromium 136+'s CDP "default
+//     %TEMP%\agenthub-real-edge-userdata so Chromium 136+'s CDP "default
 //     user-data-dir" gate passes.
 //   * Disables all installed Edge extensions for this session so any real
-//     Pilotwave install doesn't open its own side panel and conflict with
+//     AgentHub install doesn't open its own side panel and conflict with
 //     the overlay.
 //
 // Usage (from packages/extension/store-screenshots):
@@ -36,7 +36,7 @@ const REAL_USER_DATA_DIR = path.join(
   'Edge',
   'User Data',
 );
-const JUNCTION = path.join(os.tmpdir(), 'pilotwave-real-edge-userdata');
+const JUNCTION = path.join(os.tmpdir(), 'agenthub-real-edge-userdata');
 const LINKEDIN_URL = 'https://www.linkedin.com/in/irma-semma-64828891';
 
 const findEdgeExe = () => {
@@ -152,7 +152,7 @@ const SIDE_PANEL_HTML = `
 </style>
 <div class="pw-panel">
   <div class="pw-h">
-    <div class="pw-brand">Pilotwave</div>
+    <div class="pw-brand">AgentHub</div>
     <div style="flex:1"></div>
     <div class="pw-dot"></div>
     <div class="pw-status">Connected</div>
@@ -210,7 +210,7 @@ const main = async () => {
       '--disable-features=msEnterpriseSiteList,msEnterpriseSiteListService,EnterpriseSiteListService,InternetExplorerIntegration',
     ],
     // Keep the user's installed extensions out of the way — overlay would
-    // otherwise fight the real Pilotwave side panel if it's installed.
+    // otherwise fight the real AgentHub side panel if it's installed.
     ignoreDefaultArgs: ['--enable-automation'],
     timeout: 60_000,
   });

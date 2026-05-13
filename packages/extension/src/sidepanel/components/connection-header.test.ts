@@ -26,14 +26,14 @@ describe('deriveHeader', () => {
     expect(h.subtitle).toContain('vscode');
   });
 
-  it('no_lock_file shows Start Pilotwave service button', () => {
+  it('no_lock_file shows Start AgentHub service button', () => {
     const h = deriveHeader({ ...baseArgs, diagnosticReason: 'no_lock_file' });
     expect(h.title).toBe("Bridge isn't running");
     expect(h.severity).toBe('error');
     expect(h.buttons.some((b) => b.id === 'start_service')).toBe(true);
   });
 
-  it('bridge_not_started shows Start Pilotwave service button', () => {
+  it('bridge_not_started shows Start AgentHub service button', () => {
     const h = deriveHeader({ ...baseArgs, diagnosticReason: 'bridge_not_started' });
     expect(h.title).toBe("Bridge isn't running");
     expect(h.buttons.some((b) => b.id === 'start_service')).toBe(true);

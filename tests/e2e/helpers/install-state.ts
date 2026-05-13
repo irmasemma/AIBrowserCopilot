@@ -1,5 +1,5 @@
 /**
- * Probes for Pilotwave install state on Windows.
+ * Probes for AgentHub install state on Windows.
  *
  * The product layout is described in CLAUDE.md and packages/installer/src/installers/uninstaller.ts.
  * Helpers here are READ-ONLY snapshots — uninstall + install are driven by the
@@ -12,18 +12,18 @@ import { join } from 'node:path';
 
 export const INSTALL_DIR = join(
   process.env.LOCALAPPDATA ?? join(process.env.USERPROFILE ?? '', 'AppData', 'Local'),
-  'pilotwave',
+  'agenthub',
 );
 
-export const BRIDGE_BIN = 'pilotwave-win-x64.exe';
-export const HELPER_BIN = 'pilotwave-helper-win-x64.exe';
-export const NATIVE_HOST_MANIFEST = 'com.pilotwave.native_host.json';
-export const HELPER_MANIFEST = 'com.pilotwave.native_host_helper.json';
+export const BRIDGE_BIN = 'agenthub-win-x64.exe';
+export const HELPER_BIN = 'agenthub-helper-win-x64.exe';
+export const NATIVE_HOST_MANIFEST = 'com.agenthub.native_host.json';
+export const HELPER_MANIFEST = 'com.agenthub.native_host_helper.json';
 export const LOCK_FILE = 'server.lock';
 
 const HKCU_NM_BASE = 'HKCU\\SOFTWARE\\Google\\Chrome\\NativeMessagingHosts';
 const HKCU_RUN = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
-const RUN_VALUE = 'Pilotwave';
+const RUN_VALUE = 'AgentHub';
 
 export interface InstallSnapshot {
   bridgeBinary: { exists: boolean; path: string; mtimeMs?: number };
@@ -122,8 +122,8 @@ export const snapshotInstallState = (): InstallSnapshot => {
       token: lockData?.token,
     },
     registry: {
-      nativeHost: regHasValue(`${HKCU_NM_BASE}\\com.pilotwave.native_host`),
-      helper: regHasValue(`${HKCU_NM_BASE}\\com.pilotwave.native_host_helper`),
+      nativeHost: regHasValue(`${HKCU_NM_BASE}\\com.agenthub.native_host`),
+      helper: regHasValue(`${HKCU_NM_BASE}\\com.agenthub.native_host_helper`),
       autostart: autostart !== null,
       autostartCommand: autostart?.match(new RegExp(`${RUN_VALUE}\\s+REG_SZ\\s+(.+)`))?.[1]?.trim(),
     },

@@ -3,12 +3,12 @@ import type { OsType, ArchType } from './platform.js';
 export const GITHUB_REPO = 'irmasemma/AIBrowserCopilot';
 export const GITHUB_RELEASES_BASE = `https://github.com/${GITHUB_REPO}/releases/latest/download`;
 
-export const NATIVE_HOST_NAME = 'com.pilotwave.native_host';
-export const NATIVE_HOST_DESCRIPTION = 'Pilotwave Native Messaging Host';
-export const HELPER_HOST_NAME = 'com.pilotwave.native_host_helper';
-export const HELPER_DESCRIPTION = 'Pilotwave Discovery Helper';
-export const BINARY_PREFIX = 'pilotwave';
-export const HELPER_PREFIX = 'pilotwave-helper';
+export const NATIVE_HOST_NAME = 'com.agenthub.native_host';
+export const NATIVE_HOST_DESCRIPTION = 'AgentHub Native Messaging Host';
+export const HELPER_HOST_NAME = 'com.agenthub.native_host_helper';
+export const HELPER_DESCRIPTION = 'AgentHub Discovery Helper';
+export const BINARY_PREFIX = 'agenthub';
+export const HELPER_PREFIX = 'agenthub-helper';
 // No default — must be provided via --extension-id flag
 export const DEFAULT_EXTENSION_ID = '';
 

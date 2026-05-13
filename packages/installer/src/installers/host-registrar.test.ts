@@ -6,7 +6,7 @@ import { generateManifest, getManifestDir, getManifestPath, registerHost } from 
 import { detectPlatform } from '../shared/platform.js';
 import { NATIVE_HOST_NAME, DEFAULT_EXTENSION_ID } from '../shared/constants.js';
 
-const TEST_DIR = join(tmpdir(), `pilotwave-reg-test-${Date.now()}`);
+const TEST_DIR = join(tmpdir(), `agenthub-reg-test-${Date.now()}`);
 
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });
@@ -20,7 +20,7 @@ describe('generateManifest', () => {
   it('generates correct manifest with extension ID', () => {
     const manifest = generateManifest('/path/to/binary', 'testextensionid');
     expect(manifest.name).toBe(NATIVE_HOST_NAME);
-    expect(manifest.description).toBe('Pilotwave Native Messaging Host');
+    expect(manifest.description).toBe('AgentHub Native Messaging Host');
     expect(manifest.type).toBe('stdio');
     expect(manifest.allowed_origins).toEqual(['chrome-extension://testextensionid/']);
   });
@@ -37,7 +37,7 @@ describe('generateManifest', () => {
 
   it('uses correct host name', () => {
     const manifest = generateManifest('/path/to/binary', 'testid');
-    expect(manifest.name).toBe('com.pilotwave.native_host');
+    expect(manifest.name).toBe('com.agenthub.native_host');
   });
 
   it('throws when extension ID is empty', () => {
@@ -53,7 +53,7 @@ describe('getManifestDir', () => {
   it('returns Windows install directory', () => {
     const platform = detectPlatform('win32', 'x64', 'C:\\Users\\test');
     const dir = getManifestDir(platform);
-    expect(dir).toContain('pilotwave');
+    expect(dir).toContain('agenthub');
   });
 
   it('returns macOS Chrome NativeMessagingHosts directory', () => {
@@ -78,20 +78,20 @@ describe('getManifestPath', () => {
     const platform = detectPlatform('linux', 'x64', '/home/test');
     const path = getManifestPath(platform);
     expect(path).toContain('NativeMessagingHosts');
-    expect(path).toContain('com.pilotwave.native_host.json');
+    expect(path).toContain('com.agenthub.native_host.json');
   });
 
   it('returns macOS manifest path', () => {
     const platform = detectPlatform('darwin', 'arm64', '/Users/test');
     const path = getManifestPath(platform);
     expect(path).toContain('NativeMessagingHosts');
-    expect(path).toContain('com.pilotwave.native_host.json');
+    expect(path).toContain('com.agenthub.native_host.json');
   });
 
   it('returns Windows manifest path', () => {
     const platform = detectPlatform('win32', 'x64', 'C:\\Users\\test');
     const path = getManifestPath(platform);
-    expect(path).toContain('com.pilotwave.native_host.json');
+    expect(path).toContain('com.agenthub.native_host.json');
   });
 });
 
@@ -163,7 +163,7 @@ describe('registerHost', () => {
     mkdirSync(manifestDir, { recursive: true });
 
     // Create a directory where the manifest file should be — writeFileSync will fail on a directory
-    const manifestFilePath = join(manifestDir, 'com.pilotwave.native_host.json');
+    const manifestFilePath = join(manifestDir, 'com.agenthub.native_host.json');
     mkdirSync(manifestFilePath, { recursive: true });
 
     const result = await registerHost(platform, binaryPath, TEST_EXT_ID);

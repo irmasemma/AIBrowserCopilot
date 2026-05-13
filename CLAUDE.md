@@ -1,4 +1,4 @@
-# Pilotwave - Development Rules
+# AgentHub - Development Rules
 
 ## Project Structure
 
@@ -56,7 +56,7 @@ When debugging connection issues, always run this full chain check:
 
 ```bash
 # 1. Check lock file
-cat "$LOCALAPPDATA/pilotwave/server.lock"
+cat "$LOCALAPPDATA/agenthub/server.lock"
 
 # 2. Check what's actually listening
 netstat -ano | findstr "7483"
@@ -71,21 +71,21 @@ node /tmp/test-helper.js  # (create test script that sends read_lock_file via na
 # Connect to ws://127.0.0.1:<PORT>?token=<TOKEN> and verify server_info arrives
 
 # 6. Check registry entries
-reg query "HKCU\SOFTWARE\Google\Chrome\NativeMessagingHosts\com.pilotwave.native_host_helper"
-reg query "HKCU\SOFTWARE\Google\Chrome\NativeMessagingHosts\com.pilotwave.native_host"
+reg query "HKCU\SOFTWARE\Google\Chrome\NativeMessagingHosts\com.agenthub.native_host_helper"
+reg query "HKCU\SOFTWARE\Google\Chrome\NativeMessagingHosts\com.agenthub.native_host"
 
 # 7. Check native messaging manifests have correct extension ID in allowed_origins
-cat "$LOCALAPPDATA/pilotwave/com.pilotwave.native_host_helper.json"
-cat "$LOCALAPPDATA/pilotwave/com.pilotwave.native_host.json"
+cat "$LOCALAPPDATA/agenthub/com.agenthub.native_host_helper.json"
+cat "$LOCALAPPDATA/agenthub/com.agenthub.native_host.json"
 ```
 
 ## Key Architecture Details
 
 - Native host generates a random auth **token** on startup, writes it to `server.lock`
-- Extension uses `com.pilotwave.native_host_helper` (native messaging) to read the lock file and discover port + token
+- Extension uses `com.agenthub.native_host_helper` (native messaging) to read the lock file and discover port + token
 - Extension connects via WebSocket with `?token=xxx` query parameter
 - Without the token, connections are rejected with code 4001 before `server_info` is sent
-- Lock file location: `%LOCALAPPDATA%/pilotwave/server.lock`
+- Lock file location: `%LOCALAPPDATA%/agenthub/server.lock`
 - Extension ID (dev, Profile 1): `ehchmchlmggdigicfjfmlgcbhdcdcmll`
 
 ## Common Pitfalls

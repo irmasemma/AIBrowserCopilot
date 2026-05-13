@@ -1,9 +1,9 @@
 /**
  * Launch the user's real browser (Chrome by default, or Edge with
- * PILOTWAVE_TEST_BROWSER=edge) — real profile, real credentials — and locate the
- * Pilotwave extension's service worker.
+ * AGENTHUB_TEST_BROWSER=edge) — real profile, real credentials — and locate the
+ * AgentHub extension's service worker.
  *
- * Real-profile launch is gated by PILOTWAVE_TEST_KILL_CHROME=1 because attaching
+ * Real-profile launch is gated by AGENTHUB_TEST_KILL_CHROME=1 because attaching
  * to a profile that's already in use requires killing the user's running
  * browser (Chrome and Edge both hold an exclusive lock on their user-data-dir).
  * The gate keeps a casual `playwright test` from stomping on the user's session.
@@ -18,7 +18,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 type BrowserChoice = 'chrome' | 'edge';
 
 const BROWSER: BrowserChoice =
-  (process.env.PILOTWAVE_TEST_BROWSER?.toLowerCase() as BrowserChoice) === 'edge' ? 'edge' : 'chrome';
+  (process.env.AGENTHUB_TEST_BROWSER?.toLowerCase() as BrowserChoice) === 'edge' ? 'edge' : 'chrome';
 
 interface BrowserSpec {
   /** Process image name on Windows. */
@@ -42,7 +42,7 @@ interface BrowserSpec {
 const CHROME_SPEC: BrowserSpec = {
   imageName: 'chrome.exe',
   exeCandidates: [
-    process.env.PILOTWAVE_TEST_CHROME_EXE ?? '',
+    process.env.AGENTHUB_TEST_CHROME_EXE ?? '',
     'C:\\Program Files\\Google\\Chrome Dev\\Application\\chrome.exe',
     'C:\\Program Files\\Google\\Chrome Beta\\Application\\chrome.exe',
     path.join(process.env.LOCALAPPDATA ?? '', 'Google\\Chrome SxS\\Application\\chrome.exe'),
@@ -62,7 +62,7 @@ const CHROME_SPEC: BrowserSpec = {
 const EDGE_SPEC: BrowserSpec = {
   imageName: 'msedge.exe',
   exeCandidates: [
-    process.env.PILOTWAVE_TEST_EDGE_EXE ?? '',
+    process.env.AGENTHUB_TEST_EDGE_EXE ?? '',
     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
     'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
   ].filter((p) => p.length > 0),
@@ -76,10 +76,10 @@ const EDGE_SPEC: BrowserSpec = {
 const SPEC: BrowserSpec = BROWSER === 'edge' ? EDGE_SPEC : CHROME_SPEC;
 
 export const EXPECTED_EXTENSION_ID =
-  process.env.PILOTWAVE_TEST_EXPECTED_EXTENSION_ID ?? 'ehchmchlmggdigicfjfmlgcbhdcdcmll';
+  process.env.AGENTHUB_TEST_EXPECTED_EXTENSION_ID ?? 'ehchmchlmggdigicfjfmlgcbhdcdcmll';
 
-export const USER_DATA_DIR = process.env.PILOTWAVE_TEST_USER_DATA_DIR ?? SPEC.defaultUserDataDir;
-export const PROFILE_DIR = process.env.PILOTWAVE_TEST_PROFILE_DIR ?? SPEC.defaultProfile;
+export const USER_DATA_DIR = process.env.AGENTHUB_TEST_USER_DATA_DIR ?? SPEC.defaultUserDataDir;
+export const PROFILE_DIR = process.env.AGENTHUB_TEST_PROFILE_DIR ?? SPEC.defaultProfile;
 
 export const findChromeExe = (): string | null => {
   for (const p of SPEC.exeCandidates) if (existsSync(p)) return p;
@@ -326,7 +326,7 @@ const findServiceWorker = async (
       `Extension IDs derived: ${ids.join(', ') || '(none)'}\n` +
       `${wakeReport}\n` +
       `If the unpacked extension path produces a different ID on this machine, set ` +
-      `PILOTWAVE_TEST_EXPECTED_EXTENSION_ID and rerun the installer with that ID in --extension-id.`,
+      `AGENTHUB_TEST_EXPECTED_EXTENSION_ID and rerun the installer with that ID in --extension-id.`,
   );
 };
 
@@ -368,11 +368,11 @@ const bootstrapDeveloperMode = async (chromeExe: string, userDataDir: string): P
 };
 
 export const launchRealChrome = async (opts: LaunchOpts = {}): Promise<LaunchedChrome> => {
-  if (process.env.PILOTWAVE_TEST_KILL_CHROME !== '1') {
+  if (process.env.AGENTHUB_TEST_KILL_CHROME !== '1') {
     throw new Error(
-      'Refusing to launch — PILOTWAVE_TEST_KILL_CHROME is not set to "1".\n' +
+      'Refusing to launch — AGENTHUB_TEST_KILL_CHROME is not set to "1".\n' +
         'Running this test will kill your real Chrome session. To opt in:\n' +
-        '  PILOTWAVE_TEST_KILL_CHROME=1 npx playwright test tests/e2e/install-and-connect.spec.ts',
+        '  AGENTHUB_TEST_KILL_CHROME=1 npx playwright test tests/e2e/install-and-connect.spec.ts',
     );
   }
 
@@ -380,7 +380,7 @@ export const launchRealChrome = async (opts: LaunchOpts = {}): Promise<LaunchedC
   if (!chromeExe) {
     throw new Error(
       `${SPEC.imageName} not found in standard install paths. ` +
-        `Set ${BROWSER === 'edge' ? 'PILOTWAVE_TEST_EDGE_EXE' : 'PILOTWAVE_TEST_CHROME_EXE'}.`,
+        `Set ${BROWSER === 'edge' ? 'AGENTHUB_TEST_EDGE_EXE' : 'AGENTHUB_TEST_CHROME_EXE'}.`,
     );
   }
   if (opts.extensionDist && SPEC.isStableLoadExtensionBlocked(chromeExe)) {
@@ -389,8 +389,8 @@ export const launchRealChrome = async (opts: LaunchOpts = {}): Promise<LaunchedC
         'Google Chrome stable silently ignores --load-extension since channel 138+, so the\n' +
         'unpacked extension will never load and this test will hang on the side-panel\n' +
         'connection step. Install Chrome Dev (https://www.google.com/chrome/dev/), set\n' +
-        'PILOTWAVE_TEST_CHROME_EXE to a Chromium / Canary / Beta binary that still honours\n' +
-        '--load-extension, or run the test against Edge by setting PILOTWAVE_TEST_BROWSER=edge.\n' +
+        'AGENTHUB_TEST_CHROME_EXE to a Chromium / Canary / Beta binary that still honours\n' +
+        '--load-extension, or run the test against Edge by setting AGENTHUB_TEST_BROWSER=edge.\n' +
         'See docs/test-findings.md (#4) for context.',
     );
   }
@@ -425,11 +425,17 @@ export const launchRealChrome = async (opts: LaunchOpts = {}): Promise<LaunchedC
 
 export const closeChrome = async (context: BrowserContext | null | undefined): Promise<void> => {
   if (!context) return;
+  // context.close() can hang when the SW has active timers (e.g. the
+  // fast-poll watchdog) and Playwright waits for graceful shutdown. Cap at
+  // 5 s, then fall through to killAllChrome which force-terminates the
+  // browser tree.
   try {
-    await context.close();
+    await Promise.race([
+      context.close(),
+      new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
+    ]);
   } catch {
     // best-effort
   }
-  // Belt and braces — context.close() doesn't always reap the chrome.exe tree.
   killAllChrome();
 };

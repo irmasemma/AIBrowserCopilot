@@ -11,7 +11,7 @@ interface ActionButton {
   variant: 'primary' | 'secondary';
 }
 
-const INSTALL_COMMAND = 'npx pilotwave-setup --update';
+const INSTALL_COMMAND = 'npx agenthub-setup --update';
 
 /**
  * Pure mapping from connection-context shape to a UI title + subtitle + buttons.
@@ -93,11 +93,11 @@ export function deriveHeader(args: {
     return {
       title: "Bridge isn't running",
       subtitle: diagnosticReason === 'no_lock_file'
-        ? 'No Pilotwave service was found. Start it to enable browser tools.'
+        ? 'No AgentHub service was found. Start it to enable browser tools.'
         : 'A bridge is registered but not currently running.',
       severity: 'error',
       buttons: [
-        { id: 'start_service', label: 'Start Pilotwave service', variant: 'primary' },
+        { id: 'start_service', label: 'Start AgentHub service', variant: 'primary' },
         { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
       ],
       autoOpenDiagnostics: reconnectingTooLong,
@@ -171,7 +171,7 @@ export function deriveHeader(args: {
   if (state === 'connecting') {
     return {
       title: 'Looking for bridge…',
-      subtitle: 'Finding the running Pilotwave service.',
+      subtitle: 'Finding the running AgentHub service.',
       severity: 'warn',
       buttons: [],
       autoOpenDiagnostics: false,
@@ -180,10 +180,10 @@ export function deriveHeader(args: {
 
   return {
     title: 'Not connected',
-    subtitle: 'Start the Pilotwave service to enable browser tools.',
+    subtitle: 'Start the AgentHub service to enable browser tools.',
     severity: 'error',
     buttons: [
-      { id: 'start_service', label: 'Start Pilotwave service', variant: 'primary' },
+      { id: 'start_service', label: 'Start AgentHub service', variant: 'primary' },
       { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
     ],
     autoOpenDiagnostics: false,
@@ -246,7 +246,7 @@ export const ConnectionHeader: FunctionalComponent = () => {
       switch (button.id) {
         case 'start_service':
           await chrome.runtime.sendMessage({ type: 'start_service', userInitiated: true }).catch(() => null);
-          setFlash('Starting Pilotwave service…');
+          setFlash('Starting AgentHub service…');
           break;
         case 'restart_service':
           await chrome.runtime.sendMessage({ type: 'restart_service', userInitiated: true }).catch(() => null);
@@ -299,7 +299,7 @@ export const ConnectionHeader: FunctionalComponent = () => {
           </span>
           <span class={`text-[10px] text-neutral-400 transition-transform ${showDiag ? 'rotate-180' : ''}`} aria-hidden="true">{'\u25BE'}</span>
         </button>
-        <span class="text-base font-semibold text-neutral-900">Pilotwave</span>
+        <span class="text-base font-semibold text-neutral-900">AgentHub</span>
         <span class="w-4" aria-hidden="true" />
       </div>
       {header.subtitle && (

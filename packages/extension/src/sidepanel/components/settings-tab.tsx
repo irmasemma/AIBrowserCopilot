@@ -192,7 +192,7 @@ export const SettingsTab: FunctionalComponent = () => {
   );
 };
 
-// Self-heal card for Claude Code MCP registration. Detects when Pilotwave has been
+// Self-heal card for Claude Code MCP registration. Detects when AgentHub has been
 // dropped from `~/.claude.json` (which happens when `claude mcp` commands run, manual
 // edits, or auto-pruning silently rewrite the file) and offers a one-click re-register.
 const ClaudeCodeRegistrationCard: FunctionalComponent = () => {
@@ -247,7 +247,7 @@ const ClaudeCodeRegistrationCard: FunctionalComponent = () => {
     return (
       <div class="mt-3 p-2 rounded border border-amber-200 bg-amber-50">
         <p class="text-xs font-medium text-amber-900">
-          Pilotwave is registered with Claude Code, but at <em>project scope</em>.
+          AgentHub is registered with Claude Code, but at <em>project scope</em>.
         </p>
         <p class="text-xs text-amber-800 mt-1 mb-2">
           Project-scope entries are easy to lose — `claude mcp` commands and config
@@ -273,7 +273,7 @@ const ClaudeCodeRegistrationCard: FunctionalComponent = () => {
     return (
       <div class="mt-3 p-2 rounded border-l-4 border-amber-300 bg-amber-50">
         <p class="text-xs font-medium text-amber-900">
-          Pilotwave is not currently registered with Claude Code.
+          AgentHub is not currently registered with Claude Code.
         </p>
         <p class="text-xs text-amber-800 mt-1 mb-2">
           This can happen when `claude mcp` commands rewrite ~/.claude.json and drop

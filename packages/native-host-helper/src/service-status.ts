@@ -67,11 +67,11 @@ export type ServiceReason =
 export function getInstallDir(): string {
   switch (platform()) {
     case 'win32':
-      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'pilotwave');
+      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'agenthub');
     case 'darwin':
-      return join(homedir(), 'Library', 'Application Support', 'pilotwave');
+      return join(homedir(), 'Library', 'Application Support', 'agenthub');
     default:
-      return join(homedir(), '.local', 'share', 'pilotwave');
+      return join(homedir(), '.local', 'share', 'agenthub');
   }
 }
 
@@ -83,11 +83,11 @@ export function getBinaryPath(): string {
   const dir = getInstallDir();
   switch (platform()) {
     case 'win32':
-      return join(dir, 'pilotwave-win-x64.exe');
+      return join(dir, 'agenthub-win-x64.exe');
     case 'darwin':
-      return join(dir, process.arch === 'arm64' ? 'pilotwave-macos-arm64' : 'pilotwave-macos-x64');
+      return join(dir, process.arch === 'arm64' ? 'agenthub-macos-arm64' : 'agenthub-macos-x64');
     default:
-      return join(dir, process.arch === 'arm64' ? 'pilotwave-linux-arm64' : 'pilotwave-linux-x64');
+      return join(dir, process.arch === 'arm64' ? 'agenthub-linux-arm64' : 'agenthub-linux-x64');
   }
 }
 

@@ -21,7 +21,7 @@ This document describes how multiple MCP clients (Claude Desktop, Claude Code, V
 
 ```
                     ┌─────────────────────────────────────────────────────┐
-                    │           pilotwave-win-x64.exe            │
+                    │           agenthub-win-x64.exe            │
                     │      (single binary, two roles, port 7483)          │
                     │                                                     │
  stdio MCP ───────► │  PRIMARY (first spawn)                              │
@@ -72,8 +72,8 @@ Because both modes are produced by the **same** binary, the MCP host (`mcp.json`
 // .vscode/mcp.json
 {
   "servers": {
-    "pilotwave": {
-      "command": "${env:LOCALAPPDATA}/pilotwave/pilotwave-win-x64.exe",
+    "agenthub": {
+      "command": "${env:LOCALAPPDATA}/agenthub/agenthub-win-x64.exe",
       "args": []
     }
   }
@@ -191,7 +191,7 @@ Run from `packages/native-host`:
 
 ```bash
 npm run build && npm run compile:win
-# copy bin\pilotwave-win-x64.exe to %LOCALAPPDATA%\pilotwave\
+# copy bin\agenthub-win-x64.exe to %LOCALAPPDATA%\agenthub\
 ```
 
 End-to-end test (simulates how MCP clients spawn the binary):
@@ -199,7 +199,7 @@ End-to-end test (simulates how MCP clients spawn the binary):
 ```bash
 node -e "
 const cp = require('child_process');
-const c = cp.spawn(process.env.LOCALAPPDATA + '/pilotwave/pilotwave-win-x64.exe', [], { stdio: ['pipe','pipe','pipe'] });
+const c = cp.spawn(process.env.LOCALAPPDATA + '/agenthub/agenthub-win-x64.exe', [], { stdio: ['pipe','pipe','pipe'] });
 let buf = Buffer.alloc(0), cl = -1;
 c.stdout.on('data', chunk => { /* parse NDJSON lines, send initialize then tools/call list_tabs */ });
 "

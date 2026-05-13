@@ -1,7 +1,7 @@
 /**
  * Drive the LOCAL installer build (packages/installer/dist/index.js) for
  * install / uninstall flows. We never call the published `npx
- * pilotwave-setup` here — it's stale at 0.1.2 and we're verifying
+ * agenthub-setup` here — it's stale at 0.1.2 and we're verifying
  * the working tree.
  */
 import { spawnSync } from 'node:child_process';

@@ -19,11 +19,11 @@ export type InstanceCheck = 'none' | 'alive' | 'orphaned';
 function getLockDir(): string {
   switch (platform()) {
     case 'win32':
-      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'pilotwave');
+      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'agenthub');
     case 'darwin':
-      return join(homedir(), 'Library', 'Application Support', 'pilotwave');
+      return join(homedir(), 'Library', 'Application Support', 'agenthub');
     default:
-      return join(homedir(), '.local', 'share', 'pilotwave');
+      return join(homedir(), '.local', 'share', 'agenthub');
   }
 }
 
@@ -33,7 +33,7 @@ export function getLockFilePath(): string {
 
 export function getIpcPath(): string {
   if (platform() === 'win32') {
-    return `\\\\.\\pipe\\pilotwave-${process.pid}`;
+    return `\\\\.\\pipe\\agenthub-${process.pid}`;
   }
   return join(getLockDir(), `service-${process.pid}.sock`);
 }

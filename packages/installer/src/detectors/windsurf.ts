@@ -53,7 +53,7 @@ export const windsurfDetector: ToolDetector = {
     return mergeConfig(settingsPath, {
       mcp: {
         servers: {
-          'pilotwave': {
+          'agenthub': {
             command: binaryPath,
             args: [],
           },
@@ -63,6 +63,6 @@ export const windsurfDetector: ToolDetector = {
   },
 
   async verifyConfig(platform: PlatformInfo): Promise<boolean> {
-    return verifyEntryAtPath(getSettingsPath(platform), ['mcp', 'servers', 'pilotwave']);
+    return verifyEntryAtPath(getSettingsPath(platform), ['mcp', 'servers', 'agenthub']);
   },
 };

@@ -11,7 +11,7 @@
 import { execFileSync } from 'node:child_process';
 import type { PlatformInfo } from '../shared/platform.js';
 
-export const RUN_KEY_NAME = 'Pilotwave';
+export const RUN_KEY_NAME = 'AgentHub';
 export const HKCU_RUN_PATH = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 
 export type AutostartMethod = 'hkcu_run' | 'launchd' | 'systemd_user' | 'none';

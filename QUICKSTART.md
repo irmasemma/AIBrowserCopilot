@@ -1,6 +1,6 @@
 # Developer Quick Start
 
-Get Pilotwave running in 3 steps.
+Get AgentHub running in 3 steps.
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@ Get Pilotwave running in 3 steps.
 ## Step 1: Build and load the extension
 
 ```bash
-cd C:\Dev\1M\pilotwave
+cd C:\Dev\1M\agenthub
 npm install
 cd packages/native-host && npm run build
 cd ../extension && npx wxt build
@@ -21,7 +21,7 @@ Then load it in Chrome:
 1. Go to `chrome://extensions`
 2. Enable "Developer mode" (top right toggle)
 3. Click "Load unpacked"
-4. Select: `C:\Dev\1M\pilotwave\packages\extension\dist\chrome-mv3`
+4. Select: `C:\Dev\1M\agenthub\packages\extension\dist\chrome-mv3`
 
 ## Step 2: Configure VS Code
 
@@ -30,9 +30,9 @@ The file `.vscode/mcp.json` is already in the project with this content:
 ```json
 {
   "mcpServers": {
-    "pilotwave": {
+    "agenthub": {
       "command": "node",
-      "args": ["C:/Dev/1M/pilotwave/packages/native-host/dist/index.js"]
+      "args": ["C:/Dev/1M/agenthub/packages/native-host/dist/index.js"]
     }
   }
 }

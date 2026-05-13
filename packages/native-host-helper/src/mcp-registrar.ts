@@ -1,4 +1,4 @@
-// Self-heal: check whether `pilotwave` is registered in Claude Code's config,
+// Self-heal: check whether `agenthub` is registered in Claude Code's config,
 // and repair the registration if it's missing. Mirrors the installer's writeConfig
 // logic, but kept tiny because it ships inside the native messaging helper bundle.
 //
@@ -41,11 +41,11 @@ const getClaudeCodeConfigPath = (): string => join(homedir(), '.claude.json');
 const getInstallDir = (): string => {
   switch (osPlatform()) {
     case 'win32':
-      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'pilotwave');
+      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'agenthub');
     case 'darwin':
-      return join(homedir(), 'Library', 'Application Support', 'pilotwave');
+      return join(homedir(), 'Library', 'Application Support', 'agenthub');
     default:
-      return join(homedir(), '.local', 'share', 'pilotwave');
+      return join(homedir(), '.local', 'share', 'agenthub');
   }
 };
 
@@ -53,11 +53,11 @@ const getNativeHostBinaryName = (): string => {
   const arch = osArch();
   switch (osPlatform()) {
     case 'win32':
-      return `pilotwave-win-${arch === 'arm64' ? 'arm64' : 'x64'}.exe`;
+      return `agenthub-win-${arch === 'arm64' ? 'arm64' : 'x64'}.exe`;
     case 'darwin':
-      return `pilotwave-macos-${arch === 'arm64' ? 'arm64' : 'x64'}`;
+      return `agenthub-macos-${arch === 'arm64' ? 'arm64' : 'x64'}`;
     default:
-      return `pilotwave-linux-${arch === 'arm64' ? 'arm64' : 'x64'}`;
+      return `agenthub-linux-${arch === 'arm64' ? 'arm64' : 'x64'}`;
   }
 };
 
@@ -77,7 +77,7 @@ const detectIndent = (content: string): string => {
 
 const hasEntry = (mcpServers: unknown): boolean => {
   if (!isPlainObject(mcpServers)) return false;
-  const entry = (mcpServers as Record<string, MaybeMcpEntry>)['pilotwave'];
+  const entry = (mcpServers as Record<string, MaybeMcpEntry>)['agenthub'];
   return isPlainObject(entry) && typeof (entry as MaybeMcpEntry).command === 'string';
 };
 
@@ -198,7 +198,7 @@ export const repairClaudeCodeRegistration = (): RepairMcpResult => {
   const mcpServers = isPlainObject(existing.mcpServers)
     ? { ...(existing.mcpServers as Record<string, unknown>) }
     : {};
-  mcpServers['pilotwave'] = newEntry;
+  mcpServers['agenthub'] = newEntry;
   const merged = { ...existing, mcpServers };
 
   let output = JSON.stringify(merged, null, indentStr);

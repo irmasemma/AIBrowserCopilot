@@ -5,12 +5,12 @@ import { tmpdir } from 'node:os';
 import { checkClaudeCodeRegistration, repairClaudeCodeRegistration } from './mcp-registrar.js';
 
 const fakeHome = join(tmpdir(), `mcp-registrar-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-const fakeInstallDir = join(fakeHome, 'AppData', 'Local', 'pilotwave');
+const fakeInstallDir = join(fakeHome, 'AppData', 'Local', 'agenthub');
 const fakeBinaryName = process.platform === 'win32'
-  ? `pilotwave-win-${process.arch === 'arm64' ? 'arm64' : 'x64'}.exe`
+  ? `agenthub-win-${process.arch === 'arm64' ? 'arm64' : 'x64'}.exe`
   : process.platform === 'darwin'
-    ? `pilotwave-macos-${process.arch === 'arm64' ? 'arm64' : 'x64'}`
-    : `pilotwave-linux-${process.arch === 'arm64' ? 'arm64' : 'x64'}`;
+    ? `agenthub-macos-${process.arch === 'arm64' ? 'arm64' : 'x64'}`
+    : `agenthub-linux-${process.arch === 'arm64' ? 'arm64' : 'x64'}`;
 const fakeBinaryPath = join(fakeInstallDir, fakeBinaryName);
 const configPath = join(fakeHome, '.claude.json');
 
@@ -55,7 +55,7 @@ describe('mcp-registrar', () => {
   it('detects user-scope registration', async () => {
     writeFileSync(
       configPath,
-      JSON.stringify({ mcpServers: { 'pilotwave': { command: '/path/to/exe', args: [] } } }),
+      JSON.stringify({ mcpServers: { 'agenthub': { command: '/path/to/exe', args: [] } } }),
     );
     const { checkClaudeCodeRegistration: check } = await import('./mcp-registrar.js?fresh2');
     const result = check();
@@ -70,7 +70,7 @@ describe('mcp-registrar', () => {
         mcpServers: {},
         projects: {
           '/some/project': {
-            mcpServers: { 'pilotwave': { command: '/path/to/exe', args: [] } },
+            mcpServers: { 'agenthub': { command: '/path/to/exe', args: [] } },
           },
         },
       }),
@@ -104,8 +104,8 @@ describe('mcp-registrar', () => {
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
     expect(written.otherKey).toBe('preserved'); // sibling keys untouched
     expect(written.mcpServers.existing).toBeDefined(); // sibling mcp entries untouched
-    expect(written.mcpServers['pilotwave'].command).toBe(fakeBinaryPath);
-    expect(written.mcpServers['pilotwave'].args).toEqual([]);
+    expect(written.mcpServers['agenthub'].command).toBe(fakeBinaryPath);
+    expect(written.mcpServers['agenthub'].args).toEqual([]);
   });
 
   it('repair refuses to overwrite malformed JSON', async () => {
@@ -124,6 +124,6 @@ describe('mcp-registrar', () => {
     expect(result.success).toBe(true);
     expect(existsSync(configPath)).toBe(true);
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(written.mcpServers['pilotwave'].command).toBe(fakeBinaryPath);
+    expect(written.mcpServers['agenthub'].command).toBe(fakeBinaryPath);
   });
 });

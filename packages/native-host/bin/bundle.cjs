@@ -7932,11 +7932,11 @@ var import_node_os = require("node:os");
 function getLockDir() {
   switch ((0, import_node_os.platform)()) {
     case "win32":
-      return (0, import_node_path.join)(process.env.LOCALAPPDATA ?? (0, import_node_path.join)((0, import_node_os.homedir)(), "AppData", "Local"), "pilotwave");
+      return (0, import_node_path.join)(process.env.LOCALAPPDATA ?? (0, import_node_path.join)((0, import_node_os.homedir)(), "AppData", "Local"), "agenthub");
     case "darwin":
-      return (0, import_node_path.join)((0, import_node_os.homedir)(), "Library", "Application Support", "pilotwave");
+      return (0, import_node_path.join)((0, import_node_os.homedir)(), "Library", "Application Support", "agenthub");
     default:
-      return (0, import_node_path.join)((0, import_node_os.homedir)(), ".local", "share", "pilotwave");
+      return (0, import_node_path.join)((0, import_node_os.homedir)(), ".local", "share", "agenthub");
   }
 }
 function getLockFilePath() {
@@ -8245,7 +8245,7 @@ function handleMcpMessage(clientId, raw, reply) {
         result: {
           protocolVersion: "2024-11-05",
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: "pilotwave", version: VERSION }
+          serverInfo: { name: "agenthub", version: VERSION }
         }
       });
       return;
@@ -8337,11 +8337,11 @@ function zodToJsonSchema(z) {
 function getBridgeLogPath() {
   switch ((0, import_node_os2.platform)()) {
     case "win32":
-      return (0, import_node_path2.join)(process.env.LOCALAPPDATA ?? (0, import_node_path2.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "pilotwave", "bridge.log");
+      return (0, import_node_path2.join)(process.env.LOCALAPPDATA ?? (0, import_node_path2.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "agenthub", "bridge.log");
     case "darwin":
-      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "pilotwave", "bridge.log");
+      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "agenthub", "bridge.log");
     default:
-      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".local", "share", "pilotwave", "bridge.log");
+      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".local", "share", "agenthub", "bridge.log");
   }
 }
 function appendBridgeLog(line) {

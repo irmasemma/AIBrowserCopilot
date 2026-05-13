@@ -75,7 +75,7 @@ test('1. Extension loads successfully', async () => {
   const page = await context.newPage();
   await page.goto(`chrome-extension://${extensionId}/manifest.json`);
   const text = await page.textContent('body');
-  expect(text).toContain('Pilotwave');
+  expect(text).toContain('AgentHub');
   console.log('Extension is accessible');
   await page.close();
 });
@@ -112,10 +112,10 @@ test('3. Side panel renders correctly (setup wizard or main view)', async () => 
   console.log('Side panel body length:', body?.length);
   expect(body?.length).toBeGreaterThan(10);
 
-  // Check for header with "Pilotwave" text
-  const hasPilotwave = await sidePanelPage.getByText('Pilotwave').count();
-  console.log('Has Pilotwave header:', hasPilotwave > 0);
-  expect(hasPilotwave).toBeGreaterThan(0);
+  // Check for header with "AgentHub" text
+  const hasAgentHub = await sidePanelPage.getByText('AgentHub').count();
+  console.log('Has AgentHub header:', hasAgentHub > 0);
+  expect(hasAgentHub).toBeGreaterThan(0);
 
   // When not connected, side panel shows Setup Wizard
   // When connected, it shows Tools + Activity
@@ -315,7 +315,7 @@ test('8. Manifest is valid and has correct permissions', async () => {
   console.log('Version:', manifest.version);
   console.log('Permissions:', manifest.permissions);
 
-  expect(manifest.name).toBe('Pilotwave');
+  expect(manifest.name).toBe('AgentHub');
   expect(manifest.manifest_version).toBe(3);
   expect(manifest.permissions).toContain('activeTab');
   expect(manifest.permissions).toContain('tabs');

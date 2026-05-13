@@ -11,8 +11,8 @@
  * Keys are read from env at runtime; never committed. Test skips itself with a
  * clear message when keys are missing.
  *
- *   PILOTWAVE_TEST_OPENAI_KEY=sk-...
- *   PILOTWAVE_TEST_ANTHROPIC_KEY=sk-ant-api03-...
+ *   AGENTHUB_TEST_OPENAI_KEY=sk-...
+ *   AGENTHUB_TEST_ANTHROPIC_KEY=sk-ant-api03-...
  */
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import path from 'node:path';
@@ -72,8 +72,8 @@ interface ProviderRun {
 
 const collectProviderRuns = (): ProviderRun[] => {
   const runs: ProviderRun[] = [];
-  const openai = process.env.PILOTWAVE_TEST_OPENAI_KEY;
-  const anthropic = process.env.PILOTWAVE_TEST_ANTHROPIC_KEY;
+  const openai = process.env.AGENTHUB_TEST_OPENAI_KEY;
+  const anthropic = process.env.AGENTHUB_TEST_ANTHROPIC_KEY;
   if (openai) runs.push({ provider: 'openai', apiKey: openai });
   if (anthropic) runs.push({ provider: 'anthropic', apiKey: anthropic });
   return runs;
@@ -188,7 +188,7 @@ test.describe('install-and-chat', () => {
     if (runs.length === 0) {
       test.skip(
         true,
-        'No provider keys in env. Set PILOTWAVE_TEST_OPENAI_KEY and/or PILOTWAVE_TEST_ANTHROPIC_KEY to enable.',
+        'No provider keys in env. Set AGENTHUB_TEST_OPENAI_KEY and/or AGENTHUB_TEST_ANTHROPIC_KEY to enable.',
       );
     }
   });

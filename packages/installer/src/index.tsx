@@ -21,7 +21,7 @@ const main = (): void => {
   const cli = meow(
     `
     Usage
-      $ pilotwave-setup
+      $ agenthub-setup
 
     Options
       --yes          Skip confirmation prompts
@@ -34,12 +34,12 @@ const main = (): void => {
                      or the project root (looks in packages/*/bin/).
 
     Examples
-      $ pilotwave-setup
-      $ pilotwave-setup --yes
-      $ pilotwave-setup --tools vscode,cursor
-      $ pilotwave-setup --update
-      $ pilotwave-setup --uninstall
-      $ pilotwave-setup --from-local . --extension-id <id>
+      $ agenthub-setup
+      $ agenthub-setup --yes
+      $ agenthub-setup --tools vscode,cursor
+      $ agenthub-setup --update
+      $ agenthub-setup --uninstall
+      $ agenthub-setup --from-local . --extension-id <id>
   `,
     {
       importMeta: import.meta,

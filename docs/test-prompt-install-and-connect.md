@@ -3,7 +3,7 @@ Here's a single comprehensive prompt covering both tests. Paste it into a fresh 
 ---
 
 ````
-We're working in C:\Dev\1M\pilotwave — a multi-package monorepo for the Pilotwave Chrome extension. Project context lives in CLAUDE.md and docs/. Read both before starting.
+We're working in C:\Dev\1M\agenthub — a multi-package monorepo for the AgentHub Chrome extension. Project context lives in CLAUDE.md and docs/. Read both before starting.
 
 # Goal
 
@@ -15,8 +15,8 @@ Output one new spec file at: tests/e2e/install-and-connect.spec.ts. Add helpers 
 
 ## Test A — "Clean reinstall"
 
-1. Detect whether Pilotwave is currently installed on this machine (extension AND native host).
-2. If anything is installed, uninstall **completely**: extension + native-host bridge + helper + native-messaging manifests + Windows registry keys + autostart entry + lock file + MCP config entries from every detected AI tool. Use `npx pilotwave-setup --uninstall --yes` (or `node packages/installer/dist/cli.js --uninstall --yes` if running from the local tree). After uninstall, none of the artifacts in §"State to verify" below should exist.
+1. Detect whether AgentHub is currently installed on this machine (extension AND native host).
+2. If anything is installed, uninstall **completely**: extension + native-host bridge + helper + native-messaging manifests + Windows registry keys + autostart entry + lock file + MCP config entries from every detected AI tool. Use `npx agenthub-setup --uninstall --yes` (or `node packages/installer/dist/cli.js --uninstall --yes` if running from the local tree). After uninstall, none of the artifacts in §"State to verify" below should exist.
 3. Install from the local working tree: `node <local-installer-cli> --from-local . --extension-id ehchmchlmggdigicfjfmlgcbhdcdcmll --yes`. The installer auto-discovers binaries under packages/native-host/bin/ and packages/native-host-helper/bin/. Make sure those exist first — if not, build them: `npm run compile:win -w packages/native-host && npm run compile:win -w packages/native-host-helper`.
 4. Build the extension: `npm run build:extension` (output lands at packages/extension/dist/chrome-mv3/).
 5. Launch the user's real Chrome with `--load-extension=<that path>` and the user's user-data-dir (see §"Real Chrome launch"). Open the side panel.
@@ -49,31 +49,31 @@ Defined in packages/installer/src/index.tsx (argparse around lines 21–55).
 
 Flags: `--yes`, `--tools <csv>`, `--update`, `--uninstall`, `--extension-id <id>`, `--from-local <path>`.
 
-Local invocation: build the installer first (`npm run build -w packages/installer`), then call `node packages/installer/dist/cli.js …`. Or use `npx pilotwave-setup …` if you want to test the published path — but for these tests, the **local** path is what we want, because we're verifying the working-tree code.
+Local invocation: build the installer first (`npm run build -w packages/installer`), then call `node packages/installer/dist/cli.js …`. Or use `npx agenthub-setup …` if you want to test the published path — but for these tests, the **local** path is what we want, because we're verifying the working-tree code.
 
 Uninstall flow lives in packages/installer/src/installers/uninstaller.ts (lines 195–243). It removes:
-- Bridge + helper binaries from %LOCALAPPDATA%\pilotwave\
-- Native-messaging manifests com.pilotwave.native_host.json and com.pilotwave.native_host_helper.json from the same dir
+- Bridge + helper binaries from %LOCALAPPDATA%\agenthub\
+- Native-messaging manifests com.agenthub.native_host.json and com.agenthub.native_host_helper.json from the same dir
 - Lock file server.lock from the same dir
-- Registry keys under HKCU\SOFTWARE\Google\Chrome\NativeMessagingHosts\com.pilotwave.native_host and …\com.pilotwave.native_host_helper (and equivalent for Edge, Brave, Arc, Vivaldi if detected)
+- Registry keys under HKCU\SOFTWARE\Google\Chrome\NativeMessagingHosts\com.agenthub.native_host and …\com.agenthub.native_host_helper (and equivalent for Edge, Brave, Arc, Vivaldi if detected)
 - Autostart key HKCU\Software\Microsoft\Windows\CurrentVersion\Run\AIBrowserCopilot
 - MCP config entries from every detected AI tool (Claude Desktop, Claude Code, VS Code, Cursor, etc.)
 
 ## State to verify on this Windows machine
 
-Install dir: `%LOCALAPPDATA%\pilotwave\` (resolved by packages/installer/src/shared/platform.ts line ~56).
+Install dir: `%LOCALAPPDATA%\agenthub\` (resolved by packages/installer/src/shared/platform.ts line ~56).
 
 Files inside (when installed):
-- pilotwave-win-x64.exe (bridge)
-- pilotwave-helper-win-x64.exe (helper)
-- com.pilotwave.native_host.json (manifest)
-- com.pilotwave.native_host_helper.json (manifest)
+- agenthub-win-x64.exe (bridge)
+- agenthub-helper-win-x64.exe (helper)
+- com.agenthub.native_host.json (manifest)
+- com.agenthub.native_host_helper.json (manifest)
 - server.lock (JSON: { port, token, pid, startedBy })
 
 Registry (HKCU):
-- SOFTWARE\Google\Chrome\NativeMessagingHosts\com.pilotwave.native_host → manifest path
-- SOFTWARE\Google\Chrome\NativeMessagingHosts\com.pilotwave.native_host_helper → manifest path
-- Software\Microsoft\Windows\CurrentVersion\Run\AIBrowserCopilot → "<install-dir>\pilotwave-win-x64.exe" --service
+- SOFTWARE\Google\Chrome\NativeMessagingHosts\com.agenthub.native_host → manifest path
+- SOFTWARE\Google\Chrome\NativeMessagingHosts\com.agenthub.native_host_helper → manifest path
+- Software\Microsoft\Windows\CurrentVersion\Run\AIBrowserCopilot → "<install-dir>\agenthub-win-x64.exe" --service
 
 Use `reg query` and `Test-Path` (or `fs.existsSync`) to verify presence/absence between phases.
 
@@ -96,8 +96,8 @@ The default Playwright pattern (`chromium.launchPersistentContext('', …)`) use
 Real user-data-dir path on Windows: `%LOCALAPPDATA%\Google\Chrome\User Data`. Profile name: usually `Default`, but for this dev machine it's `Profile 1` (the dev extension ID `ehchmchlmggdigicfjfmlgcbhdcdcmll` corresponds to Profile 1 — see CLAUDE.md).
 
 Pattern to use:
-- Resolve user-data-dir from `process.env.LOCALAPPDATA + '\\Google\\Chrome\\User Data'`. Allow override via env var `PILOTWAVE_TEST_USER_DATA_DIR` and `PILOTWAVE_TEST_PROFILE_DIR` (default "Profile 1").
-- BEFORE launching: kill any running `chrome.exe` processes — Chrome holds an exclusive lock on the user-data-dir, so a running Chrome will prevent the test from attaching. Use `taskkill /IM chrome.exe /F` on Windows; warn the user if the test starts while Chrome is open. Skip the test (don't fail it) if `process.env.PILOTWAVE_TEST_KILL_CHROME !== '1'` to avoid trampling the user's session unintentionally — make this an explicit opt-in.
+- Resolve user-data-dir from `process.env.LOCALAPPDATA + '\\Google\\Chrome\\User Data'`. Allow override via env var `AGENTHUB_TEST_USER_DATA_DIR` and `AGENTHUB_TEST_PROFILE_DIR` (default "Profile 1").
+- BEFORE launching: kill any running `chrome.exe` processes — Chrome holds an exclusive lock on the user-data-dir, so a running Chrome will prevent the test from attaching. Use `taskkill /IM chrome.exe /F` on Windows; warn the user if the test starts while Chrome is open. Skip the test (don't fail it) if `process.env.AGENTHUB_TEST_KILL_CHROME !== '1'` to avoid trampling the user's session unintentionally — make this an explicit opt-in.
 - Launch via `chromium.launchPersistentContext(userDataDir, { args: [`--profile-directory=${profile}`, `--load-extension=${extDist}`, `--disable-extensions-except=${extDist}`, '--no-first-run'] })`.
 - Discover the loaded extension's ID from `context.serviceWorkers()` — wait up to 5s for the service worker to register. Confirm it equals `ehchmchlmggdigicfjfmlgcbhdcdcmll`; if not, print both expected and actual and fail with a clear message (the extension ID is per-profile and per-key).
 
@@ -116,7 +116,7 @@ npm run typecheck -w packages/installer
 npm run build:extension
 npm run compile:win -w packages/native-host
 npm run compile:win -w packages/native-host-helper
-PILOTWAVE_TEST_KILL_CHROME=1 npx playwright test tests/e2e/install-and-connect.spec.ts
+AGENTHUB_TEST_KILL_CHROME=1 npx playwright test tests/e2e/install-and-connect.spec.ts
 ```
 
 # Behavior loop — REQUIRED
@@ -136,17 +136,17 @@ Run the test. If it fails:
 # What "done" looks like
 
 - tests/e2e/install-and-connect.spec.ts exists with both test cases.
-- Running `PILOTWAVE_TEST_KILL_CHROME=1 npx playwright test tests/e2e/install-and-connect.spec.ts` exits 0 with both tests green.
+- Running `AGENTHUB_TEST_KILL_CHROME=1 npx playwright test tests/e2e/install-and-connect.spec.ts` exits 0 with both tests green.
 - Any product bugs found are documented in docs/test-findings.md with fixes applied to the working tree but uncommitted.
 - Final response summarises: which tests pass, what you fixed (test code vs product code), file:line for any product changes, and how to reproduce manually.
 
 # Constraints / things to avoid
 
 - No mocks. No stubbing of native messaging, the bridge, or the WebSocket. Real binaries, real Chrome, real WebSocket, real tool dispatch.
-- No tests against npm-published `pilotwave-setup` (it's stale at 0.1.2). Always use the local installer build.
+- No tests against npm-published `agenthub-setup` (it's stale at 0.1.2). Always use the local installer build.
 - Don't add new dependencies unless you can justify why an existing one (playwright, node:child_process, node:fs, node:net) won't do.
 - Don't commit. Don't push. Don't tag. Don't open PRs.
-- If the user's real Chrome profile is the only Chrome process running on this machine, killing it interrupts their work — the PILOTWAVE_TEST_KILL_CHROME env-gate exists so the test refuses to run without explicit opt-in. Keep that gate.
+- If the user's real Chrome profile is the only Chrome process running on this machine, killing it interrupts their work — the AGENTHUB_TEST_KILL_CHROME env-gate exists so the test refuses to run without explicit opt-in. Keep that gate.
 - Don't write multi-paragraph comments or docstrings in the test file. Tight, named helpers; let the code read.
 ````
 
@@ -154,7 +154,7 @@ Run the test. If it fails:
 
 A few things I deliberately put in:
 
-- **`PILOTWAVE_TEST_KILL_CHROME=1` opt-in** — running these against your real profile while you're using Chrome will close it. The env-gate keeps an LLM agent from trampling your session unprompted.
+- **`AGENTHUB_TEST_KILL_CHROME=1` opt-in** — running these against your real profile while you're using Chrome will close it. The env-gate keeps an LLM agent from trampling your session unprompted.
 - **Test B is the regression test for the bug we just fixed** — stale bridge from old install must be killed by image-name. If you re-run after a release that includes `a6c678c`, Test B should pass; before that, it should fail at install with EPERM and the LLM should find/document the same bug.
 - **`docs/test-findings.md`** — concrete dumping ground for product bugs the test surfaces, since you said "document, fix, never commit."
 - **`Profile 1`** — pulled from CLAUDE.md (the dev extension ID is bound to that profile). Override env vars are there if you use a different profile.

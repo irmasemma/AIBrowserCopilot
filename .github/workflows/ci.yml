@@ -80,5 +80,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: native-host-${{ matrix.target }}
-          path: packages/native-host/bin/pilotwave-*
+          path: packages/native-host/bin/agenthub-*
           retention-days: 14

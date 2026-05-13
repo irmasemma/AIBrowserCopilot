@@ -50,28 +50,28 @@ jobs:
           - os: ubuntu-latest
             target: linux-x64
             compile-script: compile:linux
-            binary: pilotwave-linux-x64
-            helper-binary: pilotwave-helper-linux-x64
+            binary: agenthub-linux-x64
+            helper-binary: agenthub-helper-linux-x64
           - os: ubuntu-latest
             target: linux-arm64
             compile-script: compile:linux-arm
-            binary: pilotwave-linux-arm64
-            helper-binary: pilotwave-helper-linux-arm64
+            binary: agenthub-linux-arm64
+            helper-binary: agenthub-helper-linux-arm64
           - os: macos-latest
             target: macos-x64
             compile-script: compile:mac
-            binary: pilotwave-macos-x64
-            helper-binary: pilotwave-helper-macos-x64
+            binary: agenthub-macos-x64
+            helper-binary: agenthub-helper-macos-x64
           - os: macos-latest
             target: macos-arm64
             compile-script: compile:mac-arm
-            binary: pilotwave-macos-arm64
-            helper-binary: pilotwave-helper-macos-arm64
+            binary: agenthub-macos-arm64
+            helper-binary: agenthub-helper-macos-arm64
           - os: windows-latest
             target: win-x64
             compile-script: compile:win
-            binary: pilotwave-win-x64.exe
-            helper-binary: pilotwave-helper-win-x64.exe
+            binary: agenthub-win-x64.exe
+            helper-binary: agenthub-helper-win-x64.exe
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

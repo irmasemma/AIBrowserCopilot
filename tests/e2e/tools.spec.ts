@@ -194,7 +194,7 @@ test.describe('Tool: list_tabs', () => {
     });
 
     console.log('Filtered tabs:', tabs.length);
-    // Should find Pilotwave Test Page
+    // Should find AgentHub Test Page
     expect(tabs.length).toBeGreaterThanOrEqual(1);
 
     console.log('PASS: list_tabs filters by query');
@@ -222,8 +222,8 @@ test.describe('Tool: get_page_metadata', () => {
       };
     });
 
-    expect(metadata.title).toBe('Pilotwave Test Page');
-    expect(metadata.description).toBe('Test page for Pilotwave E2E tests');
+    expect(metadata.title).toBe('AgentHub Test Page');
+    expect(metadata.description).toBe('Test page for AgentHub E2E tests');
     expect(metadata.ogTitle).toBe('OG Test Title');
     expect(metadata.ogImage).toBe('https://example.com/og-image.png');
     expect(metadata.favicon).toContain('favicon.ico');
@@ -245,7 +245,7 @@ test.describe('Tool: navigate', () => {
     const url = page.url();
     expect(url).toContain('test-page.html');
     const title = await page.title();
-    expect(title).toBe('Pilotwave Test Page');
+    expect(title).toBe('AgentHub Test Page');
 
     console.log('PASS: navigate changes tab URL');
     await page.close();

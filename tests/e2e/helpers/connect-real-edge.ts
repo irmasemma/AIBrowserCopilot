@@ -4,7 +4,7 @@
  *
  * The launcher writes tests/e2e/.edge-debug.json with the port + extension
  * path. This module reads that file, connects via CDP, and locates the
- * Pilotwave service worker (matched by manifest name so it works
+ * AgentHub service worker (matched by manifest name so it works
  * even when other extensions are also installed in the user's profile).
  */
 import { chromium, type Browser, type BrowserContext, type Worker } from '@playwright/test';
@@ -15,7 +15,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const STATE_FILE = path.resolve(REPO_ROOT, 'tests/e2e/.edge-debug.json');
 
-const EXTENSION_NAME = 'Pilotwave';
+const EXTENSION_NAME = 'AgentHub';
 
 export interface EdgeDebugState {
   port: number;
@@ -64,7 +64,7 @@ const fetchManifestName = async (
   }
 };
 
-const findPilotwaveExtension = async (
+const findAgentHubExtension = async (
   context: BrowserContext,
   timeoutMs = 15000,
 ): Promise<{ extensionId: string; serviceWorker: Worker }> => {
@@ -102,7 +102,7 @@ export const attachToRealEdge = async (timeoutMs = 15000): Promise<AttachedEdge>
     throw new Error('CDP connection returned no contexts — is Edge fully started?');
   }
   const context = contexts[0];
-  const { extensionId, serviceWorker } = await findPilotwaveExtension(context, timeoutMs);
+  const { extensionId, serviceWorker } = await findAgentHubExtension(context, timeoutMs);
   return { browser, context, extensionId, serviceWorker, port: state.port };
 };
 

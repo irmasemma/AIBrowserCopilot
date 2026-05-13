@@ -1,16 +1,16 @@
 {
-  "name": "@pilotwave/native-host-helper",
-  "version": "0.4.0",
+  "name": "@agenthub/native-host-helper",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "tsc",
     "bundle": "esbuild src/index.ts --bundle --platform=node --target=node18 --format=cjs --outfile=bin/bundle.cjs",
-    "compile:win": "npm run bundle && pkg bin/bundle.cjs --targets node18-win-x64 --output bin/pilotwave-helper-win-x64.exe",
-    "compile:mac": "npm run bundle && pkg bin/bundle.cjs --targets node18-macos-x64 --output bin/pilotwave-helper-macos-x64",
-    "compile:mac-arm": "npm run bundle && pkg bin/bundle.cjs --targets node18-macos-arm64 --output bin/pilotwave-helper-macos-arm64",
-    "compile:linux": "npm run bundle && pkg bin/bundle.cjs --targets node18-linux-x64 --output bin/pilotwave-helper-linux-x64",
-    "compile:linux-arm": "npm run bundle && pkg bin/bundle.cjs --targets node18-linux-arm64 --output bin/pilotwave-helper-linux-arm64",
+    "compile:win": "npm run bundle && pkg bin/bundle.cjs --targets node18-win-x64 --output bin/agenthub-helper-win-x64.exe",
+    "compile:mac": "npm run bundle && pkg bin/bundle.cjs --targets node18-macos-x64 --output bin/agenthub-helper-macos-x64",
+    "compile:mac-arm": "npm run bundle && pkg bin/bundle.cjs --targets node18-macos-arm64 --output bin/agenthub-helper-macos-arm64",
+    "compile:linux": "npm run bundle && pkg bin/bundle.cjs --targets node18-linux-x64 --output bin/agenthub-helper-linux-x64",
+    "compile:linux-arm": "npm run bundle && pkg bin/bundle.cjs --targets node18-linux-arm64 --output bin/agenthub-helper-linux-arm64",
     "test": "vitest run"
   },
   "dependencies": {

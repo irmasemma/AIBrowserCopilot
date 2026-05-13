@@ -58,7 +58,7 @@ export const findPidByPort = (port: number, platform: PlatformInfo): number | nu
 
 /**
  * Enumerate all PIDs running the given executable image (e.g.
- * `pilotwave-win-x64.exe`). On Windows multiple bridge instances
+ * `agenthub-win-x64.exe`). On Windows multiple bridge instances
  * (one per Chrome profile, or stale orphans) all hold an exclusive lock on
  * the .exe file — killing only the port-owner isn't enough to free the file
  * for an in-place upgrade.

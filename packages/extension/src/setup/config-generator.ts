@@ -1,6 +1,6 @@
 import { NATIVE_HOST_NAME } from '../shared/constants.js';
 
-const BINARY_PREFIX = 'pilotwave';
+const BINARY_PREFIX = 'agenthub';
 
 interface McpConfig {
   mcpServers: Record<string, {
@@ -28,11 +28,11 @@ export const getNativeHostInstallDir = (): string => {
   const platform = detectPlatform();
   switch (platform) {
     case 'windows':
-      return '%LOCALAPPDATA%\\pilotwave';
+      return '%LOCALAPPDATA%\\agenthub';
     case 'macos':
-      return '~/Library/Application Support/pilotwave';
+      return '~/Library/Application Support/agenthub';
     default:
-      return '~/.local/share/pilotwave';
+      return '~/.local/share/agenthub';
   }
 };
 
@@ -41,17 +41,17 @@ const getBinaryPath = (): string => {
   const binaryName = getBinaryName();
   switch (platform) {
     case 'windows':
-      return `%LOCALAPPDATA%\\\\pilotwave\\\\${binaryName}`;
+      return `%LOCALAPPDATA%\\\\agenthub\\\\${binaryName}`;
     case 'macos':
-      return `~/Library/Application Support/pilotwave/${binaryName}`;
+      return `~/Library/Application Support/agenthub/${binaryName}`;
     default:
-      return `~/.local/share/pilotwave/${binaryName}`;
+      return `~/.local/share/agenthub/${binaryName}`;
   }
 };
 
 export const generateMcpConfig = (): McpConfig => ({
   mcpServers: {
-    'pilotwave': {
+    'agenthub': {
       command: getBinaryPath(),
       args: [],
     },
@@ -90,7 +90,7 @@ const getClaudeConfigPath = (): string => {
 
 export const getNativeMessagingManifest = (hostPath: string): object => ({
   name: NATIVE_HOST_NAME,
-  description: 'Pilotwave Native Messaging Host',
+  description: 'AgentHub Native Messaging Host',
   path: hostPath,
   type: 'stdio',
   allowed_origins: [`chrome-extension://${chrome.runtime.id}/`],

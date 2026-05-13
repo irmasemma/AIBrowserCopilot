@@ -1,6 +1,6 @@
 // Render 5 Chrome Web Store listing screenshots at 1280×800 PNG from inline
 // HTML mockups. Each scene composes a Chrome-window frame (tab strip + address
-// bar) with page content on the left ~71% and a Pilotwave side panel on the
+// bar) with page content on the left ~71% and a AgentHub side panel on the
 // right 360 px. See ../../../docs/screenshots-brief.md for the source spec.
 //
 // Usage (from packages/extension/store-screenshots):
@@ -159,7 +159,7 @@ const chromeShell = ({ tabs, url, content }) => `<!DOCTYPE html>
 
 const panelHeader = (activeTab = 'Chat') => `
 <div class="panel-header">
-  <div class="brand">Pilotwave</div>
+  <div class="brand">AgentHub</div>
   <div style="flex:1"></div>
   <div class="status-dot"></div>
   <div class="status-label">Connected</div>
@@ -175,7 +175,7 @@ const scene1 = () => chromeShell({
   tabs: [
     { title: 'Jane Doe | LinkedIn', active: true },
     { title: 'Acme Corp – Crunchbase', active: false },
-    { title: 'Pilotwave: AI Chat…', active: false },
+    { title: 'AgentHub: AI Chat…', active: false },
   ],
   url: 'linkedin.example/in/jane-doe',
   content: `
@@ -274,7 +274,7 @@ const scene1 = () => chromeShell({
 const scene2 = () => chromeShell({
   tabs: [
     { title: 'New Tab', active: true },
-    { title: 'Pilotwave: AI Chat…', active: false },
+    { title: 'AgentHub: AI Chat…', active: false },
   ],
   url: 'chrome://newtab',
   content: `
@@ -336,8 +336,8 @@ const scene2 = () => chromeShell({
           </div>
           <div class="s-code">{
   "mcpServers": {
-    "pilotwave": {
-      "command": "%LOCALAPPDATA%/pilotwave/native-host.exe"
+    "agenthub": {
+      "command": "%LOCALAPPDATA%/agenthub/native-host.exe"
     }
   }
 }</div>
@@ -362,7 +362,7 @@ const scene3 = () => chromeShell({
   tabs: [
     { title: 'Jane Doe | LinkedIn', active: true },
     { title: 'Salesforce — Lightning', active: false },
-    { title: 'Pilotwave: AI Chat…', active: false },
+    { title: 'AgentHub: AI Chat…', active: false },
   ],
   url: 'linkedin.example/in/jane-doe',
   content: `
@@ -446,7 +446,7 @@ const scene4 = () => chromeShell({
   tabs: [
     { title: 'New Lead | Salesforce', active: true },
     { title: 'Jane Doe | LinkedIn', active: false },
-    { title: 'Pilotwave: AI Chat…', active: false },
+    { title: 'AgentHub: AI Chat…', active: false },
   ],
   url: 'salesforce.example/lightning/o/Lead/new',
   content: `
@@ -530,7 +530,7 @@ const scene5 = () => chromeShell({
     { title: 'Jane Doe – Contact | Salesforce', active: true },
     { title: 'Jane Doe | LinkedIn', active: false },
     { title: 'Acme Corp – Crunchbase', active: false },
-    { title: 'Pilotwave: AI Chat…', active: false },
+    { title: 'AgentHub: AI Chat…', active: false },
   ],
   url: 'salesforce.example/lightning/r/Contact/003.../view',
   content: `

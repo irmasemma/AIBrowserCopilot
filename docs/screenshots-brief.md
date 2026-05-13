@@ -1,10 +1,10 @@
-# Brief: Chrome Web Store Screenshots for "Pilotwave"
+# Brief: Chrome Web Store Screenshots for "AgentHub"
 
 > Self-contained handoff brief. Paste verbatim into an LLM (or hand to a designer) — no prior context required.
 
 ## Product summary
 
-Pilotwave is a Chrome extension that brings AI into the browser two ways:
+AgentHub is a Chrome extension that brings AI into the browser two ways:
 
 1. **AI chat sidebar** — a chat agent lives in Chrome's side panel, uses the user's own OpenAI API key (gpt-4o-mini), and can read/click/type/extract on the active tab via tool calls.
 2. **MCP server** — exposes the same tools over the Model Context Protocol so external AI tools (Claude Code, Cursor, VS Code, Windsurf, Continue, JetBrains, Zed) can drive the user's real Chrome.
@@ -43,11 +43,11 @@ Deliver 5 listing screenshots. PNG preferred. Filenames: `01-chat-hero.png`, `02
 
 **Dimensions:** 1280 × 800
 
-**Scene:** Chrome window showing a LinkedIn-style profile page on the left ~70% and Pilotwave's side panel on the right ~30%.
+**Scene:** Chrome window showing a LinkedIn-style profile page on the left ~70% and AgentHub's side panel on the right ~30%.
 
 **Side panel content (Chat tab active):**
 
-- Header: small "Pilotwave" wordmark + green "Connected" status dot
+- Header: small "AgentHub" wordmark + green "Connected" status dot
 - Conversation:
   - User bubble: *"Extract every job from this profile into a table"*
   - Assistant bubble in progress: *"Reading the page… calling extract_data…"* with a small spinner icon
@@ -69,7 +69,7 @@ Deliver 5 listing screenshots. PNG preferred. Filenames: `01-chat-hero.png`, `02
 
 **Side panel content (Settings tab):**
 
-- Header: "Pilotwave" wordmark + "Connected" status
+- Header: "AgentHub" wordmark + "Connected" status
 - Tab strip: `Chat | Tools | Settings` with Settings selected
 - Section "MCP Connection":
   - "Status: Connected via native messaging" with a green dot
@@ -78,8 +78,8 @@ Deliver 5 listing screenshots. PNG preferred. Filenames: `01-chat-hero.png`, `02
     ```
     {
       "mcpServers": {
-        "pilotwave": {
-          "command": "%LOCALAPPDATA%/pilotwave/native-host.exe"
+        "agenthub": {
+          "command": "%LOCALAPPDATA%/agenthub/native-host.exe"
         }
       }
     }
@@ -102,7 +102,7 @@ Deliver 5 listing screenshots. PNG preferred. Filenames: `01-chat-hero.png`, `02
 
 **Side panel content (Tools tab):**
 
-- Header: "Pilotwave" + "Connected"
+- Header: "AgentHub" + "Connected"
 - Tab strip with `Tools` selected
 - Top half — "Permissions" section with toggle switches (use real iOS-style toggles):
   - ✓ Read page content (ON)
@@ -162,7 +162,7 @@ Deliver 5 listing screenshots. PNG preferred. Filenames: `01-chat-hero.png`, `02
 - Tab 1: "Salesforce — Lightning" (currently focused, shows a contact record page on the left)
 - Tab 2: "Jane Doe | LinkedIn"
 - Tab 3: "Acme Corp - Crunchbase"
-- Tab 4: "Pilotwave: AI Chat…" (background)
+- Tab 4: "AgentHub: AI Chat…" (background)
 
 **Left side — Tab 1 content:** A fake Salesforce contact page for "Jane Doe" with empty fields (Email, Phone, Company Notes).
 
@@ -190,7 +190,7 @@ Deliver 5 listing screenshots. PNG preferred. Filenames: `01-chat-hero.png`, `02
 - ❌ Screenshots that look obviously mocked up in Figma — these get rejected by CWS reviewers
 - ❌ Real user data (real emails, real LinkedIn URLs, real Salesforce orgs)
 - ❌ Real API keys visible anywhere (mask with •)
-- ❌ Chrome window with the *Pilotwave dev console tab* visible (meta and confusing)
+- ❌ Chrome window with the *AgentHub dev console tab* visible (meta and confusing)
 - ❌ Comic Sans, drop shadows, neon gradients
 - ❌ Different visual styles between the 5 screenshots — they must look like a set
 

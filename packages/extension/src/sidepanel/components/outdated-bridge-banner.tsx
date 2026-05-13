@@ -18,8 +18,8 @@ export const OutdatedBridgeBanner: FunctionalComponent<OutdatedBridgeBannerProps
   const [copied, setCopied] = useState(false);
   const extId = chrome.runtime?.id ?? '';
   const installCommand = extId
-    ? `npx pilotwave-setup --update --extension-id ${extId}`
-    : 'npx pilotwave-setup --update';
+    ? `npx agenthub-setup --update --extension-id ${extId}`
+    : 'npx agenthub-setup --update';
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(installCommand);

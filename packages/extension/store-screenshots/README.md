@@ -4,7 +4,7 @@
 
 ## Files
 
-- `out/01-chat-hero.png` — LinkedIn profile + Pilotwave chat extracting jobs into a table. Hero shot.
+- `out/01-chat-hero.png` — LinkedIn profile + AgentHub chat extracting jobs into a table. Hero shot.
 - `out/02-mcp-settings.png` — Settings tab. MCP connection status, detected AI tools, OpenAI key, model.
 - `out/03-tools-log.png` — Tools tab. Per-tool permission toggles + dark activity log.
 - `out/04-form-fill.png` — Salesforce-style "New Lead" form filled by the chat agent.

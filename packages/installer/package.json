@@ -1,10 +1,10 @@
 {
-  "name": "pilotwave-setup",
-  "version": "0.1.1",
-  "description": "One-command setup for Pilotwave — installs the native host and configures your AI tools (Claude Code, Cursor, VS Code, Windsurf, Continue, JetBrains, Zed)",
+  "name": "agenthub-setup",
+  "version": "0.1.0",
+  "description": "One-command setup for AgentHub — installs the native host and configures your AI tools (Claude Code, Cursor, VS Code, Windsurf, Continue, JetBrains, Zed)",
   "type": "module",
   "bin": {
-    "pilotwave-setup": "./dist/index.js"
+    "agenthub-setup": "./dist/index.js"
   },
   "files": [
     "dist"
@@ -33,7 +33,7 @@
     "node": ">=18.0.0"
   },
   "keywords": [
-    "pilotwave",
+    "agenthub",
     "mcp",
     "browser",
     "automation",

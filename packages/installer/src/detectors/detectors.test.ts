@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { detectPlatform } from '../shared/platform.js';
 import { claudeDesktopDetector, getConfigPath as getDesktopConfigPath } from './claude-desktop.js';
 import { claudeCodeDetector, getConfigPath as getCodeConfigPath } from './claude-code.js';
-import { vscodeDetector, getSettingsPath as getVscodeSettingsPath, getConfigPath as getVscodeConfigPath, cleanupLegacyVscodeSettings, removePilotwaveFromVscode } from './vscode.js';
+import { vscodeDetector, getSettingsPath as getVscodeSettingsPath, getConfigPath as getVscodeConfigPath, cleanupLegacyVscodeSettings, removeAgentHubFromVscode } from './vscode.js';
 import { cursorDetector, getSettingsPath as getCursorSettingsPath } from './cursor.js';
 import { windsurfDetector, getSettingsPath as getWindsurfSettingsPath } from './windsurf.js';
 import { jetbrainsDetector, getConfigPath as getJetbrainsConfigPath } from './jetbrains.js';
@@ -13,7 +13,7 @@ import { zedDetector, getSettingsPath as getZedSettingsPath } from './zed.js';
 import { continueDevDetector, getConfigPath as getContinueConfigPath } from './continue-dev.js';
 import { registerAllDetectors, getAll, clear, runAll } from './index.js';
 
-const TEST_DIR = join(tmpdir(), `pilotwave-detectors-test-${Date.now()}`);
+const TEST_DIR = join(tmpdir(), `agenthub-detectors-test-${Date.now()}`);
 
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });
@@ -55,13 +55,13 @@ describe('Claude Desktop Detector', () => {
     expect(result.hasExistingMcp).toBe(false);
   });
 
-  it('detects existing pilotwave MCP entry', async () => {
+  it('detects existing agenthub MCP entry', async () => {
     const platform = testPlatform('linux');
     const configDir = join(TEST_DIR, '.config', 'Claude');
     mkdirSync(configDir, { recursive: true });
     writeFileSync(
       join(configDir, 'claude_desktop_config.json'),
-      JSON.stringify({ mcpServers: { 'pilotwave': { command: 'old' } } }),
+      JSON.stringify({ mcpServers: { 'agenthub': { command: 'old' } } }),
     );
 
     const result = await claudeDesktopDetector.detect(platform);
@@ -79,7 +79,7 @@ describe('Claude Desktop Detector', () => {
 
     const configPath = getDesktopConfigPath(platform);
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(written.mcpServers['pilotwave'].command).toBe('/path/to/binary');
+    expect(written.mcpServers['agenthub'].command).toBe('/path/to/binary');
   });
 
   it('writeConfig merges preserving existing entries', async () => {
@@ -104,7 +104,7 @@ describe('Claude Desktop Detector', () => {
     expect(written.theme).toBe('dark');
     expect(written.mcpServers.filesystem.command).toBe('npx');
     expect(written.mcpServers.github.command).toBe('gh-mcp');
-    expect(written.mcpServers['pilotwave'].command).toBe('/path/to/binary');
+    expect(written.mcpServers['agenthub'].command).toBe('/path/to/binary');
   });
 
   it('writeConfig skips malformed JSON', async () => {
@@ -159,7 +159,7 @@ describe('Claude Code Detector', () => {
 
     const configPath = getCodeConfigPath(platform);
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(written.mcpServers['pilotwave'].command).toBe('/path/to/binary');
+    expect(written.mcpServers['agenthub'].command).toBe('/path/to/binary');
   });
 
   it('writeConfig merges into existing .claude.json', async () => {
@@ -175,7 +175,7 @@ describe('Claude Code Detector', () => {
     const written = JSON.parse(readFileSync(join(TEST_DIR, '.claude.json'), 'utf-8'));
     expect(written.existingSetting).toBe(true);
     expect(written.mcpServers.other).toEqual({});
-    expect(written.mcpServers['pilotwave'].command).toBe('/binary');
+    expect(written.mcpServers['agenthub'].command).toBe('/binary');
   });
 });
 
@@ -212,14 +212,14 @@ describe('VS Code Detector', () => {
     const mcpJsonPath = getVscodeConfigPath(platform);
     expect(existsSync(mcpJsonPath)).toBe(true);
     const written = JSON.parse(readFileSync(mcpJsonPath, 'utf-8'));
-    expect(written.servers['pilotwave'].command).toBe('/binary');
-    expect(written.servers['pilotwave'].type).toBe('stdio');
+    expect(written.servers['agenthub'].command).toBe('/binary');
+    expect(written.servers['agenthub'].type).toBe('stdio');
     expect(written.inputs).toEqual([]);
     // Must NOT touch settings.json `mcp.servers` shape
     const settingsPath = getVscodeSettingsPath(platform);
     if (existsSync(settingsPath)) {
       const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-      expect(settings.mcp?.servers?.['pilotwave']).toBeUndefined();
+      expect(settings.mcp?.servers?.['agenthub']).toBeUndefined();
     }
   });
 
@@ -238,11 +238,11 @@ describe('VS Code Detector', () => {
 
     const written = JSON.parse(readFileSync(mcpJsonPath, 'utf-8'));
     expect(written.servers['other-tool']).toEqual({ command: 'other', args: [] });
-    expect(written.servers['pilotwave'].command).toBe('/binary');
+    expect(written.servers['agenthub'].command).toBe('/binary');
     expect(written.inputs).toEqual([{ id: 'token', type: 'promptString' }]);
   });
 
-  it('replaces (not deep-merges) the pilotwave entry', async () => {
+  it('replaces (not deep-merges) the agenthub entry', async () => {
     const platform = testPlatform('linux');
     const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(settingsDir, { recursive: true });
@@ -250,7 +250,7 @@ describe('VS Code Detector', () => {
     const mcpJsonPath = getVscodeConfigPath(platform);
     writeFileSync(mcpJsonPath, JSON.stringify({
       servers: {
-        'pilotwave': {
+        'agenthub': {
           command: '/old/path',
           args: ['--legacy-flag'],
           env: { OLD: '1' },
@@ -263,45 +263,45 @@ describe('VS Code Detector', () => {
     await vscodeDetector.writeConfig(platform, '/new/binary');
 
     const written = JSON.parse(readFileSync(mcpJsonPath, 'utf-8'));
-    expect(written.servers['pilotwave'].command).toBe('/new/binary');
-    expect(written.servers['pilotwave'].args).toEqual([]);
-    expect(written.servers['pilotwave'].env).toBeUndefined();
-    expect(written.servers['pilotwave'].disabled).toBeUndefined();
+    expect(written.servers['agenthub'].command).toBe('/new/binary');
+    expect(written.servers['agenthub'].args).toEqual([]);
+    expect(written.servers['agenthub'].env).toBeUndefined();
+    expect(written.servers['agenthub'].disabled).toBeUndefined();
   });
 
-  it('detects existing pilotwave in new mcp.json (top-level servers)', async () => {
+  it('detects existing agenthub in new mcp.json (top-level servers)', async () => {
     const platform = testPlatform('linux');
     const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(settingsDir, { recursive: true });
     writeFileSync(
       getVscodeConfigPath(platform),
-      JSON.stringify({ servers: { 'pilotwave': {} }, inputs: [] }),
+      JSON.stringify({ servers: { 'agenthub': {} }, inputs: [] }),
     );
 
     const result = await vscodeDetector.detect(platform);
     expect(result.hasExistingMcp).toBe(true);
   });
 
-  it('detects existing pilotwave in legacy settings.json (mcp.servers)', async () => {
+  it('detects existing agenthub in legacy settings.json (mcp.servers)', async () => {
     const platform = testPlatform('linux');
     const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(settingsDir, { recursive: true });
     writeFileSync(
       getVscodeSettingsPath(platform),
-      JSON.stringify({ mcp: { servers: { 'pilotwave': {} } } }),
+      JSON.stringify({ mcp: { servers: { 'agenthub': {} } } }),
     );
 
     const result = await vscodeDetector.detect(platform);
     expect(result.hasExistingMcp).toBe(true);
   });
 
-  it('migrates legacy entry: install removes pilotwave from settings.json', async () => {
+  it('migrates legacy entry: install removes agenthub from settings.json', async () => {
     const platform = testPlatform('linux');
     const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(settingsDir, { recursive: true });
     writeFileSync(getVscodeSettingsPath(platform), JSON.stringify({
       'editor.fontSize': 14,
-      mcp: { servers: { 'pilotwave': { command: '/old' } } },
+      mcp: { servers: { 'agenthub': { command: '/old' } } },
     }, null, 2) + '\n');
 
     await vscodeDetector.writeConfig(platform, '/new');
@@ -312,7 +312,7 @@ describe('VS Code Detector', () => {
     expect(settings.mcp).toBeUndefined();
     // New entry lives in mcp.json
     const newJson = JSON.parse(readFileSync(getVscodeConfigPath(platform), 'utf-8'));
-    expect(newJson.servers['pilotwave'].command).toBe('/new');
+    expect(newJson.servers['agenthub'].command).toBe('/new');
   });
 
   it('cleanupLegacyVscodeSettings prunes empty mcp block (entry already absent)', () => {
@@ -340,7 +340,7 @@ describe('VS Code Detector', () => {
     writeFileSync(getVscodeSettingsPath(platform), JSON.stringify({
       'editor.fontSize': 14,
       mcp: {
-        servers: { 'pilotwave': {}, 'keep-me': { command: 'k' } },
+        servers: { 'agenthub': {}, 'keep-me': { command: 'k' } },
         'gallery.enabled': true,
       },
     }, null, 2) + '\n');
@@ -349,7 +349,7 @@ describe('VS Code Detector', () => {
     expect(result.cleaned).toBe(true);
 
     const settings = JSON.parse(readFileSync(getVscodeSettingsPath(platform), 'utf-8'));
-    expect(settings.mcp.servers['pilotwave']).toBeUndefined();
+    expect(settings.mcp.servers['agenthub']).toBeUndefined();
     expect(settings.mcp.servers['keep-me']).toEqual({ command: 'k' });
     expect(settings.mcp['gallery.enabled']).toBe(true);
   });
@@ -372,14 +372,14 @@ describe('VS Code Detector', () => {
     const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(settingsDir, { recursive: true });
     writeFileSync(getVscodeSettingsPath(platform), JSON.stringify({
-      mcp: { servers: { 'pilotwave': {}, other: { command: 'o' } } },
+      mcp: { servers: { 'agenthub': {}, other: { command: 'o' } } },
     }, null, 2) + '\n');
 
     const result = cleanupLegacyVscodeSettings(platform);
     expect(result.cleaned).toBe(true);
 
     const settings = JSON.parse(readFileSync(getVscodeSettingsPath(platform), 'utf-8'));
-    expect(settings.mcp.servers['pilotwave']).toBeUndefined();
+    expect(settings.mcp.servers['agenthub']).toBeUndefined();
     expect(settings.mcp.servers.other).toEqual({ command: 'o' });
   });
 
@@ -394,25 +394,25 @@ describe('VS Code Detector', () => {
     expect(result.error).toContain('malformed');
   });
 
-  it('removePilotwaveFromVscode handles both new mcp.json and legacy settings.json', () => {
+  it('removeAgentHubFromVscode handles both new mcp.json and legacy settings.json', () => {
     const platform = testPlatform('linux');
     const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(settingsDir, { recursive: true });
     writeFileSync(getVscodeConfigPath(platform), JSON.stringify({
-      servers: { 'pilotwave': { command: '/x' }, 'other': {} },
+      servers: { 'agenthub': { command: '/x' }, 'other': {} },
       inputs: [],
     }, null, 2) + '\n');
     writeFileSync(getVscodeSettingsPath(platform), JSON.stringify({
       'editor.fontSize': 14,
-      mcp: { servers: { 'pilotwave': {} } },
+      mcp: { servers: { 'agenthub': {} } },
     }, null, 2) + '\n');
 
-    const result = removePilotwaveFromVscode(platform);
+    const result = removeAgentHubFromVscode(platform);
     expect(result.removed).toBe(true);
     expect(result.errors).toEqual([]);
 
     const newJson = JSON.parse(readFileSync(getVscodeConfigPath(platform), 'utf-8'));
-    expect(newJson.servers['pilotwave']).toBeUndefined();
+    expect(newJson.servers['agenthub']).toBeUndefined();
     expect(newJson.servers.other).toEqual({});
 
     const settings = JSON.parse(readFileSync(getVscodeSettingsPath(platform), 'utf-8'));
@@ -420,16 +420,16 @@ describe('VS Code Detector', () => {
     expect(settings['editor.fontSize']).toBe(14);
   });
 
-  it('removePilotwaveFromVscode is idempotent', () => {
+  it('removeAgentHubFromVscode is idempotent', () => {
     const platform = testPlatform('linux');
     const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(settingsDir, { recursive: true });
 
-    const r1 = removePilotwaveFromVscode(platform);
+    const r1 = removeAgentHubFromVscode(platform);
     expect(r1.removed).toBe(false);
     expect(r1.errors).toEqual([]);
 
-    const r2 = removePilotwaveFromVscode(platform);
+    const r2 = removeAgentHubFromVscode(platform);
     expect(r2.removed).toBe(false);
     expect(r2.errors).toEqual([]);
   });
@@ -459,7 +459,7 @@ describe('Cursor Detector', () => {
     await cursorDetector.writeConfig(platform, '/binary');
 
     const written = JSON.parse(readFileSync(join(settingsDir, 'settings.json'), 'utf-8'));
-    expect(written.mcp.servers['pilotwave']).toBeDefined();
+    expect(written.mcp.servers['agenthub']).toBeDefined();
   });
 
   it('preserves existing Cursor settings', async () => {
@@ -475,7 +475,7 @@ describe('Cursor Detector', () => {
 
     const written = JSON.parse(readFileSync(join(settingsDir, 'settings.json'), 'utf-8'));
     expect(written['cursor.aiModel']).toBe('gpt-4');
-    expect(written.mcp.servers['pilotwave'].command).toBe('/binary');
+    expect(written.mcp.servers['agenthub'].command).toBe('/binary');
   });
 });
 
@@ -503,7 +503,7 @@ describe('Windsurf Detector', () => {
     await windsurfDetector.writeConfig(platform, '/binary');
 
     const written = JSON.parse(readFileSync(join(settingsDir, 'settings.json'), 'utf-8'));
-    expect(written.mcp.servers['pilotwave']).toBeDefined();
+    expect(written.mcp.servers['agenthub']).toBeDefined();
     expect(written.mcpServers).toBeUndefined();
   });
 
@@ -520,7 +520,7 @@ describe('Windsurf Detector', () => {
 
     const written = JSON.parse(readFileSync(join(settingsDir, 'settings.json'), 'utf-8'));
     expect(written['editor.theme']).toBe('dark');
-    expect(written.mcp.servers['pilotwave'].command).toBe('/binary');
+    expect(written.mcp.servers['agenthub'].command).toBe('/binary');
   });
 });
 
@@ -564,7 +564,7 @@ describe('JetBrains IDE Detector', () => {
 
     const configPath = getJetbrainsConfigPath(platform);
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(written.mcpServers['pilotwave'].command).toBe('/binary');
+    expect(written.mcpServers['agenthub'].command).toBe('/binary');
   });
 
   it('preserves existing entries', async () => {
@@ -580,7 +580,7 @@ describe('JetBrains IDE Detector', () => {
 
     const written = JSON.parse(readFileSync(join(configDir, 'mcp.json'), 'utf-8'));
     expect(written.mcpServers.existing.command).toBe('test');
-    expect(written.mcpServers['pilotwave'].command).toBe('/binary');
+    expect(written.mcpServers['agenthub'].command).toBe('/binary');
   });
 });
 
@@ -608,7 +608,7 @@ describe('Zed Detector', () => {
     await zedDetector.writeConfig(platform, '/binary');
 
     const written = JSON.parse(readFileSync(join(configDir, 'settings.json'), 'utf-8'));
-    expect(written.mcp.servers['pilotwave']).toBeDefined();
+    expect(written.mcp.servers['agenthub']).toBeDefined();
   });
 
   it('preserves existing settings', async () => {
@@ -625,7 +625,7 @@ describe('Zed Detector', () => {
     const written = JSON.parse(readFileSync(join(configDir, 'settings.json'), 'utf-8'));
     expect(written.theme).toBe('one-dark');
     expect(written.vim_mode).toBe(true);
-    expect(written.mcp.servers['pilotwave'].command).toBe('/binary');
+    expect(written.mcp.servers['agenthub'].command).toBe('/binary');
   });
 });
 
@@ -653,7 +653,7 @@ describe('Continue.dev Detector', () => {
 
     const configPath = getContinueConfigPath(platform);
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(written.mcpServers['pilotwave'].command).toBe('/binary');
+    expect(written.mcpServers['agenthub'].command).toBe('/binary');
   });
 
   it('preserves existing config', async () => {
@@ -673,16 +673,16 @@ describe('Continue.dev Detector', () => {
     const written = JSON.parse(readFileSync(join(continueDir, 'config.json'), 'utf-8'));
     expect(written.models).toHaveLength(1);
     expect(written.mcpServers.existing.command).toBe('test');
-    expect(written.mcpServers['pilotwave'].command).toBe('/binary');
+    expect(written.mcpServers['agenthub'].command).toBe('/binary');
   });
 
-  it('detects existing pilotwave entry', async () => {
+  it('detects existing agenthub entry', async () => {
     const platform = testPlatform('linux');
     const continueDir = join(TEST_DIR, '.continue');
     mkdirSync(continueDir, { recursive: true });
     writeFileSync(
       join(continueDir, 'config.json'),
-      JSON.stringify({ mcpServers: { 'pilotwave': { command: 'old' } } }),
+      JSON.stringify({ mcpServers: { 'agenthub': { command: 'old' } } }),
     );
 
     const result = await continueDevDetector.detect(platform);

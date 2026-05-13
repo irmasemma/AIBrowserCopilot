@@ -2,7 +2,7 @@
  * Single-flight bridge auto-start coordinator.
  *
  * Anyone who detects a missing/dead bridge (SW startup, alarm reconcile,
- * popup verify, or the explicit "Start Pilotwave service" button) calls
+ * popup verify, or the explicit "Start AgentHub service" button) calls
  * `tryStart()` here. Only one in-flight start at a time; rapid
  * re-entry within the cooldown returns the in-flight promise; max
  * `maxAutoAttempts` consecutive failures lock auto-restart until the

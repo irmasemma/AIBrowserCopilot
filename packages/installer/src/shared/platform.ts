@@ -54,12 +54,12 @@ export const getInstallDir = (platform: PlatformInfo): string => {
     case 'windows':
       return join(
         process.env['LOCALAPPDATA'] ?? join(platform.homeDir, 'AppData', 'Local'),
-        'pilotwave',
+        'agenthub',
       );
     case 'macos':
-      return join(platform.homeDir, 'Library', 'Application Support', 'pilotwave');
+      return join(platform.homeDir, 'Library', 'Application Support', 'agenthub');
     case 'linux':
-      return join(platform.homeDir, '.local', 'share', 'pilotwave');
+      return join(platform.homeDir, '.local', 'share', 'agenthub');
     default:
       throw new Error(`Unsupported platform: ${platform.os}`);
   }

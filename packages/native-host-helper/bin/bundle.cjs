@@ -3765,15 +3765,15 @@ function resolveKeyPath(obj, keys) {
   }
   return current;
 }
-function hasCopilotEntry(mcpValue) {
+function hasAgentHubEntry(mcpValue) {
   if (mcpValue === null || mcpValue === void 0) return false;
   if (Array.isArray(mcpValue)) {
     return mcpValue.some(
-      (item) => typeof item === "object" && item !== null && ("pilotwave" in item || item.name === "pilotwave")
+      (item) => typeof item === "object" && item !== null && ("agenthub" in item || item.name === "agenthub")
     );
   }
   if (typeof mcpValue === "object") {
-    return "pilotwave" in mcpValue;
+    return "agenthub" in mcpValue;
   }
   return false;
 }
@@ -3785,7 +3785,7 @@ function scanDetector(detector) {
       const content = (0, import_node_fs.readFileSync)(configPath, "utf-8");
       const parsed = JSON.parse(content);
       const mcpValue = resolveKeyPath(parsed, detector.getMcpKeyPath());
-      const configured = hasCopilotEntry(mcpValue);
+      const configured = hasAgentHubEntry(mcpValue);
       return { tool: detector.name, slug: detector.slug, installed: true, configured, configPath };
     } catch {
       return { tool: detector.name, slug: detector.slug, installed: true, configured: false, configPath };
@@ -3805,22 +3805,22 @@ var getClaudeCodeConfigPath = () => (0, import_node_path2.join)((0, import_node_
 var getInstallDir = () => {
   switch ((0, import_node_os2.platform)()) {
     case "win32":
-      return (0, import_node_path2.join)(process.env.LOCALAPPDATA ?? (0, import_node_path2.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "pilotwave");
+      return (0, import_node_path2.join)(process.env.LOCALAPPDATA ?? (0, import_node_path2.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "agenthub");
     case "darwin":
-      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "pilotwave");
+      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "agenthub");
     default:
-      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".local", "share", "pilotwave");
+      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".local", "share", "agenthub");
   }
 };
 var getNativeHostBinaryName = () => {
   const arch = (0, import_node_os2.arch)();
   switch ((0, import_node_os2.platform)()) {
     case "win32":
-      return `pilotwave-win-${arch === "arm64" ? "arm64" : "x64"}.exe`;
+      return `agenthub-win-${arch === "arm64" ? "arm64" : "x64"}.exe`;
     case "darwin":
-      return `pilotwave-macos-${arch === "arm64" ? "arm64" : "x64"}`;
+      return `agenthub-macos-${arch === "arm64" ? "arm64" : "x64"}`;
     default:
-      return `pilotwave-linux-${arch === "arm64" ? "arm64" : "x64"}`;
+      return `agenthub-linux-${arch === "arm64" ? "arm64" : "x64"}`;
   }
 };
 var getNativeHostBinaryPath = () => (0, import_node_path2.join)(getInstallDir(), getNativeHostBinaryName());
@@ -3834,7 +3834,7 @@ var detectIndent = (content) => {
 };
 var hasEntry = (mcpServers) => {
   if (!isPlainObject(mcpServers)) return false;
-  const entry = mcpServers["pilotwave"];
+  const entry = mcpServers["agenthub"];
   return isPlainObject(entry) && typeof entry.command === "string";
 };
 var checkClaudeCodeRegistration = () => {
@@ -3929,7 +3929,7 @@ var repairClaudeCodeRegistration = () => {
     (0, import_node_fs2.copyFileSync)(configPath, backupPath);
   }
   const mcpServers = isPlainObject(existing.mcpServers) ? { ...existing.mcpServers } : {};
-  mcpServers["pilotwave"] = newEntry;
+  mcpServers["agenthub"] = newEntry;
   const merged = { ...existing, mcpServers };
   let output = JSON.stringify(merged, null, indentStr);
   if (trailingNewline) output += "\n";
@@ -3973,11 +3973,11 @@ var WS_PROBE_TIMEOUT_MS = 3e3;
 function getInstallDir2() {
   switch ((0, import_node_os3.platform)()) {
     case "win32":
-      return (0, import_node_path3.join)(process.env.LOCALAPPDATA ?? (0, import_node_path3.join)((0, import_node_os3.homedir)(), "AppData", "Local"), "pilotwave");
+      return (0, import_node_path3.join)(process.env.LOCALAPPDATA ?? (0, import_node_path3.join)((0, import_node_os3.homedir)(), "AppData", "Local"), "agenthub");
     case "darwin":
-      return (0, import_node_path3.join)((0, import_node_os3.homedir)(), "Library", "Application Support", "pilotwave");
+      return (0, import_node_path3.join)((0, import_node_os3.homedir)(), "Library", "Application Support", "agenthub");
     default:
-      return (0, import_node_path3.join)((0, import_node_os3.homedir)(), ".local", "share", "pilotwave");
+      return (0, import_node_path3.join)((0, import_node_os3.homedir)(), ".local", "share", "agenthub");
   }
 }
 function getLockFilePath() {
@@ -3987,11 +3987,11 @@ function getBinaryPath() {
   const dir = getInstallDir2();
   switch ((0, import_node_os3.platform)()) {
     case "win32":
-      return (0, import_node_path3.join)(dir, "pilotwave-win-x64.exe");
+      return (0, import_node_path3.join)(dir, "agenthub-win-x64.exe");
     case "darwin":
-      return (0, import_node_path3.join)(dir, process.arch === "arm64" ? "pilotwave-macos-arm64" : "pilotwave-macos-x64");
+      return (0, import_node_path3.join)(dir, process.arch === "arm64" ? "agenthub-macos-arm64" : "agenthub-macos-x64");
     default:
-      return (0, import_node_path3.join)(dir, process.arch === "arm64" ? "pilotwave-linux-arm64" : "pilotwave-linux-x64");
+      return (0, import_node_path3.join)(dir, process.arch === "arm64" ? "agenthub-linux-arm64" : "agenthub-linux-x64");
   }
 }
 function readLockFile() {

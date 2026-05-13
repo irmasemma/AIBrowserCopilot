@@ -1,11 +1,11 @@
 /**
  * E2E install + connect: drives the user's REAL browser (Chrome by default,
- * Edge with PILOTWAVE_TEST_BROWSER=edge) with the REAL profile through two
+ * Edge with AGENTHUB_TEST_BROWSER=edge) with the REAL profile through two
  * install scenarios — clean reinstall and stale-installer reinstall — and
  * verifies the side panel reaches "Connected" plus two `claude -p` turns
- * invoking `mcp__pilotwave__list_tabs` against the live bridge.
+ * invoking `mcp__agenthub__list_tabs` against the live bridge.
  *
- * Opt-in. Set PILOTWAVE_TEST_KILL_CHROME=1 to allow killing the user's running
+ * Opt-in. Set AGENTHUB_TEST_KILL_CHROME=1 to allow killing the user's running
  * browser session (the browser holds an exclusive lock on the user-data-dir,
  * so attaching otherwise is impossible).
  */
@@ -43,10 +43,10 @@ const requirePrebuilt = () => {
         `Build it first: npm run build:extension`,
     );
   }
-  const bridgeBin = path.resolve(REPO_ROOT, 'packages/native-host/bin/pilotwave-win-x64.exe');
+  const bridgeBin = path.resolve(REPO_ROOT, 'packages/native-host/bin/agenthub-win-x64.exe');
   const helperBin = path.resolve(
     REPO_ROOT,
-    'packages/native-host-helper/bin/pilotwave-helper-win-x64.exe',
+    'packages/native-host-helper/bin/agenthub-helper-win-x64.exe',
   );
   if (!existsSync(bridgeBin) || !existsSync(helperBin)) {
     throw new Error(
@@ -60,7 +60,7 @@ const requirePrebuilt = () => {
 };
 
 const CLAUDE_PROMPT =
-  'Use the mcp__pilotwave__list_tabs tool right now to enumerate every tab open in my browser. ' +
+  'Use the mcp__agenthub__list_tabs tool right now to enumerate every tab open in my browser. ' +
   'Call the tool. Do not describe what you would do.';
 
 const runClaudeListTabsTurn = async (label: string): Promise<void> => {
@@ -72,7 +72,7 @@ const runClaudeListTabsTurn = async (label: string): Promise<void> => {
   const call = findListTabsCall(result);
   expect(
     call,
-    `${label}: claude did not invoke mcp__pilotwave__list_tabs.\n` +
+    `${label}: claude did not invoke mcp__agenthub__list_tabs.\n` +
       `Tools called: ${result.toolUses.map((t) => t.toolName).join(', ') || '(none)'}\n` +
       `Final text: ${result.finalText.slice(0, 200)}\n` +
       `stderr (first 300): ${result.stderr.slice(0, 300)}`,
@@ -100,7 +100,7 @@ const runConnectAndChatPhase = async (
   assertConnected(display);
 
   // Then: run two list_tabs turns through Claude Code's MCP client. The
-  // installer registers pilotwave as an MCP server in ~/.claude.
+  // installer registers agenthub as an MCP server in ~/.claude.
   // Two distinct subprocess turns to verify the bridge handles back-to-back
   // requests without state leaks.
   await runClaudeListTabsTurn('Claude turn #1');
@@ -175,7 +175,11 @@ test.describe('install-and-connect', () => {
     //    once now to seed the stale state we want to overwrite). We deliberately
     //    do NOT run --uninstall here — that's the whole point of Test B.
     let snap = snapshotInstallState();
-    if (!isFullyInstalled(snap)) {
+    // Re-seed when install is incomplete OR when no bridge is currently
+    // running. After Test A's browser closes the bridge may exit (its
+    // native-messaging stdin closes), leaving artefacts on disk but no
+    // process. We need a live bridge for the regression check below.
+    if (!isFullyInstalled(snap) || snap.runningBridgePids.length === 0) {
       const seed = runInstall(EXPECTED_EXTENSION_ID);
       expect(
         seed.ok,

@@ -448,7 +448,7 @@ function handleMcpMessage(clientId: string, raw: string, reply: (msg: unknown) =
         result: {
           protocolVersion: '2024-11-05',
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'pilotwave', version: VERSION },
+          serverInfo: { name: 'agenthub', version: VERSION },
         },
       });
       return;
@@ -550,11 +550,11 @@ function zodToJsonSchema(z: unknown): Record<string, unknown> {
 function getBridgeLogPath(): string {
   switch (osPlatform()) {
     case 'win32':
-      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'pilotwave', 'bridge.log');
+      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'agenthub', 'bridge.log');
     case 'darwin':
-      return join(homedir(), 'Library', 'Application Support', 'pilotwave', 'bridge.log');
+      return join(homedir(), 'Library', 'Application Support', 'agenthub', 'bridge.log');
     default:
-      return join(homedir(), '.local', 'share', 'pilotwave', 'bridge.log');
+      return join(homedir(), '.local', 'share', 'agenthub', 'bridge.log');
   }
 }
 

@@ -4,8 +4,8 @@ import { join, resolve } from 'node:path';
 import type { PlatformInfo } from '../shared/platform.js';
 import { NATIVE_HOST_NAME, NATIVE_HOST_DESCRIPTION } from '../shared/constants.js';
 
-export const HELPER_HOST_NAME = 'com.pilotwave.native_host_helper';
-const HELPER_DESCRIPTION = 'Pilotwave Discovery Helper';
+export const HELPER_HOST_NAME = 'com.agenthub.native_host_helper';
+const HELPER_DESCRIPTION = 'AgentHub Discovery Helper';
 
 export interface BrowserInfo {
   name: string;
@@ -191,7 +191,7 @@ export function registerForBrowser(
       // Write manifest to install dir
       const installDir = join(
         process.env['LOCALAPPDATA'] ?? join(platform.homeDir, 'AppData', 'Local'),
-        'pilotwave',
+        'agenthub',
       );
       const manifestPath = writeManifest(installDir, hostName, description, binaryPath, extensionIds);
       createRegistryKey(browser.registryKey, hostName, manifestPath);

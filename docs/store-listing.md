@@ -1,15 +1,15 @@
 # Chrome Web Store Listing
 
 ## Extension Name
-Pilotwave
+AgentHub
 
 ## Short Description (132 chars max)
 Connect your browser to your AI assistant. Read pages, take screenshots, fill forms, and extract data — all from your AI.
 
 ## Detailed Description
-Pilotwave bridges your browser and your AI assistant (Claude, VS Code Copilot, etc.) using the Model Context Protocol (MCP). Your AI can now see and interact with the web pages you're viewing.
+AgentHub bridges your browser and your AI assistant (Claude, VS Code Copilot, etc.) using the Model Context Protocol (MCP). Your AI can now see and interact with the web pages you're viewing.
 
-**What can your AI do with Pilotwave?**
+**What can your AI do with AgentHub?**
 
 FREE TOOLS:
 - Read page content — Ask your AI about anything on the current page
@@ -31,7 +31,7 @@ PRO TOOLS:
 
 **How it works:**
 1. Install the extension
-2. Run the one-command setup: npx pilotwave-setup
+2. Run the one-command setup: npx agenthub-setup
 3. Your AI tool is automatically detected and configured
 4. Start asking your AI about what's on your screen
 

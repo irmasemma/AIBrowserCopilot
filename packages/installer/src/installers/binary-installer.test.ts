@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { isBinaryInstalled, resolveLocalBinaries, downloadBinary } from './binary-installer.js';
 import { detectPlatform } from '../shared/platform.js';
 
-const TEST_DIR = join(tmpdir(), `pilotwave-test-${Date.now()}`);
+const TEST_DIR = join(tmpdir(), `agenthub-test-${Date.now()}`);
 
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });
@@ -23,7 +23,7 @@ describe('isBinaryInstalled', () => {
 
   it('returns false when only the bridge is installed (helper missing)', () => {
     const platform = detectPlatform('win32', 'x64', 'C:\\Users\\test');
-    writeFileSync(join(TEST_DIR, 'pilotwave-win-x64.exe'), 'fake-binary');
+    writeFileSync(join(TEST_DIR, 'agenthub-win-x64.exe'), 'fake-binary');
     // Helper missing → install is incomplete; the extension would report
     // "Setup incomplete" because it can't reach the native messaging endpoint.
     expect(isBinaryInstalled(TEST_DIR, platform)).toBe(false);
@@ -31,22 +31,22 @@ describe('isBinaryInstalled', () => {
 
   it('returns true when both bridge and helper exist for Windows', () => {
     const platform = detectPlatform('win32', 'x64', 'C:\\Users\\test');
-    writeFileSync(join(TEST_DIR, 'pilotwave-win-x64.exe'), 'fake-binary');
-    writeFileSync(join(TEST_DIR, 'pilotwave-helper-win-x64.exe'), 'fake-helper');
+    writeFileSync(join(TEST_DIR, 'agenthub-win-x64.exe'), 'fake-binary');
+    writeFileSync(join(TEST_DIR, 'agenthub-helper-win-x64.exe'), 'fake-helper');
     expect(isBinaryInstalled(TEST_DIR, platform)).toBe(true);
   });
 
   it('returns true when both bridge and helper exist for macOS', () => {
     const platform = detectPlatform('darwin', 'arm64', '/Users/test');
-    writeFileSync(join(TEST_DIR, 'pilotwave-macos-arm64'), 'fake-binary');
-    writeFileSync(join(TEST_DIR, 'pilotwave-helper-macos-arm64'), 'fake-helper');
+    writeFileSync(join(TEST_DIR, 'agenthub-macos-arm64'), 'fake-binary');
+    writeFileSync(join(TEST_DIR, 'agenthub-helper-macos-arm64'), 'fake-helper');
     expect(isBinaryInstalled(TEST_DIR, platform)).toBe(true);
   });
 
   it('returns true when both bridge and helper exist for Linux', () => {
     const platform = detectPlatform('linux', 'x64', '/home/test');
-    writeFileSync(join(TEST_DIR, 'pilotwave-linux-x64'), 'fake-binary');
-    writeFileSync(join(TEST_DIR, 'pilotwave-helper-linux-x64'), 'fake-helper');
+    writeFileSync(join(TEST_DIR, 'agenthub-linux-x64'), 'fake-binary');
+    writeFileSync(join(TEST_DIR, 'agenthub-helper-linux-x64'), 'fake-helper');
     expect(isBinaryInstalled(TEST_DIR, platform)).toBe(true);
   });
 });
@@ -123,8 +123,8 @@ describe('downloadBinary - progress callback', () => {
 
 describe('resolveLocalBinaries', () => {
   const platform = detectPlatform('win32', 'x64', 'C:\\Users\\test');
-  const binaryName = 'pilotwave-win-x64.exe';
-  const helperName = 'pilotwave-helper-win-x64.exe';
+  const binaryName = 'agenthub-win-x64.exe';
+  const helperName = 'agenthub-helper-win-x64.exe';
 
   it('finds binaries in flat layout (both files in the given dir)', () => {
     const dir = join(TEST_DIR, 'flat');
@@ -177,8 +177,8 @@ describe('resolveLocalBinaries', () => {
 
 describe('downloadBinary --from-local path', () => {
   const platform = detectPlatform('win32', 'x64', 'C:\\Users\\test');
-  const binaryName = 'pilotwave-win-x64.exe';
-  const helperName = 'pilotwave-helper-win-x64.exe';
+  const binaryName = 'agenthub-win-x64.exe';
+  const helperName = 'agenthub-helper-win-x64.exe';
 
   it('copies binary + helper from local source instead of downloading', async () => {
     const src = join(TEST_DIR, 'src');

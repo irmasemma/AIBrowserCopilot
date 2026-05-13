@@ -7,7 +7,7 @@ import { getAssetName, getHelperAssetName, NATIVE_HOST_NAME } from '../shared/co
 import { getManifestPath } from './host-registrar.js';
 import { removeConfigEntry } from './config-merger.js';
 import { registerAllDetectors, getAll, clear } from '../detectors/index.js';
-import { removePilotwaveFromVscode } from '../detectors/vscode.js';
+import { removeAgentHubFromVscode } from '../detectors/vscode.js';
 import { detectBrowsers, HELPER_HOST_NAME } from './browser-registrar.js';
 import { killRunningNativeHost, NATIVE_HOST_PORT } from './process-killer.js';
 import { unregisterAutostart } from './autostart-registrar.js';
@@ -29,7 +29,7 @@ export interface ConfigRemovalResult {
 
 /**
  * Remove the native host binaries (bridge + helper) and their install directory
- * if it ends up empty. Both binaries live side-by-side in `%LOCALAPPDATA%\pilotwave\`
+ * if it ends up empty. Both binaries live side-by-side in `%LOCALAPPDATA%\agenthub\`
  * on Windows; missing the helper here leaves a stale .exe behind and prevents
  * the install dir from being garbage-collected.
  */
@@ -101,7 +101,7 @@ const removeRegistryKey = (platform: PlatformInfo): { removed: boolean; error?: 
 };
 
 /**
- * Remove pilotwave MCP entries from all detected tool configs.
+ * Remove agenthub MCP entries from all detected tool configs.
  */
 const removeConfigs = async (platform: PlatformInfo): Promise<ConfigRemovalResult[]> => {
   clear();
@@ -124,7 +124,7 @@ const removeConfigs = async (platform: PlatformInfo): Promise<ConfigRemovalResul
         continue;
       }
 
-      const result = removeConfigEntry(detection.configPath, 'pilotwave');
+      const result = removeConfigEntry(detection.configPath, 'agenthub');
       results.push({
         tool: detector.name,
         removed: result.success,
@@ -138,7 +138,7 @@ const removeConfigs = async (platform: PlatformInfo): Promise<ConfigRemovalResul
   }
 
   try {
-    const vscodeResult = removePilotwaveFromVscode(platform);
+    const vscodeResult = removeAgentHubFromVscode(platform);
     results.push({
       tool: 'VS Code',
       removed: vscodeResult.removed || vscodeResult.errors.length === 0,
