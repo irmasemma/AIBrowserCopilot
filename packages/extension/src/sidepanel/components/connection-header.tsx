@@ -269,7 +269,7 @@ export const ConnectionHeader: FunctionalComponent = () => {
     : 'text-neutral-900';
 
   return (
-    <header class="border-b border-neutral-200 bg-white" role="banner">
+    <header class="border-b border-neutral-200 bg-white" role="banner" data-testid="connection-header">
       <div class="flex items-center justify-between px-4 py-3">
         <button
           class="flex items-center gap-1.5 cursor-pointer hover:opacity-80"
@@ -279,7 +279,12 @@ export const ConnectionHeader: FunctionalComponent = () => {
           title="Click for diagnostics"
         >
           <StatusBadge state={displayState} compact />
-          <span class={`text-xs font-medium ${titleColor}`}>{header.title}</span>
+          <span
+            class={`text-xs font-medium ${titleColor}`}
+            data-testid="connection-header-title"
+          >
+            {header.title}
+          </span>
           <span class={`text-[10px] text-neutral-400 transition-transform ${showDiag ? 'rotate-180' : ''}`} aria-hidden="true">{'\u25BE'}</span>
         </button>
         <span class="text-base font-semibold text-neutral-900">CoPilot</span>
@@ -287,7 +292,12 @@ export const ConnectionHeader: FunctionalComponent = () => {
       </div>
       {header.subtitle && (
         <div class="px-4 pb-2">
-          <p class="text-xs text-neutral-500 leading-snug">{header.subtitle}</p>
+          <p
+            class="text-xs text-neutral-500 leading-snug"
+            data-testid="connection-header-subtitle"
+          >
+            {header.subtitle}
+          </p>
         </div>
       )}
       {header.buttons.length > 0 && (

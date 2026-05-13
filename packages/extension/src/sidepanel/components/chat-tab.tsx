@@ -338,6 +338,7 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) =
               class="text-xs text-neutral-500 hover:text-neutral-800 px-1"
               onClick={newConversation}
               title="Start a new conversation"
+              data-testid="chat-new-button"
             >
               New
             </button>
@@ -446,11 +447,13 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) =
             onInput={(e) => setInput((e.target as HTMLTextAreaElement).value)}
             onKeyDown={onKeyDown}
             disabled={busy || !hasKey}
+            data-testid="chat-textarea"
           />
           {busy ? (
             <button
               class="text-sm font-medium text-white bg-neutral-500 px-3 rounded hover:bg-neutral-600"
               onClick={cancel}
+              data-testid="chat-stop-button"
             >
               Stop
             </button>
@@ -459,6 +462,7 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) =
               class="text-sm font-medium text-white bg-brand-primary px-3 rounded hover:bg-brand-primary-dark disabled:opacity-50"
               onClick={() => void send()}
               disabled={!input.trim() || !canSend}
+              data-testid="chat-send-button"
             >
               Send
             </button>
@@ -495,6 +499,9 @@ const ChatBubble: FunctionalComponent<{ entry: DisplayEntry }> = ({ entry }) => 
           class={`text-xs px-2 py-1 rounded ${
             entry.ok ? 'bg-neutral-100 text-neutral-600' : 'bg-red-50 text-red-700'
           }`}
+          data-testid="chat-tool-call"
+          data-tool-name={entry.toolName ?? ''}
+          data-tool-ok={entry.ok ? 'true' : 'false'}
         >
           {entry.ok ? '✓' : '✗'} {entry.text}
         </div>

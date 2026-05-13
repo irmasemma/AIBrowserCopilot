@@ -28,19 +28,21 @@ export interface ConfigRemovalResult {
 }
 
 /**
- * Remove the native host binary and its install directory (if empty).
+ * Remove the native host binaries (bridge + helper) and their install directory
+ * if it ends up empty. Both binaries live side-by-side in `%LOCALAPPDATA%\ai-browser-copilot\`
+ * on Windows; missing the helper here leaves a stale .exe behind and prevents
+ * the install dir from being garbage-collected.
  */
 const removeBinary = (platform: PlatformInfo): { removed: boolean; error?: string } => {
   const installDir = getInstallDir(platform);
-  const assetName = getAssetName(platform.os, platform.arch);
-  const binaryPath = join(installDir, assetName);
+  const bridgePath = join(installDir, getAssetName(platform.os, platform.arch));
+  const helperPath = join(installDir, getHelperAssetName(platform.os, platform.arch));
 
   try {
-    if (existsSync(binaryPath)) {
-      unlinkSync(binaryPath);
+    for (const p of [bridgePath, helperPath]) {
+      if (existsSync(p)) unlinkSync(p);
     }
 
-    // Remove install directory if empty
     if (existsSync(installDir)) {
       const remaining = readdirSync(installDir);
       if (remaining.length === 0) {
@@ -56,14 +58,21 @@ const removeBinary = (platform: PlatformInfo): { removed: boolean; error?: strin
 };
 
 /**
- * Remove the native messaging host manifest file.
+ * Remove the native messaging host manifests. On Windows both the bridge and
+ * helper manifests live in the install dir (browser-registrar writes them there
+ * and points the per-browser registry keys at them). On macOS/Linux the bridge
+ * manifest still lives in the per-browser dir handled by getManifestPath, while
+ * the helper manifests are cleaned up by removeMultiBrowserRegistrations.
  */
 const removeManifest = (platform: PlatformInfo): { removed: boolean; error?: string } => {
-  const manifestPath = getManifestPath(platform);
+  const paths = [getManifestPath(platform)];
+  if (platform.os === 'windows') {
+    paths.push(join(getInstallDir(platform), `${HELPER_HOST_NAME}.json`));
+  }
 
   try {
-    if (existsSync(manifestPath)) {
-      unlinkSync(manifestPath);
+    for (const p of paths) {
+      if (existsSync(p)) unlinkSync(p);
     }
     return { removed: true };
   } catch (err) {

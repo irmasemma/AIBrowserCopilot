@@ -38,7 +38,15 @@ export const StatusBadge: FunctionalComponent<StatusBadgeProps> = ({ state, comp
   const dotClasses = `w-2 h-2 rounded-full ${colorClass}${pulse ? ' animate-pulse' : ''}`;
 
   return (
-    <div class="flex items-center gap-1.5" role="status" aria-live="polite" aria-label={`Connection: ${label}`}>
+    <div
+      class="flex items-center gap-1.5"
+      role="status"
+      aria-live="polite"
+      aria-label={`Connection: ${label}`}
+      data-testid="status-badge"
+      data-state={state}
+      data-label={label}
+    >
       <span class="relative flex items-center">
         <span class={dotClasses} aria-hidden="true" />
         {badge && (

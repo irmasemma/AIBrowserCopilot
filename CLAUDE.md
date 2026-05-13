@@ -95,3 +95,15 @@ cat "$LOCALAPPDATA/ai-browser-copilot/com.copilot.native_host.json"
 - Multiple native host processes can run on different ports — always check the lock file for the current one
 - The `.cmd` wrapper is needed on Windows because Chrome native messaging requires an executable, not a `.cjs` file
 - `DEFAULT_EXTENSION_ID` in `packages/installer/src/shared/constants.ts` is empty — must be provided via flag during install
+- Google Chrome stable (138+) silently ignores `--load-extension` and `--disable-extensions-except` — only Chromium / Chrome Canary / Beta / Dev / Edge accept them. See `docs/test-findings.md` §4.
+
+## End-to-end install + connect test
+
+`tests/e2e/install-and-connect.spec.ts` exercises the full install → connect → MCP path with the user's real browser profile. Default-on against Edge (because of the Chrome stable block above):
+
+```
+COPILOT_TEST_KILL_CHROME=1 COPILOT_TEST_BROWSER=edge \
+  npx playwright test tests/e2e/install-and-connect.spec.ts
+```
+
+`COPILOT_TEST_KILL_CHROME=1` is required (it'll close the user's browser session). Test calls `claude -p` for the chat assertions, so `claude` must be on PATH and logged in. Full details + env-var reference + every gotcha hit while building this: `docs/test-findings.md`.
