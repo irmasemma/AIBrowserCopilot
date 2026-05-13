@@ -19,18 +19,18 @@ npm run compile:win -w packages/native-host-helper
 npm run build -w packages/installer
 
 # install-and-connect (Tests A, B) — install/uninstall flow + MCP via claude -p
-COPILOT_TEST_KILL_CHROME=1 COPILOT_TEST_BROWSER=edge \
+PILOTWAVE_TEST_KILL_CHROME=1 PILOTWAVE_TEST_BROWSER=edge \
   npx playwright test tests/e2e/install-and-connect.spec.ts
 
 # install-and-chat (Tests C, D, E) — side-panel chatbot, no-bridge resilience,
 # and recovery to Connected after install
-COPILOT_TEST_KILL_CHROME=1 COPILOT_TEST_BROWSER=edge \
-  COPILOT_TEST_OPENAI_KEY=sk-proj-... \
-  COPILOT_TEST_ANTHROPIC_KEY=sk-ant-api03-... \
+PILOTWAVE_TEST_KILL_CHROME=1 PILOTWAVE_TEST_BROWSER=edge \
+  PILOTWAVE_TEST_OPENAI_KEY=sk-proj-... \
+  PILOTWAVE_TEST_ANTHROPIC_KEY=sk-ant-api03-... \
   npx playwright test tests/e2e/install-and-chat.spec.ts
 ```
 
-`COPILOT_TEST_KILL_CHROME=1` opts in to closing your running browser session — the user-data-dir lock prevents Playwright from attaching otherwise. Drop `COPILOT_TEST_BROWSER=edge` to use Chrome (the helper auto-discovers Dev / Beta / Canary; refuses stable with a clear pointer to finding #4 below).
+`PILOTWAVE_TEST_KILL_CHROME=1` opts in to closing your running browser session — the user-data-dir lock prevents Playwright from attaching otherwise. Drop `PILOTWAVE_TEST_BROWSER=edge` to use Chrome (the helper auto-discovers Dev / Beta / Canary; refuses stable with a clear pointer to finding #4 below).
 
 Test A runs the clean-reinstall path (full uninstall → install → Connected → 2× `claude -p list_tabs` round-trips through the bridge). Test B runs the stale-install regression (no uninstall first, with the old bridge still running, to verify the new install kills + replaces the binary). Total wall time ~1m on this machine.
 
@@ -38,13 +38,13 @@ Test A runs the clean-reinstall path (full uninstall → install → Connected �
 
 | var | default | purpose |
 | --- | --- | --- |
-| `COPILOT_TEST_KILL_CHROME` | unset (refuses to launch) | must be `1` to opt in to killing the user's browser |
-| `COPILOT_TEST_BROWSER` | `chrome` | `edge` or `chrome` |
-| `COPILOT_TEST_USER_DATA_DIR` | per-browser default | override real user-data-dir |
-| `COPILOT_TEST_PROFILE_DIR` | `Profile 1` (Chrome) / `Default` (Edge) | profile inside the user-data-dir |
-| `COPILOT_TEST_CHROME_EXE` | auto-discover | explicit path to chrome.exe |
-| `COPILOT_TEST_EDGE_EXE` | auto-discover | explicit path to msedge.exe |
-| `COPILOT_TEST_EXPECTED_EXTENSION_ID` | `ehchm…dcmll` | derived from the extension dist path |
+| `PILOTWAVE_TEST_KILL_CHROME` | unset (refuses to launch) | must be `1` to opt in to killing the user's browser |
+| `PILOTWAVE_TEST_BROWSER` | `chrome` | `edge` or `chrome` |
+| `PILOTWAVE_TEST_USER_DATA_DIR` | per-browser default | override real user-data-dir |
+| `PILOTWAVE_TEST_PROFILE_DIR` | `Profile 1` (Chrome) / `Default` (Edge) | profile inside the user-data-dir |
+| `PILOTWAVE_TEST_CHROME_EXE` | auto-discover | explicit path to chrome.exe |
+| `PILOTWAVE_TEST_EDGE_EXE` | auto-discover | explicit path to msedge.exe |
+| `PILOTWAVE_TEST_EXPECTED_EXTENSION_ID` | `ehchm…dcmll` | derived from the extension dist path |
 
 ## What the test actually verifies
 
@@ -109,7 +109,7 @@ Asymmetric implementation: the install path was extended to copy a helper binary
 2. (Have something installed first) `node packages/installer/dist/index.js --uninstall --yes`
 3. `Test-Path "$env:LOCALAPPDATA\pilotwave\pilotwave-helper-win-x64.exe"` → `False`
 4. `Test-Path "$env:LOCALAPPDATA\pilotwave\com.pilotwave.native_host_helper.json"` → `False`
-5. Re-run the spec: `COPILOT_TEST_KILL_CHROME=1 npx playwright test tests/e2e/install-and-connect.spec.ts`
+5. Re-run the spec: `PILOTWAVE_TEST_KILL_CHROME=1 npx playwright test tests/e2e/install-and-connect.spec.ts`
 
 ## 2. Test-only fix: Chrome refuses CDP when user-data-dir is the default
 
@@ -123,7 +123,7 @@ Chromium 136+ refuses remote debugging (both `--remote-debugging-pipe` and `--re
 
 ### Fix applied (test-side, not product)
 
-`tests/e2e/helpers/real-chrome.ts`: present the real user-data-dir to Chrome via a directory junction at `%TEMP%\copilot-real-chrome-userdata`. Chrome sees a non-default path string, the gate passes, and the real profile data (cookies, signed-in sessions, extensions, chrome.storage) loads through the junction. The junction is idempotent — created once on the first run, reused after.
+`tests/e2e/helpers/real-chrome.ts`: present the real user-data-dir to Chrome via a directory junction at `%TEMP%\pilotwave-real-chrome-userdata`. Chrome sees a non-default path string, the gate passes, and the real profile data (cookies, signed-in sessions, extensions, chrome.storage) loads through the junction. The junction is idempotent — created once on the first run, reused after.
 
 ## 3. Test-only fix: Chrome 128+ refuses unpacked extensions until Developer Mode is on
 
@@ -159,7 +159,7 @@ WARNING:chrome\browser\extensions\extension_service.cc:440] --disable-extensions
 
 ### Path chosen: run against Microsoft Edge
 
-`tests/e2e/helpers/real-chrome.ts` is now browser-agnostic. Set `COPILOT_TEST_BROWSER=edge` to drive Edge instead of Chrome — Edge still honours `--load-extension`. The helper also auto-discovers Chrome Dev / Beta / Canary if you'd rather stay on Chrome (just don't set `COPILOT_TEST_BROWSER=edge`); it refuses Chrome stable with a clear error pointing here.
+`tests/e2e/helpers/real-chrome.ts` is now browser-agnostic. Set `PILOTWAVE_TEST_BROWSER=edge` to drive Edge instead of Chrome — Edge still honours `--load-extension`. The helper also auto-discovers Chrome Dev / Beta / Canary if you'd rather stay on Chrome (just don't set `PILOTWAVE_TEST_BROWSER=edge`); it refuses Chrome stable with a clear error pointing here.
 
 The same `Default` Edge profile, real cookies / sessions / extensions, real native-messaging registry — everything that mattered for "real profile" testing carries over.
 
@@ -195,12 +195,12 @@ npm run compile:win -w packages/native-host-helper
 npm run build -w packages/installer
 
 # Run (will close all open Edge windows when invoked)
-COPILOT_TEST_KILL_CHROME=1 COPILOT_TEST_BROWSER=edge \
+PILOTWAVE_TEST_KILL_CHROME=1 PILOTWAVE_TEST_BROWSER=edge \
   npx playwright test tests/e2e/install-and-connect.spec.ts
 ```
 
 Prerequisites baked into the test (handled automatically — no manual setup):
-- Junction at `%TEMP%\copilot-real-edge-userdata` → `%LOCALAPPDATA%\Microsoft\Edge\User Data` (CDP gate workaround).
+- Junction at `%TEMP%\pilotwave-real-edge-userdata` → `%LOCALAPPDATA%\Microsoft\Edge\User Data` (CDP gate workaround).
 - Bootstrap launch flips `developer-mode` toggle in `edge://extensions/` (extension-load gate).
 - Wake-up navigation forces the MV3 service worker to activate.
 
@@ -244,7 +244,7 @@ Once the extension ever connected (which the second profile had), any new diagno
 | Fix | File | What changed |
 | --- | --- | --- |
 | **1** Shape-skew handling | `background/service-discovery.ts` (`fetchServiceStatus`, ~lines 107-141) | When the helper responds with valid native-messaging but the response doesn't have `reason` + `url` strings, synthesize a partial `ServiceStatus` with `reason: 'no_lock_file'` instead of returning `null`. Auto-recovery now spawns the bridge via `start_native_host` (an action stable across helper versions). Genuine "helper threw" still returns `null` → `helper_unavailable`. |
-| **2** Preserve actionable diagnostics | `background/connection-manager.ts` (`setDiagnostic`, ~lines 87-108) | Added `ACTIONABLE_REASONS = ['no_lock_file', 'bridge_not_started', 'server_not_responding', 'protocol_timeout', 'helper_unavailable']`. The `was_connected` override only kicks in when the new reason isn't in that list. So when the SW knows the bridge isn't running, the UI says "Bridge isn't running, Start CoPilot service" and auto-recovery fires. |
+| **2** Preserve actionable diagnostics | `background/connection-manager.ts` (`setDiagnostic`, ~lines 87-108) | Added `ACTIONABLE_REASONS = ['no_lock_file', 'bridge_not_started', 'server_not_responding', 'protocol_timeout', 'helper_unavailable']`. The `was_connected` override only kicks in when the new reason isn't in that list. So when the SW knows the bridge isn't running, the UI says "Bridge isn't running, Start Pilotwave service" and auto-recovery fires. |
 | **3** Reload-extension escape hatch everywhere | `sidepanel/components/connection-header.tsx` | Added `{ id: 'reload_extension', label: 'Reload extension', variant: 'secondary' }` to every error-state's button list: `'Bridge isn't running'`, `'Bridge running but unresponsive'`, `'Lost connection'`, `'Bridge looks broken'`, `'Bridge is outdated'`, `'Not connected'`. Previously only on `'Setup incomplete'`. |
 | **4** Fast-poll watchdog | `entrypoints/background.ts` (~lines 25-32, 75-100) | While `ctx.state ∈ {disconnected, reconnecting}` AND a side panel is open keeping the SW alive, reconcile every 5s instead of waiting for the 30s alarm. Capped at 5 min total per broken episode so a user who walked away with the bridge uninstalled isn't burning CPU. |
 
@@ -256,4 +256,4 @@ Once the extension ever connected (which the second profile had), any new diagno
 
 ### Test infra side note
 
-Playwright was running multiple spec files in parallel by default, and the install-and-* specs share a single `%TEMP%\copilot-real-edge-userdata` junction → second worker hit "Opening in existing browser session" and crashed. Pinned `workers: 1` in `playwright.config.ts`; the affected specs are short and serial within themselves, so single-worker is the right default anyway.
+Playwright was running multiple spec files in parallel by default, and the install-and-* specs share a single `%TEMP%\pilotwave-real-edge-userdata` junction → second worker hit "Opening in existing browser session" and crashed. Pinned `workers: 1` in `playwright.config.ts`; the affected specs are short and serial within themselves, so single-worker is the right default anyway.

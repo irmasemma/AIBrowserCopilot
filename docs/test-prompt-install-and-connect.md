@@ -96,8 +96,8 @@ The default Playwright pattern (`chromium.launchPersistentContext('', …)`) use
 Real user-data-dir path on Windows: `%LOCALAPPDATA%\Google\Chrome\User Data`. Profile name: usually `Default`, but for this dev machine it's `Profile 1` (the dev extension ID `ehchmchlmggdigicfjfmlgcbhdcdcmll` corresponds to Profile 1 — see CLAUDE.md).
 
 Pattern to use:
-- Resolve user-data-dir from `process.env.LOCALAPPDATA + '\\Google\\Chrome\\User Data'`. Allow override via env var `COPILOT_TEST_USER_DATA_DIR` and `COPILOT_TEST_PROFILE_DIR` (default "Profile 1").
-- BEFORE launching: kill any running `chrome.exe` processes — Chrome holds an exclusive lock on the user-data-dir, so a running Chrome will prevent the test from attaching. Use `taskkill /IM chrome.exe /F` on Windows; warn the user if the test starts while Chrome is open. Skip the test (don't fail it) if `process.env.COPILOT_TEST_KILL_CHROME !== '1'` to avoid trampling the user's session unintentionally — make this an explicit opt-in.
+- Resolve user-data-dir from `process.env.LOCALAPPDATA + '\\Google\\Chrome\\User Data'`. Allow override via env var `PILOTWAVE_TEST_USER_DATA_DIR` and `PILOTWAVE_TEST_PROFILE_DIR` (default "Profile 1").
+- BEFORE launching: kill any running `chrome.exe` processes — Chrome holds an exclusive lock on the user-data-dir, so a running Chrome will prevent the test from attaching. Use `taskkill /IM chrome.exe /F` on Windows; warn the user if the test starts while Chrome is open. Skip the test (don't fail it) if `process.env.PILOTWAVE_TEST_KILL_CHROME !== '1'` to avoid trampling the user's session unintentionally — make this an explicit opt-in.
 - Launch via `chromium.launchPersistentContext(userDataDir, { args: [`--profile-directory=${profile}`, `--load-extension=${extDist}`, `--disable-extensions-except=${extDist}`, '--no-first-run'] })`.
 - Discover the loaded extension's ID from `context.serviceWorkers()` — wait up to 5s for the service worker to register. Confirm it equals `ehchmchlmggdigicfjfmlgcbhdcdcmll`; if not, print both expected and actual and fail with a clear message (the extension ID is per-profile and per-key).
 
@@ -116,7 +116,7 @@ npm run typecheck -w packages/installer
 npm run build:extension
 npm run compile:win -w packages/native-host
 npm run compile:win -w packages/native-host-helper
-COPILOT_TEST_KILL_CHROME=1 npx playwright test tests/e2e/install-and-connect.spec.ts
+PILOTWAVE_TEST_KILL_CHROME=1 npx playwright test tests/e2e/install-and-connect.spec.ts
 ```
 
 # Behavior loop — REQUIRED
@@ -136,7 +136,7 @@ Run the test. If it fails:
 # What "done" looks like
 
 - tests/e2e/install-and-connect.spec.ts exists with both test cases.
-- Running `COPILOT_TEST_KILL_CHROME=1 npx playwright test tests/e2e/install-and-connect.spec.ts` exits 0 with both tests green.
+- Running `PILOTWAVE_TEST_KILL_CHROME=1 npx playwright test tests/e2e/install-and-connect.spec.ts` exits 0 with both tests green.
 - Any product bugs found are documented in docs/test-findings.md with fixes applied to the working tree but uncommitted.
 - Final response summarises: which tests pass, what you fixed (test code vs product code), file:line for any product changes, and how to reproduce manually.
 
@@ -146,7 +146,7 @@ Run the test. If it fails:
 - No tests against npm-published `pilotwave-setup` (it's stale at 0.1.2). Always use the local installer build.
 - Don't add new dependencies unless you can justify why an existing one (playwright, node:child_process, node:fs, node:net) won't do.
 - Don't commit. Don't push. Don't tag. Don't open PRs.
-- If the user's real Chrome profile is the only Chrome process running on this machine, killing it interrupts their work — the COPILOT_TEST_KILL_CHROME env-gate exists so the test refuses to run without explicit opt-in. Keep that gate.
+- If the user's real Chrome profile is the only Chrome process running on this machine, killing it interrupts their work — the PILOTWAVE_TEST_KILL_CHROME env-gate exists so the test refuses to run without explicit opt-in. Keep that gate.
 - Don't write multi-paragraph comments or docstrings in the test file. Tight, named helpers; let the code read.
 ````
 
@@ -154,7 +154,7 @@ Run the test. If it fails:
 
 A few things I deliberately put in:
 
-- **`COPILOT_TEST_KILL_CHROME=1` opt-in** — running these against your real profile while you're using Chrome will close it. The env-gate keeps an LLM agent from trampling your session unprompted.
+- **`PILOTWAVE_TEST_KILL_CHROME=1` opt-in** — running these against your real profile while you're using Chrome will close it. The env-gate keeps an LLM agent from trampling your session unprompted.
 - **Test B is the regression test for the bug we just fixed** — stale bridge from old install must be killed by image-name. If you re-run after a release that includes `a6c678c`, Test B should pass; before that, it should fail at install with EPERM and the LLM should find/document the same bug.
 - **`docs/test-findings.md`** — concrete dumping ground for product bugs the test surfaces, since you said "document, fix, never commit."
 - **`Profile 1`** — pulled from CLAUDE.md (the dev extension ID is bound to that profile). Override env vars are there if you use a different profile.

@@ -1212,7 +1212,7 @@ test.describe('Edge cases and race conditions', () => {
 
     const body = await page.textContent('body');
     expect(body?.length).toBeGreaterThan(10); // Not blank
-    expect(body).toContain('CoPilot'); // Header always renders
+    expect(body).toContain('Pilotwave'); // Header always renders
 
     console.log('PASS: Rapid state changes — no blank screen');
     await clearAllStorage(page);
@@ -1248,7 +1248,7 @@ test.describe('Edge cases and race conditions', () => {
     // Extension should not be blank — should fall back to setup-needed or default
     const body = await page.textContent('body');
     expect(body?.length).toBeGreaterThan(10);
-    expect(body).toContain('CoPilot');
+    expect(body).toContain('Pilotwave');
 
     console.log('PASS: Corrupted storage does not crash extension');
     await clearAllStorage(page);
@@ -1264,7 +1264,7 @@ test.describe('Edge cases and race conditions', () => {
     // With no connectionState, store defaults to setup-needed
     const body = await page.textContent('body');
     // Should show setup wizard or at least not crash
-    expect(body).toContain('CoPilot');
+    expect(body).toContain('Pilotwave');
 
     console.log('PASS: Missing connectionState handled gracefully');
     await page.close();

@@ -185,7 +185,7 @@ export default defineBackground(() => {
       return true; // async response
     }
 
-    // User clicked "Start CoPilot service" in the popup/sidepanel.
+    // User clicked "Start Pilotwave service" in the popup/sidepanel.
     if (message?.type === 'start_service') {
       startCoordinator.tryStart({ userInitiated: true })
         .then((result) => {
@@ -200,7 +200,7 @@ export default defineBackground(() => {
       return true;
     }
 
-    // User clicked "Restart CoPilot service" in the popup/sidepanel.
+    // User clicked "Restart Pilotwave service" in the popup/sidepanel.
     if (message?.type === 'restart_service') {
       discovery.restartNativeHost()
         .then((result) => {
@@ -231,7 +231,7 @@ export default defineBackground(() => {
       return true; // async response
     }
 
-    // Self-heal: side panel asks "is CoPilot registered with Claude Code?" and "if not, fix it."
+    // Self-heal: side panel asks "is Pilotwave registered with Claude Code?" and "if not, fix it."
     if (message?.type === 'check_mcp_registration') {
       discovery.checkMcpRegistration()
         .then((status) => sendResponse(status))

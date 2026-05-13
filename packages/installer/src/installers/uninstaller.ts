@@ -7,7 +7,7 @@ import { getAssetName, getHelperAssetName, NATIVE_HOST_NAME } from '../shared/co
 import { getManifestPath } from './host-registrar.js';
 import { removeConfigEntry } from './config-merger.js';
 import { registerAllDetectors, getAll, clear } from '../detectors/index.js';
-import { removeAiBrowserCopilotFromVscode } from '../detectors/vscode.js';
+import { removePilotwaveFromVscode } from '../detectors/vscode.js';
 import { detectBrowsers, HELPER_HOST_NAME } from './browser-registrar.js';
 import { killRunningNativeHost, NATIVE_HOST_PORT } from './process-killer.js';
 import { unregisterAutostart } from './autostart-registrar.js';
@@ -138,7 +138,7 @@ const removeConfigs = async (platform: PlatformInfo): Promise<ConfigRemovalResul
   }
 
   try {
-    const vscodeResult = removeAiBrowserCopilotFromVscode(platform);
+    const vscodeResult = removePilotwaveFromVscode(platform);
     results.push({
       tool: 'VS Code',
       removed: vscodeResult.removed || vscodeResult.errors.length === 0,

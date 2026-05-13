@@ -11,7 +11,7 @@ import {
   type LockFileData,
 } from './lock-file-manager.js';
 
-const TEST_DIR = join(tmpdir(), 'copilot-lock-test-' + process.pid);
+const TEST_DIR = join(tmpdir(), 'pilotwave-lock-test-' + process.pid);
 const TEST_LOCK = join(TEST_DIR, 'server.lock');
 
 function makeLockData(overrides?: Partial<LockFileData>): LockFileData {

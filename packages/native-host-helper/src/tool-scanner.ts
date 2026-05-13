@@ -116,7 +116,7 @@ function resolveKeyPath(obj: unknown, keys: string[]): unknown {
   return current;
 }
 
-function hasCopilotEntry(mcpValue: unknown): boolean {
+function hasPilotwaveEntry(mcpValue: unknown): boolean {
   if (mcpValue === null || mcpValue === undefined) return false;
   if (Array.isArray(mcpValue)) {
     return mcpValue.some(
@@ -139,7 +139,7 @@ function scanDetector(detector: ToolDetector): ToolScanResult {
       const content = readFileSync(configPath, 'utf-8');
       const parsed = JSON.parse(content);
       const mcpValue = resolveKeyPath(parsed, detector.getMcpKeyPath());
-      const configured = hasCopilotEntry(mcpValue);
+      const configured = hasPilotwaveEntry(mcpValue);
       return { tool: detector.name, slug: detector.slug, installed: true, configured, configPath };
     } catch {
       return { tool: detector.name, slug: detector.slug, installed: true, configured: false, configPath };

@@ -440,7 +440,7 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) =
             rows={2}
             placeholder={
               hasKey
-                ? 'Ask CoPilot to do something in your browser…'
+                ? 'Ask Pilotwave to do something in your browser…'
                 : `Add a ${meta.label} key above to start chatting`
             }
             value={input}

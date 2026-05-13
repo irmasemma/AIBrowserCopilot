@@ -86,7 +86,7 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
 
   // Diagnostics that name a specific recoverable failure. Surface these as-is
   // (even after a prior successful connection) so the UI shows the actionable
-  // button ("Start CoPilot service", "Restart service", "Copy install command")
+  // button ("Start Pilotwave service", "Restart service", "Copy install command")
   // instead of the generic "Lost connection — Reopen autostart to reconnect"
   // and so the SW's auto-recovery loop (background.ts:RECOVERABLE_REASONS)
   // can fire.

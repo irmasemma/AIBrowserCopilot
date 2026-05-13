@@ -83,7 +83,7 @@ const buildSteps = (
       label: 'Lock file present',
       status: 'fail',
       detail: 'No service lock file. Bridge isn\u2019t running.',
-      hint: 'Click "Start CoPilot service" in the header.',
+      hint: 'Click "Start Pilotwave service" in the header.',
     });
     return steps;
   }
@@ -98,7 +98,7 @@ const buildSteps = (
       label: 'Process alive',
       status: 'fail',
       detail: 'Lock file is stale — bridge process exited.',
-      hint: 'Click "Start CoPilot service" to spawn a fresh bridge.',
+      hint: 'Click "Start Pilotwave service" to spawn a fresh bridge.',
     });
     return steps;
   }

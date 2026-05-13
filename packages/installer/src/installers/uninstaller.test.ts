@@ -6,7 +6,7 @@ import { detectPlatform } from '../shared/platform.js';
 import { getAssetName, NATIVE_HOST_NAME } from '../shared/constants.js';
 import { uninstall } from './uninstaller.js';
 
-const TEST_DIR = join(tmpdir(), `copilot-uninstall-test-${Date.now()}`);
+const TEST_DIR = join(tmpdir(), `pilotwave-uninstall-test-${Date.now()}`);
 
 const testPlatform = (os: 'win32' | 'darwin' | 'linux' = 'linux') =>
   detectPlatform(os, 'x64', TEST_DIR);

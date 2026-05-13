@@ -64,7 +64,7 @@ const fetchManifestName = async (
   }
 };
 
-const findCoPilotExtension = async (
+const findPilotwaveExtension = async (
   context: BrowserContext,
   timeoutMs = 15000,
 ): Promise<{ extensionId: string; serviceWorker: Worker }> => {
@@ -102,7 +102,7 @@ export const attachToRealEdge = async (timeoutMs = 15000): Promise<AttachedEdge>
     throw new Error('CDP connection returned no contexts — is Edge fully started?');
   }
   const context = contexts[0];
-  const { extensionId, serviceWorker } = await findCoPilotExtension(context, timeoutMs);
+  const { extensionId, serviceWorker } = await findPilotwaveExtension(context, timeoutMs);
   return { browser, context, extensionId, serviceWorker, port: state.port };
 };
 

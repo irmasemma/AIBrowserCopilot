@@ -112,10 +112,10 @@ test('3. Side panel renders correctly (setup wizard or main view)', async () => 
   console.log('Side panel body length:', body?.length);
   expect(body?.length).toBeGreaterThan(10);
 
-  // Check for header with "CoPilot" text
-  const hasCoPilot = await sidePanelPage.getByText('CoPilot').count();
-  console.log('Has CoPilot header:', hasCoPilot > 0);
-  expect(hasCoPilot).toBeGreaterThan(0);
+  // Check for header with "Pilotwave" text
+  const hasPilotwave = await sidePanelPage.getByText('Pilotwave').count();
+  console.log('Has Pilotwave header:', hasPilotwave > 0);
+  expect(hasPilotwave).toBeGreaterThan(0);
 
   // When not connected, side panel shows Setup Wizard
   // When connected, it shows Tools + Activity

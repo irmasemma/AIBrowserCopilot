@@ -13,27 +13,27 @@ const INSTALL_BASE = 'npx pilotwave-setup';
 const TOOL_GUIDES: ToolGuide[] = [
   {
     name: 'VS Code',
-    blurb: 'Adds CoPilot to your VS Code MCP servers (`.vscode/mcp.json`).',
+    blurb: 'Adds Pilotwave to your VS Code MCP servers (`.vscode/mcp.json`).',
     command: `${INSTALL_BASE} --tools vscode`,
   },
   {
     name: 'Cursor',
-    blurb: 'Adds CoPilot to Cursor\u2019s MCP server list.',
+    blurb: 'Adds Pilotwave to Cursor\u2019s MCP server list.',
     command: `${INSTALL_BASE} --tools cursor`,
   },
   {
     name: 'Claude Code (CLI)',
-    blurb: 'Adds CoPilot to ~/.claude.json at user scope so it survives `claude mcp` rewrites.',
+    blurb: 'Adds Pilotwave to ~/.claude.json at user scope so it survives `claude mcp` rewrites.',
     command: `${INSTALL_BASE} --tools claude-code`,
   },
   {
     name: 'Claude Desktop',
-    blurb: 'Adds CoPilot to Claude Desktop\u2019s MCP config.',
+    blurb: 'Adds Pilotwave to Claude Desktop\u2019s MCP config.',
     command: `${INSTALL_BASE} --tools claude-desktop`,
   },
   {
     name: 'Continue.dev',
-    blurb: 'Adds CoPilot to your Continue config so its agents can drive the browser.',
+    blurb: 'Adds Pilotwave to your Continue config so its agents can drive the browser.',
     command: `${INSTALL_BASE} --tools continue-dev`,
   },
   {
@@ -43,12 +43,12 @@ const TOOL_GUIDES: ToolGuide[] = [
   },
   {
     name: 'Windsurf',
-    blurb: 'Adds CoPilot to Windsurf\u2019s Cascade MCP server list.',
+    blurb: 'Adds Pilotwave to Windsurf\u2019s Cascade MCP server list.',
     command: `${INSTALL_BASE} --tools windsurf`,
   },
   {
     name: 'Zed',
-    blurb: 'Adds CoPilot as a context server for Zed.',
+    blurb: 'Adds Pilotwave as a context server for Zed.',
     command: `${INSTALL_BASE} --tools zed`,
   },
 ];
@@ -74,7 +74,7 @@ export const HowToConnect: FunctionalComponent = () => {
     <section class="border-t border-neutral-200 pt-4">
       <h3 class="font-semibold text-neutral-800 mb-1">Connect another AI tool</h3>
       <p class="text-xs text-neutral-500 mb-3">
-        CoPilot is a single bridge that any number of AI tools can talk to. Add it
+        Pilotwave is a single bridge that any number of AI tools can talk to. Add it
         once per tool — works alongside any existing MCP setup. No reinstall needed
         between tools.
       </p>

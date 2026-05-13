@@ -242,7 +242,7 @@ export interface VscodeUninstallResult {
  * `removeConfigEntry` path because mcp.json's top-level `servers` shape
  * is VS-Code-specific.
  */
-export const removeAiBrowserCopilotFromVscode = (
+export const removePilotwaveFromVscode = (
   platform: PlatformInfo,
 ): VscodeUninstallResult => {
   const backupPaths: string[] = [];

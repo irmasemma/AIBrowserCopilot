@@ -2,7 +2,7 @@
 
 Two Playwright specs at the repo root drive the real installer + real browser + real bridge end-to-end. They live outside this package (under `tests/e2e/`) because they exercise the whole product — installer, native host, helper, extension — together. Documented here because the extension is the moving part most likely to break them.
 
-Both specs are opt-in. They will kill any running browser session: gate is `COPILOT_TEST_KILL_CHROME=1`.
+Both specs are opt-in. They will kill any running browser session: gate is `PILOTWAVE_TEST_KILL_CHROME=1`.
 
 ## `tests/e2e/install-and-connect.spec.ts`
 
@@ -22,15 +22,15 @@ npm run build:extension
 npm run compile:win -w packages/native-host
 npm run compile:win -w packages/native-host-helper
 npm run build -w packages/installer
-COPILOT_TEST_KILL_CHROME=1 COPILOT_TEST_BROWSER=edge \
+PILOTWAVE_TEST_KILL_CHROME=1 PILOTWAVE_TEST_BROWSER=edge \
   npx playwright test tests/e2e/install-and-connect.spec.ts
 ```
 
-Default browser is Chrome — but Google Chrome stable (138+) silently ignores `--load-extension`, so the helper refuses stable with a pointer to install Chrome Dev / Beta / Canary, or to use Edge. The simplest path on Windows is `COPILOT_TEST_BROWSER=edge`.
+Default browser is Chrome — but Google Chrome stable (138+) silently ignores `--load-extension`, so the helper refuses stable with a pointer to install Chrome Dev / Beta / Canary, or to use Edge. The simplest path on Windows is `PILOTWAVE_TEST_BROWSER=edge`.
 
 ### Prereqs picked up automatically (no manual setup)
 
-- Junction at `%TEMP%\copilot-real-edge-userdata` → real Edge user-data-dir (works around the Chrome/Edge "no remote debugging on default profile" gate).
+- Junction at `%TEMP%\pilotwave-real-edge-userdata` → real Edge user-data-dir (works around the Chrome/Edge "no remote debugging on default profile" gate).
 - Bootstrap launch flips the `developer-mode` toggle in `edge://extensions/` (works around the Chrome 128+ unpacked-extension block).
 - Wake-up navigation forces the lazy MV3 service worker to activate before SW discovery.
 
@@ -53,17 +53,17 @@ Tests skip themselves with a clear message when no key env vars are set. Configu
 
 | Provider | Env var | Model used | Stored key id in `chrome.storage.local` |
 | --- | --- | --- | --- |
-| OpenAI | `COPILOT_TEST_OPENAI_KEY` | `gpt-4.1-mini` | `openaiApiKey` |
-| Anthropic | `COPILOT_TEST_ANTHROPIC_KEY` | `claude-haiku-4-5` | `anthropicApiKey` |
+| OpenAI | `PILOTWAVE_TEST_OPENAI_KEY` | `gpt-4.1-mini` | `openaiApiKey` |
+| Anthropic | `PILOTWAVE_TEST_ANTHROPIC_KEY` | `claude-haiku-4-5` | `anthropicApiKey` |
 
 Keys are read from env at runtime; never written into any file in the repo.
 
 ### Run
 
 ```
-COPILOT_TEST_KILL_CHROME=1 COPILOT_TEST_BROWSER=edge \
-  COPILOT_TEST_OPENAI_KEY=sk-proj-... \
-  COPILOT_TEST_ANTHROPIC_KEY=sk-ant-api03-... \
+PILOTWAVE_TEST_KILL_CHROME=1 PILOTWAVE_TEST_BROWSER=edge \
+  PILOTWAVE_TEST_OPENAI_KEY=sk-proj-... \
+  PILOTWAVE_TEST_ANTHROPIC_KEY=sk-ant-api03-... \
   npx playwright test tests/e2e/install-and-chat.spec.ts
 ```
 

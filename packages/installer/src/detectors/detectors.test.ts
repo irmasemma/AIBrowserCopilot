@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { detectPlatform } from '../shared/platform.js';
 import { claudeDesktopDetector, getConfigPath as getDesktopConfigPath } from './claude-desktop.js';
 import { claudeCodeDetector, getConfigPath as getCodeConfigPath } from './claude-code.js';
-import { vscodeDetector, getSettingsPath as getVscodeSettingsPath, getConfigPath as getVscodeConfigPath, cleanupLegacyVscodeSettings, removeAiBrowserCopilotFromVscode } from './vscode.js';
+import { vscodeDetector, getSettingsPath as getVscodeSettingsPath, getConfigPath as getVscodeConfigPath, cleanupLegacyVscodeSettings, removePilotwaveFromVscode } from './vscode.js';
 import { cursorDetector, getSettingsPath as getCursorSettingsPath } from './cursor.js';
 import { windsurfDetector, getSettingsPath as getWindsurfSettingsPath } from './windsurf.js';
 import { jetbrainsDetector, getConfigPath as getJetbrainsConfigPath } from './jetbrains.js';
@@ -13,7 +13,7 @@ import { zedDetector, getSettingsPath as getZedSettingsPath } from './zed.js';
 import { continueDevDetector, getConfigPath as getContinueConfigPath } from './continue-dev.js';
 import { registerAllDetectors, getAll, clear, runAll } from './index.js';
 
-const TEST_DIR = join(tmpdir(), `copilot-detectors-test-${Date.now()}`);
+const TEST_DIR = join(tmpdir(), `pilotwave-detectors-test-${Date.now()}`);
 
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });
@@ -394,7 +394,7 @@ describe('VS Code Detector', () => {
     expect(result.error).toContain('malformed');
   });
 
-  it('removeAiBrowserCopilotFromVscode handles both new mcp.json and legacy settings.json', () => {
+  it('removePilotwaveFromVscode handles both new mcp.json and legacy settings.json', () => {
     const platform = testPlatform('linux');
     const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(settingsDir, { recursive: true });
@@ -407,7 +407,7 @@ describe('VS Code Detector', () => {
       mcp: { servers: { 'pilotwave': {} } },
     }, null, 2) + '\n');
 
-    const result = removeAiBrowserCopilotFromVscode(platform);
+    const result = removePilotwaveFromVscode(platform);
     expect(result.removed).toBe(true);
     expect(result.errors).toEqual([]);
 
@@ -420,16 +420,16 @@ describe('VS Code Detector', () => {
     expect(settings['editor.fontSize']).toBe(14);
   });
 
-  it('removeAiBrowserCopilotFromVscode is idempotent', () => {
+  it('removePilotwaveFromVscode is idempotent', () => {
     const platform = testPlatform('linux');
     const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(settingsDir, { recursive: true });
 
-    const r1 = removeAiBrowserCopilotFromVscode(platform);
+    const r1 = removePilotwaveFromVscode(platform);
     expect(r1.removed).toBe(false);
     expect(r1.errors).toEqual([]);
 
-    const r2 = removeAiBrowserCopilotFromVscode(platform);
+    const r2 = removePilotwaveFromVscode(platform);
     expect(r2.removed).toBe(false);
     expect(r2.errors).toEqual([]);
   });

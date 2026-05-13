@@ -1,11 +1,11 @@
 /**
  * E2E install + connect: drives the user's REAL browser (Chrome by default,
- * Edge with COPILOT_TEST_BROWSER=edge) with the REAL profile through two
+ * Edge with PILOTWAVE_TEST_BROWSER=edge) with the REAL profile through two
  * install scenarios — clean reinstall and stale-installer reinstall — and
  * verifies the side panel reaches "Connected" plus two `claude -p` turns
  * invoking `mcp__pilotwave__list_tabs` against the live bridge.
  *
- * Opt-in. Set COPILOT_TEST_KILL_CHROME=1 to allow killing the user's running
+ * Opt-in. Set PILOTWAVE_TEST_KILL_CHROME=1 to allow killing the user's running
  * browser session (the browser holds an exclusive lock on the user-data-dir,
  * so attaching otherwise is impossible).
  */

@@ -9,7 +9,7 @@ Connect your browser to your AI assistant. Read pages, take screenshots, fill fo
 ## Detailed Description
 Pilotwave bridges your browser and your AI assistant (Claude, VS Code Copilot, etc.) using the Model Context Protocol (MCP). Your AI can now see and interact with the web pages you're viewing.
 
-**What can your AI do with CoPilot?**
+**What can your AI do with Pilotwave?**
 
 FREE TOOLS:
 - Read page content — Ask your AI about anything on the current page

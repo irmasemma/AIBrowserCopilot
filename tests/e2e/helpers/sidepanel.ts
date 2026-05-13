@@ -4,9 +4,9 @@
  * a chat turn that should trigger list_tabs.
  *
  * The chat tab requires an LLM API key. For tests we read it from env:
- *   COPILOT_TEST_LLM_PROVIDER (openai|anthropic|gemini, default openai)
- *   COPILOT_TEST_LLM_KEY      (required to run the chat assertions)
- *   COPILOT_TEST_LLM_MODEL    (per-provider default below)
+ *   PILOTWAVE_TEST_LLM_PROVIDER (openai|anthropic|gemini, default openai)
+ *   PILOTWAVE_TEST_LLM_KEY      (required to run the chat assertions)
+ *   PILOTWAVE_TEST_LLM_MODEL    (per-provider default below)
  */
 import { expect, type BrowserContext, type Page } from '@playwright/test';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -32,13 +32,13 @@ const STORAGE_KEY: Record<Provider, string> = {
 };
 
 export const readChatConfigFromEnv = (): ChatConfig | null => {
-  const apiKey = process.env.COPILOT_TEST_LLM_KEY;
+  const apiKey = process.env.PILOTWAVE_TEST_LLM_KEY;
   if (!apiKey) return null;
-  const provider = (process.env.COPILOT_TEST_LLM_PROVIDER ?? 'openai') as Provider;
+  const provider = (process.env.PILOTWAVE_TEST_LLM_PROVIDER ?? 'openai') as Provider;
   if (!['openai', 'anthropic', 'gemini'].includes(provider)) {
-    throw new Error(`Bad COPILOT_TEST_LLM_PROVIDER="${provider}" — must be openai|anthropic|gemini`);
+    throw new Error(`Bad PILOTWAVE_TEST_LLM_PROVIDER="${provider}" — must be openai|anthropic|gemini`);
   }
-  const model = process.env.COPILOT_TEST_LLM_MODEL ?? DEFAULT_MODEL[provider];
+  const model = process.env.PILOTWAVE_TEST_LLM_MODEL ?? DEFAULT_MODEL[provider];
   return { provider, apiKey, model };
 };
 

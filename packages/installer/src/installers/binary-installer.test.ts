@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { isBinaryInstalled, resolveLocalBinaries, downloadBinary } from './binary-installer.js';
 import { detectPlatform } from '../shared/platform.js';
 
-const TEST_DIR = join(tmpdir(), `copilot-test-${Date.now()}`);
+const TEST_DIR = join(tmpdir(), `pilotwave-test-${Date.now()}`);
 
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });

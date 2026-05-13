@@ -120,7 +120,7 @@ export function createServiceDiscovery(): ServiceDiscovery {
     // (e.g. user manually ran `npx pilotwave-setup` which installs an
     // older published helper whose response format the current extension
     // doesn't recognise). Surface as a recoverable "bridge not running" state
-    // so auto-recovery (or the user's "Start CoPilot service" click) can call
+    // so auto-recovery (or the user's "Start Pilotwave service" click) can call
     // the helper's `start_native_host` action, which has been stable across
     // versions. Better than collapsing into `helper_unavailable`, which would
     // falsely tell the user to re-run the installer they already ran.

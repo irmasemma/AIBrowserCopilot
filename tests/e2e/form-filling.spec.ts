@@ -457,20 +457,20 @@ test.describe('form-react.html', () => {
 
   test('fills controlled inputs and verifies React state updates', async () => {
     const results = await fillForm(tabId, [
-      { selector: '#product-name', value: 'CoPilot Pro' },
+      { selector: '#product-name', value: 'Pilotwave Pro' },
       { selector: '#tagline', value: 'AI meets browser' },
       { selector: '#website-url', value: 'https://copilotpro.dev' },
     ]);
 
     results.forEach(r => expect(r.success).toBe(true));
 
-    expect(await page.inputValue('#product-name')).toBe('CoPilot Pro');
+    expect(await page.inputValue('#product-name')).toBe('Pilotwave Pro');
     expect(await page.inputValue('#tagline')).toBe('AI meets browser');
     expect(await page.inputValue('#website-url')).toBe('https://copilotpro.dev');
 
     // Verify React internal state was updated via __reactEvents
     const stateUpdated = await page.evaluate(() => {
-      return (window as any).__reactEvents?.some((e: any) => e.id === 'product-name' && e.value === 'CoPilot Pro');
+      return (window as any).__reactEvents?.some((e: any) => e.id === 'product-name' && e.value === 'Pilotwave Pro');
     });
     expect(stateUpdated).toBe(true);
   });

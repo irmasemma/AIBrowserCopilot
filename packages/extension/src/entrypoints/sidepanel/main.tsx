@@ -79,7 +79,7 @@ const ToolsTab = () => {
         </h2>
         {activityLog.length === 0 ? (
           <p class="px-4 text-xs text-neutral-400 py-4">
-            No activity yet — try asking CoPilot to do something, or connect an
+            No activity yet — try asking Pilotwave to do something, or connect an
             MCP-capable AI tool.
           </p>
         ) : (

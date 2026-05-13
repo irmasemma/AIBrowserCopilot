@@ -1,6 +1,6 @@
 {
   "name": "pilotwave-setup",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "One-command setup for Pilotwave — installs the native host and configures your AI tools (Claude Code, Cursor, VS Code, Windsurf, Continue, JetBrains, Zed)",
   "type": "module",
   "bin": {

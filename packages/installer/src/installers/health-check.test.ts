@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { checkBinaryHealth } from './health-check.js';
 import { detectPlatform } from '../shared/platform.js';
 
-const TEST_DIR = join(tmpdir(), `copilot-health-test-${Date.now()}`);
+const TEST_DIR = join(tmpdir(), `pilotwave-health-test-${Date.now()}`);
 
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });

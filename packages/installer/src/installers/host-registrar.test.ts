@@ -6,7 +6,7 @@ import { generateManifest, getManifestDir, getManifestPath, registerHost } from 
 import { detectPlatform } from '../shared/platform.js';
 import { NATIVE_HOST_NAME, DEFAULT_EXTENSION_ID } from '../shared/constants.js';
 
-const TEST_DIR = join(tmpdir(), `copilot-reg-test-${Date.now()}`);
+const TEST_DIR = join(tmpdir(), `pilotwave-reg-test-${Date.now()}`);
 
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });

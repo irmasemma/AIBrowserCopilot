@@ -23,7 +23,7 @@ export const LOCK_FILE = 'server.lock';
 
 const HKCU_NM_BASE = 'HKCU\\SOFTWARE\\Google\\Chrome\\NativeMessagingHosts';
 const HKCU_RUN = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
-const RUN_VALUE = 'AIBrowserCopilot';
+const RUN_VALUE = 'Pilotwave';
 
 export interface InstallSnapshot {
   bridgeBinary: { exists: boolean; path: string; mtimeMs?: number };

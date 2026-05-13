@@ -6,7 +6,7 @@
 // Setup:
 //   * Closes any running msedge.exe (user-data-dir is locked otherwise).
 //   * Mounts %LOCALAPPDATA%\Microsoft\Edge\User Data via a junction at
-//     %TEMP%\copilot-real-edge-userdata so Chromium 136+'s CDP "default
+//     %TEMP%\pilotwave-real-edge-userdata so Chromium 136+'s CDP "default
 //     user-data-dir" gate passes.
 //   * Disables all installed Edge extensions for this session so any real
 //     Pilotwave install doesn't open its own side panel and conflict with
@@ -36,7 +36,7 @@ const REAL_USER_DATA_DIR = path.join(
   'Edge',
   'User Data',
 );
-const JUNCTION = path.join(os.tmpdir(), 'copilot-real-edge-userdata');
+const JUNCTION = path.join(os.tmpdir(), 'pilotwave-real-edge-userdata');
 const LINKEDIN_URL = 'https://www.linkedin.com/in/irma-semma-64828891';
 
 const findEdgeExe = () => {

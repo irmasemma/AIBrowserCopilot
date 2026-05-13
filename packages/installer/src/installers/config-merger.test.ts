@@ -11,7 +11,7 @@ import {
   removeConfigEntry,
 } from './config-merger.js';
 
-const TEST_DIR = join(tmpdir(), `copilot-merger-test-${Date.now()}`);
+const TEST_DIR = join(tmpdir(), `pilotwave-merger-test-${Date.now()}`);
 
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });
