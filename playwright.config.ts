@@ -6,6 +6,12 @@ const extensionPath = path.resolve(__dirname, 'packages/extension/dist');
 export default defineConfig({
   testDir: './tests/e2e',
   timeout: 60000,
+  // Real-browser e2e specs (install-and-connect, install-and-chat) share a
+  // single user-data-dir junction at %TEMP%\copilot-real-edge-userdata —
+  // running multiple workers makes the second worker hit "Opening in existing
+  // browser session" and fail. Pin to one worker globally; the affected specs
+  // are short and serial within themselves.
+  workers: 1,
   use: {
     headless: false, // Extensions require headed mode
   },

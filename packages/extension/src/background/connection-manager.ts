@@ -84,9 +84,28 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
     });
   }
 
+  // Diagnostics that name a specific recoverable failure. Surface these as-is
+  // (even after a prior successful connection) so the UI shows the actionable
+  // button ("Start CoPilot service", "Restart service", "Copy install command")
+  // instead of the generic "Lost connection — Reopen autostart to reconnect"
+  // and so the SW's auto-recovery loop (background.ts:RECOVERABLE_REASONS)
+  // can fire.
+  const ACTIONABLE_REASONS: DiagnosticReason[] = [
+    'no_lock_file',
+    'bridge_not_started',
+    'server_not_responding',
+    'protocol_timeout',
+    'helper_unavailable',
+  ];
+
   function setDiagnostic(reason: DiagnosticReason): void {
-    // If we previously had a connection, override to 'was_connected'
-    const effectiveReason = context.serverInfo !== null && reason !== 'connecting' ? 'was_connected' : reason;
+    // After a successful connection, if the new reason isn't itself actionable,
+    // surface 'was_connected' so the UI tells the user how to reconnect.
+    // Actionable reasons pass through so recovery can drive the fix.
+    const effectiveReason =
+      context.serverInfo !== null && reason !== 'connecting' && !ACTIONABLE_REASONS.includes(reason)
+        ? 'was_connected'
+        : reason;
     if (context.diagnosticReason !== effectiveReason) {
       context = { ...context, diagnosticReason: effectiveReason };
       persistContext(context);

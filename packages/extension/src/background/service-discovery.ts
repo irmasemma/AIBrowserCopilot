@@ -105,14 +105,39 @@ export function createServiceDiscovery(): ServiceDiscovery {
   }
 
   async function fetchServiceStatus(browserId: string): Promise<ServiceStatus | null> {
+    let response: Record<string, unknown>;
     try {
-      const r = await sendNativeMessage('get_service_status', { browserId });
-      // Defensive: validate the shape minimally.
-      if (typeof r.reason !== 'string' || typeof r.url !== 'string') return null;
-      return r as unknown as ServiceStatus;
+      response = await sendNativeMessage('get_service_status', { browserId });
     } catch {
+      // Helper genuinely not reachable (Chrome's connectNative failed because
+      // the manifest isn't registered, or the helper exe is missing).
       return null;
     }
+    if (typeof response.reason === 'string' && typeof response.url === 'string') {
+      return response as unknown as ServiceStatus;
+    }
+    // Helper responded but with an unexpected shape — usually a version skew
+    // (e.g. user manually ran `npx ai-browser-copilot-setup` which installs an
+    // older published helper whose response format the current extension
+    // doesn't recognise). Surface as a recoverable "bridge not running" state
+    // so auto-recovery (or the user's "Start CoPilot service" click) can call
+    // the helper's `start_native_host` action, which has been stable across
+    // versions. Better than collapsing into `helper_unavailable`, which would
+    // falsely tell the user to re-run the installer they already ran.
+    return {
+      helperVersion: typeof response.helperVersion === 'string' ? response.helperVersion : 'unknown',
+      installDir: typeof response.installDir === 'string' ? response.installDir : '',
+      binaryPath: typeof response.binaryPath === 'string' ? response.binaryPath : '',
+      // Optimistically assume the binary is there. If it isn't, start_native_host
+      // will fail with a real error the user can act on.
+      binaryExists: typeof response.binaryExists === 'boolean' ? response.binaryExists : true,
+      lockFile: { exists: false },
+      pidAlive: null,
+      portListening: false,
+      wsHealthy: false,
+      url: `ws://127.0.0.1:${DEFAULT_PORT}?browserId=${encodeURIComponent(browserId)}`,
+      reason: 'no_lock_file',
+    };
   }
 
   return {

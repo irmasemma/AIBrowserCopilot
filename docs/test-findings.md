@@ -1,22 +1,33 @@
-# Test findings — install-and-connect.spec.ts
+# Test findings — install-and-connect + install-and-chat
 
-Findings surfaced by `tests/e2e/install-and-connect.spec.ts`. Status: **both tests green** (Test A — clean reinstall, Test B — stale-installer reinstall).
+Findings surfaced by `tests/e2e/install-and-connect.spec.ts` and `tests/e2e/install-and-chat.spec.ts`. Status: **all 5 tests green** (Test A — clean reinstall, Test B — stale-installer reinstall, Test C — side-panel chat with OpenAI + Anthropic providers, Test D — side-panel chat without bridge installed, Test E — side panel auto-recovers from no-bridge to Connected after install).
 
-## TL;DR — running the test
+## TL;DR — running the tests
 
 ```
 # One-time per-machine prereqs
 #   * Microsoft Edge installed (or Chrome Dev / Beta / Canary for Chrome)
 #   * `claude` CLI on PATH and logged in (this gives you the OAuth token in
-#     ~/.claude/.credentials.json — no separate ANTHROPIC_API_KEY needed)
+#     ~/.claude/.credentials.json — used by install-and-connect Tests A/B)
+#   * OpenAI and/or Anthropic API key in env (only required for install-and-chat
+#     Tests C/D — install-and-connect's claude -p assertions don't need these)
 #
 # Per-run (rebuilds + run)
 npm run build:extension
 npm run compile:win -w packages/native-host
 npm run compile:win -w packages/native-host-helper
 npm run build -w packages/installer
+
+# install-and-connect (Tests A, B) — install/uninstall flow + MCP via claude -p
 COPILOT_TEST_KILL_CHROME=1 COPILOT_TEST_BROWSER=edge \
   npx playwright test tests/e2e/install-and-connect.spec.ts
+
+# install-and-chat (Tests C, D, E) — side-panel chatbot, no-bridge resilience,
+# and recovery to Connected after install
+COPILOT_TEST_KILL_CHROME=1 COPILOT_TEST_BROWSER=edge \
+  COPILOT_TEST_OPENAI_KEY=sk-proj-... \
+  COPILOT_TEST_ANTHROPIC_KEY=sk-ant-api03-... \
+  npx playwright test tests/e2e/install-and-chat.spec.ts
 ```
 
 `COPILOT_TEST_KILL_CHROME=1` opts in to closing your running browser session — the user-data-dir lock prevents Playwright from attaching otherwise. Drop `COPILOT_TEST_BROWSER=edge` to use Chrome (the helper auto-discovers Dev / Beta / Canary; refuses stable with a clear pointer to finding #4 below).
@@ -197,3 +208,52 @@ External prereqs:
 - Microsoft Edge installed (or Chrome Dev for Chrome path).
 - `claude` CLI on PATH and logged in.
 - `ai-browser-copilot` registered as a Claude Code MCP server (the installer does this).
+
+## 6. Product fixes: side panel got stuck in contradictory states after uninstall + manual reinstall
+
+### Symptoms (what the user saw)
+
+After Test D (which leaves the system fully uninstalled), running `npx ai-browser-copilot-setup --update --extension-id ...` did NOT bring the side panel back to Connected. Instead two contradictory states stuck:
+
+- **Profile 1**: header says "Setup incomplete — The native messaging helper isn't registered. Re-run the installer." Diagnostics panel below says "Helper available" ✕ "Helper returned no data." Buttons offered: "Copy install command" + "Reload extension."
+- **A second profile**: header says "Lost connection — Reopen autostart to reconnect." Same diagnostics body underneath.
+
+Both shown indefinitely until "Reload extension" was clicked manually. The header's claim ("helper isn't registered") directly contradicted the diagnostic body ("helper available").
+
+### Root causes (four interacting bugs)
+
+**(a) Shape-skew collapses to `helper_unavailable`.** `service-discovery.ts:fetchServiceStatus` did:
+```
+const r = await sendNativeMessage('get_service_status', { browserId });
+if (typeof r.reason !== 'string' || typeof r.url !== 'string') return null;
+```
+Returning `null` in both "helper threw" and "helper responded but with unrecognised shape" → both map to `diagnostic: 'helper_unavailable'`. The user had run the *published* installer (`npx ai-browser-copilot-setup` = `0.1.2`, stale) — its helper responded with a slightly different shape than the working-tree extension expected. So helper was reachable, but the extension treated it as unregistered.
+
+**(b) `setDiagnostic` blanket-overrides actionable reasons.** `connection-manager.ts:setDiagnostic` did:
+```
+const effectiveReason = context.serverInfo !== null && reason !== 'connecting' ? 'was_connected' : reason;
+```
+Once the extension ever connected (which the second profile had), any new diagnostic *other than* `'connecting'` got rewritten to `'was_connected'`. Even when the SW knew the real reason was `'no_lock_file'` or `'bridge_not_started'` (both in `RECOVERABLE_REASONS`, both would have triggered auto-recovery via `startCoordinator.tryStart()`), the override hid it. UI showed "Lost connection" and the auto-recovery never fired.
+
+**(c) Only `Setup incomplete` had a `Reload extension` escape hatch.** Every other broken state ("Lost connection", "Bridge running but unresponsive", "Bridge looks broken", etc.) had no manual way out beyond the action button that was already failing. If alarm reconcile couldn't unstick the state, the user had nothing to click.
+
+**(d) Recovery latency was up to 30s.** Chrome enforces a 30s minimum for periodic alarms. So even when discovery *would* have unstuck things on the next reconcile, the user waited up to 30s after running the installer before anything changed.
+
+### Fixes applied (all in `packages/extension/src/`)
+
+| Fix | File | What changed |
+| --- | --- | --- |
+| **1** Shape-skew handling | `background/service-discovery.ts` (`fetchServiceStatus`, ~lines 107-141) | When the helper responds with valid native-messaging but the response doesn't have `reason` + `url` strings, synthesize a partial `ServiceStatus` with `reason: 'no_lock_file'` instead of returning `null`. Auto-recovery now spawns the bridge via `start_native_host` (an action stable across helper versions). Genuine "helper threw" still returns `null` → `helper_unavailable`. |
+| **2** Preserve actionable diagnostics | `background/connection-manager.ts` (`setDiagnostic`, ~lines 87-108) | Added `ACTIONABLE_REASONS = ['no_lock_file', 'bridge_not_started', 'server_not_responding', 'protocol_timeout', 'helper_unavailable']`. The `was_connected` override only kicks in when the new reason isn't in that list. So when the SW knows the bridge isn't running, the UI says "Bridge isn't running, Start CoPilot service" and auto-recovery fires. |
+| **3** Reload-extension escape hatch everywhere | `sidepanel/components/connection-header.tsx` | Added `{ id: 'reload_extension', label: 'Reload extension', variant: 'secondary' }` to every error-state's button list: `'Bridge isn't running'`, `'Bridge running but unresponsive'`, `'Lost connection'`, `'Bridge looks broken'`, `'Bridge is outdated'`, `'Not connected'`. Previously only on `'Setup incomplete'`. |
+| **4** Fast-poll watchdog | `entrypoints/background.ts` (~lines 25-32, 75-100) | While `ctx.state ∈ {disconnected, reconnecting}` AND a side panel is open keeping the SW alive, reconcile every 5s instead of waiting for the 30s alarm. Capped at 5 min total per broken episode so a user who walked away with the bridge uninstalled isn't burning CPU. |
+
+### Tests guarding the fix
+
+- **Test E** (new): start with everything uninstalled → launch browser → confirm side panel is NOT Connected → run installer → wait for header title to flip to "Connected" without any manual click. Passes in ~15s. Would fail without fix #4 (alarm latency) and could fail without fixes #1 or #2 if the user had previously connected.
+- **Tests A, B, C, D**: all still pass after the fixes — no regressions in install/uninstall, MCP, side-panel-with-bridge, or side-panel-without-bridge.
+- **Extension unit tests**: 200/200 still pass (`npm run test -w packages/extension`).
+
+### Test infra side note
+
+Playwright was running multiple spec files in parallel by default, and the install-and-* specs share a single `%TEMP%\copilot-real-edge-userdata` junction → second worker hit "Opening in existing browser session" and crashed. Pinned `workers: 1` in `playwright.config.ts`; the affected specs are short and serial within themselves, so single-worker is the right default anyway.

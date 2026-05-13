@@ -13,6 +13,15 @@ import type { ToolScanResult, DiagnosticReason } from '../shared/types';
 const ALARM_NAME = 'connection-check';
 const ALARM_PERIOD_MINUTES = 0.5; // 30s — Chrome minimum for periodic alarms
 
+// While the connection is broken AND a side panel is open (keeping the SW
+// alive), poll every FAST_POLL_INTERVAL_MS instead of waiting for the next
+// 30s alarm. Cuts recovery latency after the user runs the installer from
+// up-to-30s to up-to-5s. We cap total fast-poll time so a long-term broken
+// state (user uninstalled and walked away) doesn't burn CPU forever — once
+// the cap is hit we fall back to alarm cadence.
+const FAST_POLL_INTERVAL_MS = 5_000;
+const FAST_POLL_MAX_DURATION_MS = 5 * 60_000;
+
 const RECOVERABLE_REASONS: DiagnosticReason[] = [
   'no_lock_file',
   'bridge_not_started',
@@ -62,6 +71,31 @@ export default defineBackground(() => {
     },
   });
 
+  // Fast-poll watchdog: while we're broken, reconcile every 5s (instead of
+  // waiting up to 30s for the alarm). Only runs while a side panel is open
+  // (keepalive port keeps the SW from being evicted). Resets when the
+  // connection recovers; caps total duration to avoid CPU burn for users who
+  // uninstalled and walked away.
+  let fastPollTimer: ReturnType<typeof setInterval> | null = null;
+  let fastPollStartedAt = 0;
+  const stopFastPoll = () => {
+    if (fastPollTimer !== null) {
+      clearInterval(fastPollTimer);
+      fastPollTimer = null;
+    }
+  };
+  const startFastPoll = () => {
+    if (fastPollTimer !== null) return;
+    fastPollStartedAt = Date.now();
+    fastPollTimer = setInterval(() => {
+      if (Date.now() - fastPollStartedAt > FAST_POLL_MAX_DURATION_MS) {
+        stopFastPoll();
+        return;
+      }
+      manager.reconcile().catch(() => {});
+    }, FAST_POLL_INTERVAL_MS);
+  };
+
   // Update badge on connection state changes
   manager.onStateChange((ctx) => {
     const unconfigured = getUnconfiguredTools(scanState.current);
@@ -84,6 +118,11 @@ export default defineBackground(() => {
         // Coordinator handles its own logging; nothing to do here.
       });
     }
+
+    // Drive the fast-poll watchdog: on while broken, off while healthy.
+    const isBroken = ctx.state === 'disconnected' || ctx.state === 'reconnecting';
+    if (isBroken) startFastPoll();
+    else stopFastPoll();
   });
 
   try {

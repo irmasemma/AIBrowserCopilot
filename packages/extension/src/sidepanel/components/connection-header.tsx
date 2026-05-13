@@ -78,7 +78,10 @@ export function deriveHeader(args: {
       title: 'Bridge is outdated',
       subtitle: 'Re-run the installer to update.',
       severity: 'warn',
-      buttons: [{ id: 'copy_install_command', label: 'Copy install command', variant: 'primary' }],
+      buttons: [
+        { id: 'copy_install_command', label: 'Copy install command', variant: 'primary' },
+        { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
+      ],
       autoOpenDiagnostics: false,
     };
   }
@@ -95,6 +98,7 @@ export function deriveHeader(args: {
       severity: 'error',
       buttons: [
         { id: 'start_service', label: 'Start CoPilot service', variant: 'primary' },
+        { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
       ],
       autoOpenDiagnostics: reconnectingTooLong,
     };
@@ -125,6 +129,7 @@ export function deriveHeader(args: {
       buttons: [
         { id: 'restart_service', label: 'Restart service', variant: 'primary' },
         { id: 'reconnect_now', label: 'Reconnect', variant: 'secondary' },
+        { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
       ],
       autoOpenDiagnostics: true,
     };
@@ -137,7 +142,10 @@ export function deriveHeader(args: {
         ? `Reopen ${startedBy} to reconnect.`
         : 'Reopen your AI tool to reconnect.',
       severity: 'warn',
-      buttons: [{ id: 'reconnect_now', label: 'Reconnect now', variant: 'primary' }],
+      buttons: [
+        { id: 'reconnect_now', label: 'Reconnect now', variant: 'primary' },
+        { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
+      ],
       autoOpenDiagnostics: reconnectingTooLong,
     };
   }
@@ -153,6 +161,7 @@ export function deriveHeader(args: {
         ? [
             { id: 'restart_service', label: 'Restart service', variant: 'primary' },
             { id: 'reconnect_now', label: 'Reconnect', variant: 'secondary' },
+            { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
           ]
         : [],
       autoOpenDiagnostics: reconnectingTooLong,
@@ -173,7 +182,10 @@ export function deriveHeader(args: {
     title: 'Not connected',
     subtitle: 'Start the CoPilot service to enable browser tools.',
     severity: 'error',
-    buttons: [{ id: 'start_service', label: 'Start CoPilot service', variant: 'primary' }],
+    buttons: [
+      { id: 'start_service', label: 'Start CoPilot service', variant: 'primary' },
+      { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
+    ],
     autoOpenDiagnostics: false,
   };
 }
