@@ -5,9 +5,9 @@ export default defineConfig({
   srcDir: 'src',
   outDir: 'dist',
   manifest: {
-    name: 'AI Browser CoPilot',
+    name: 'Pilotwave: AI Chat + MCP for Claude, Cursor, ChatGPT — Forms, Data',
     version: '0.1.0',
-    description: 'Connect your browser to your AI assistant. Read pages, fill forms, extract data — no terminal required.',
+    description: 'Let AI control your real Chrome — your tabs, sessions, logins. Chat sidebar + MCP for Claude, Cursor, ChatGPT, VS Code.',
     permissions: ['tabs', 'sidePanel', 'nativeMessaging', 'storage', 'scripting', 'debugger', 'alarms'],
     host_permissions: [
       'https://api.openai.com/*',
