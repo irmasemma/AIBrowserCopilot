@@ -46,7 +46,7 @@ describe('App', () => {
     const { lastFrame } = render(
       <App platform={makePlatform()} flags={defaultFlags} {...allMocks} />,
     );
-    expect(lastFrame()).toContain('AI Browser CoPilot');
+    expect(lastFrame()).toContain('Pilotwave');
     expect(lastFrame()).toContain('Setup');
   });
 

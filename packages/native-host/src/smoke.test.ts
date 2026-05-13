@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import net from 'node:net';
 import { VERSION } from './version';
 
-const BINARY_PATH = join(__dirname, '..', 'bin', 'ai-browser-copilot-win-x64.exe');
+const BINARY_PATH = join(__dirname, '..', 'bin', 'pilotwave-win-x64.exe');
 const PORT = 7483;
 
 const isPortFree = (port: number): Promise<boolean> =>
@@ -86,7 +86,7 @@ describe('compiled binary smoke test', () => {
 
       expect(response, `No NDJSON response within 5s. stdout so far: ${stdoutBuf.slice(0, 500)}`).not.toBeNull();
       expect(response!.id).toBe(1);
-      expect(response!.result?.serverInfo?.name).toBe('ai-browser-copilot');
+      expect(response!.result?.serverInfo?.name).toBe('pilotwave');
     } finally {
       child.kill();
       // Wait for port to free up so subsequent tests don't conflict.

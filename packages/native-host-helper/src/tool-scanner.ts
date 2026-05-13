@@ -120,11 +120,11 @@ function hasCopilotEntry(mcpValue: unknown): boolean {
   if (mcpValue === null || mcpValue === undefined) return false;
   if (Array.isArray(mcpValue)) {
     return mcpValue.some(
-      (item) => typeof item === 'object' && item !== null && ('ai-browser-copilot' in item || (item as Record<string, unknown>).name === 'ai-browser-copilot'),
+      (item) => typeof item === 'object' && item !== null && ('pilotwave' in item || (item as Record<string, unknown>).name === 'pilotwave'),
     );
   }
   if (typeof mcpValue === 'object') {
-    return 'ai-browser-copilot' in (mcpValue as Record<string, unknown>);
+    return 'pilotwave' in (mcpValue as Record<string, unknown>);
   }
   return false;
 }

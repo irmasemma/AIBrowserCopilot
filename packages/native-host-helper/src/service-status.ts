@@ -67,11 +67,11 @@ export type ServiceReason =
 export function getInstallDir(): string {
   switch (platform()) {
     case 'win32':
-      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'ai-browser-copilot');
+      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'pilotwave');
     case 'darwin':
-      return join(homedir(), 'Library', 'Application Support', 'ai-browser-copilot');
+      return join(homedir(), 'Library', 'Application Support', 'pilotwave');
     default:
-      return join(homedir(), '.local', 'share', 'ai-browser-copilot');
+      return join(homedir(), '.local', 'share', 'pilotwave');
   }
 }
 
@@ -83,11 +83,11 @@ export function getBinaryPath(): string {
   const dir = getInstallDir();
   switch (platform()) {
     case 'win32':
-      return join(dir, 'ai-browser-copilot-win-x64.exe');
+      return join(dir, 'pilotwave-win-x64.exe');
     case 'darwin':
-      return join(dir, process.arch === 'arm64' ? 'ai-browser-copilot-macos-arm64' : 'ai-browser-copilot-macos-x64');
+      return join(dir, process.arch === 'arm64' ? 'pilotwave-macos-arm64' : 'pilotwave-macos-x64');
     default:
-      return join(dir, process.arch === 'arm64' ? 'ai-browser-copilot-linux-arm64' : 'ai-browser-copilot-linux-x64');
+      return join(dir, process.arch === 'arm64' ? 'pilotwave-linux-arm64' : 'pilotwave-linux-x64');
   }
 }
 

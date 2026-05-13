@@ -1,6 +1,6 @@
 # Developer Quick Start
 
-Get AI Browser CoPilot running in 3 steps.
+Get Pilotwave running in 3 steps.
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@ Get AI Browser CoPilot running in 3 steps.
 ## Step 1: Build and load the extension
 
 ```bash
-cd C:\Dev\1M\ai-browser-copilot
+cd C:\Dev\1M\pilotwave
 npm install
 cd packages/native-host && npm run build
 cd ../extension && npx wxt build
@@ -21,7 +21,7 @@ Then load it in Chrome:
 1. Go to `chrome://extensions`
 2. Enable "Developer mode" (top right toggle)
 3. Click "Load unpacked"
-4. Select: `C:\Dev\1M\ai-browser-copilot\packages\extension\dist\chrome-mv3`
+4. Select: `C:\Dev\1M\pilotwave\packages\extension\dist\chrome-mv3`
 
 ## Step 2: Configure VS Code
 
@@ -30,9 +30,9 @@ The file `.vscode/mcp.json` is already in the project with this content:
 ```json
 {
   "mcpServers": {
-    "ai-browser-copilot": {
+    "pilotwave": {
       "command": "node",
-      "args": ["C:/Dev/1M/ai-browser-copilot/packages/native-host/dist/index.js"]
+      "args": ["C:/Dev/1M/pilotwave/packages/native-host/dist/index.js"]
     }
   }
 }

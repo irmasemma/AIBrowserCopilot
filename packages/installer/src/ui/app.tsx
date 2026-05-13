@@ -480,7 +480,7 @@ export const App: React.FC<AppProps> = ({
 
 const Header: React.FC = () => (
   <Box marginBottom={1}>
-    <Text bold color="blue">AI Browser CoPilot</Text>
+    <Text bold color="blue">Pilotwave</Text>
     <Text> — </Text>
     <Text>Setup</Text>
   </Box>

@@ -17,12 +17,12 @@ const REPO_ROOT = path.resolve(__dirname, '../..');
 const EXTENSION_PATH = path.resolve(REPO_ROOT, 'packages/extension/dist/chrome-mv3');
 const HOST_BIN = path.join(
   process.env.LOCALAPPDATA ?? '',
-  'ai-browser-copilot',
-  'ai-browser-copilot-win-x64.exe',
+  'pilotwave',
+  'pilotwave-win-x64.exe',
 );
 const LOCK_FILE = path.join(
   process.env.LOCALAPPDATA ?? '',
-  'ai-browser-copilot',
+  'pilotwave',
   'server.lock',
 );
 
@@ -101,7 +101,7 @@ test('diag: extension can connect when host is spawned (Edge, real binary)', asy
     try {
       helperResp = await new Promise((resolve, reject) => {
         chrome.runtime.sendNativeMessage(
-          'com.copilot.native_host_helper',
+          'com.pilotwave.native_host_helper',
           { action: 'check_mcp_registration' },
           (r) => {
             if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));

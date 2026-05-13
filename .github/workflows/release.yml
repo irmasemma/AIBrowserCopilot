@@ -50,28 +50,28 @@ jobs:
           - os: ubuntu-latest
             target: linux-x64
             compile-script: compile:linux
-            binary: ai-browser-copilot-linux-x64
-            helper-binary: ai-browser-copilot-helper-linux-x64
+            binary: pilotwave-linux-x64
+            helper-binary: pilotwave-helper-linux-x64
           - os: ubuntu-latest
             target: linux-arm64
             compile-script: compile:linux-arm
-            binary: ai-browser-copilot-linux-arm64
-            helper-binary: ai-browser-copilot-helper-linux-arm64
+            binary: pilotwave-linux-arm64
+            helper-binary: pilotwave-helper-linux-arm64
           - os: macos-latest
             target: macos-x64
             compile-script: compile:mac
-            binary: ai-browser-copilot-macos-x64
-            helper-binary: ai-browser-copilot-helper-macos-x64
+            binary: pilotwave-macos-x64
+            helper-binary: pilotwave-helper-macos-x64
           - os: macos-latest
             target: macos-arm64
             compile-script: compile:mac-arm
-            binary: ai-browser-copilot-macos-arm64
-            helper-binary: ai-browser-copilot-helper-macos-arm64
+            binary: pilotwave-macos-arm64
+            helper-binary: pilotwave-helper-macos-arm64
           - os: windows-latest
             target: win-x64
             compile-script: compile:win
-            binary: ai-browser-copilot-win-x64.exe
-            helper-binary: ai-browser-copilot-helper-win-x64.exe
+            binary: pilotwave-win-x64.exe
+            helper-binary: pilotwave-helper-win-x64.exe
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

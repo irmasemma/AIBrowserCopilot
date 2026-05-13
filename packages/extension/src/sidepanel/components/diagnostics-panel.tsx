@@ -266,8 +266,8 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
 
   const extId = chrome.runtime?.id ?? '';
   const installCommand = extId
-    ? `npx ai-browser-copilot-setup --update --extension-id ${extId}`
-    : 'npx ai-browser-copilot-setup --update';
+    ? `npx pilotwave-setup --update --extension-id ${extId}`
+    : 'npx pilotwave-setup --update';
   const steps = buildSteps(status, connectionContext, installCommand);
 
   return (

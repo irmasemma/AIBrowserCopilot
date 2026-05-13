@@ -132,11 +132,11 @@ Reasoning:
 
 A working installation went silent. `chrome://extensions` showed CoPilot enabled,
 the side panel said "Not Connected", and `claude mcp list` did not list
-`ai-browser-copilot`. The user's reasonable belief was "it worked yesterday."
+`pilotwave`. The user's reasonable belief was "it worked yesterday."
 
 **Root cause:** the registration *did* exist. A backup at
 `~/.claude.json.backup-20260330-230259` proved that `~/.claude.json` had
-`projects."C:/Dev/1M".mcpServers.ai-browser-copilot` pointing at
+`projects."C:/Dev/1M".mcpServers.pilotwave` pointing at
 `node .../packages/native-host/dist/index.js`. On 2026-05-05 at 16:05, the file
 was modified and shrunk by 5,297 bytes — the entry was removed. We don't know
 *who* removed it (a `claude mcp` command, a manual edit, an auto-prune), but
@@ -164,7 +164,7 @@ in the native-host helper's self-heal action.
    `mcpServers` (Claude Code, Claude Desktop, Continue, JetBrains) or top-level
    `mcp.servers` (Cursor, VS Code, Windsurf, Zed). Project-scope is a non-goal
    unless the user explicitly opts in.
-2. **Use the production `.exe` path in `%LOCALAPPDATA%/ai-browser-copilot/`,
+2. **Use the production `.exe` path in `%LOCALAPPDATA%/pilotwave/`,
    never a dev `node .../dist/index.js`.** The dev path is fragile (requires
    PATH, requires a build) and routinely breaks for real users. The native-host
    helper now derives the correct binary path from its own install dir at
@@ -181,7 +181,7 @@ Lives in `packages/native-host-helper/src/mcp-registrar.ts` and is exposed to
 the extension via two new native-messaging actions:
 
 - `check_mcp_registration` — reads `~/.claude.json`, returns whether
-  `ai-browser-copilot` is registered, at what scope (`user` | `project` | null),
+  `pilotwave` is registered, at what scope (`user` | `project` | null),
   whether the production binary exists.
 - `repair_mcp_registration` — writes the entry to **user scope** with the
   production `.exe` path, backs up the existing config first, then verifies the

@@ -8,7 +8,7 @@ interface ToolGuide {
   docsUrl?: string;
 }
 
-const INSTALL_BASE = 'npx ai-browser-copilot-setup';
+const INSTALL_BASE = 'npx pilotwave-setup';
 
 const TOOL_GUIDES: ToolGuide[] = [
   {

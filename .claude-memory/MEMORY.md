@@ -1,5 +1,5 @@
 - [User Profile](user_profile.md) — Solo developer, Chrome extension expertise, income-focused
-- [Project: AI Browser CoPilot](project_ai_browser_copilot.md) — Connection redesign 15/18 stories done, 435 tests, 4 packages, multi-browser
+- [Project: Pilotwave](project_ai_browser_copilot.md) — Connection redesign 15/18 stories done, 435 tests, 4 packages, multi-browser
 - [BMAD Method Setup](reference_bmad_setup.md) — BMM module installed, all agents available
 - [Feedback: Speed & Quality](feedback_speed.md) — Fast iteration, real tests, don't stop mid-fix, switch tools fast
 - [Feedback: Verify Before Done](feedback_verify_before_done.md) — Build, run, and verify working before marking story done

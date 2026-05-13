@@ -27,5 +27,5 @@ The product direction is **chat-first**, not MCP-server-first. We can't beat bro
 - Don't invest in the MCP installer UX. Replace "auto-detect AI tools and write configs" with a "Copy MCP config snippet" button. The 5% of users who care will copy/paste; everyone else gets the chat.
 
 **How to apply:**
-- Full plan: `ai-browser-copilot/docs/chat-tab-plan.md` — read before any chat-tab work.
+- Full plan: `pilotwave/docs/chat-tab-plan.md` — read before any chat-tab work.
 - Strategic comparison with browsermcp: see `project_browsermcp_comparison.md`.

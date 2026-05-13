@@ -3,7 +3,7 @@
  * Edge with COPILOT_TEST_BROWSER=edge) with the REAL profile through two
  * install scenarios — clean reinstall and stale-installer reinstall — and
  * verifies the side panel reaches "Connected" plus two `claude -p` turns
- * invoking `mcp__ai-browser-copilot__list_tabs` against the live bridge.
+ * invoking `mcp__pilotwave__list_tabs` against the live bridge.
  *
  * Opt-in. Set COPILOT_TEST_KILL_CHROME=1 to allow killing the user's running
  * browser session (the browser holds an exclusive lock on the user-data-dir,
@@ -43,10 +43,10 @@ const requirePrebuilt = () => {
         `Build it first: npm run build:extension`,
     );
   }
-  const bridgeBin = path.resolve(REPO_ROOT, 'packages/native-host/bin/ai-browser-copilot-win-x64.exe');
+  const bridgeBin = path.resolve(REPO_ROOT, 'packages/native-host/bin/pilotwave-win-x64.exe');
   const helperBin = path.resolve(
     REPO_ROOT,
-    'packages/native-host-helper/bin/ai-browser-copilot-helper-win-x64.exe',
+    'packages/native-host-helper/bin/pilotwave-helper-win-x64.exe',
   );
   if (!existsSync(bridgeBin) || !existsSync(helperBin)) {
     throw new Error(
@@ -60,7 +60,7 @@ const requirePrebuilt = () => {
 };
 
 const CLAUDE_PROMPT =
-  'Use the mcp__ai-browser-copilot__list_tabs tool right now to enumerate every tab open in my browser. ' +
+  'Use the mcp__pilotwave__list_tabs tool right now to enumerate every tab open in my browser. ' +
   'Call the tool. Do not describe what you would do.';
 
 const runClaudeListTabsTurn = async (label: string): Promise<void> => {
@@ -72,7 +72,7 @@ const runClaudeListTabsTurn = async (label: string): Promise<void> => {
   const call = findListTabsCall(result);
   expect(
     call,
-    `${label}: claude did not invoke mcp__ai-browser-copilot__list_tabs.\n` +
+    `${label}: claude did not invoke mcp__pilotwave__list_tabs.\n` +
       `Tools called: ${result.toolUses.map((t) => t.toolName).join(', ') || '(none)'}\n` +
       `Final text: ${result.finalText.slice(0, 200)}\n` +
       `stderr (first 300): ${result.stderr.slice(0, 300)}`,
@@ -100,7 +100,7 @@ const runConnectAndChatPhase = async (
   assertConnected(display);
 
   // Then: run two list_tabs turns through Claude Code's MCP client. The
-  // installer registers ai-browser-copilot as an MCP server in ~/.claude.
+  // installer registers pilotwave as an MCP server in ~/.claude.
   // Two distinct subprocess turns to verify the bridge handles back-to-back
   // requests without state leaks.
   await runClaudeListTabsTurn('Claude turn #1');

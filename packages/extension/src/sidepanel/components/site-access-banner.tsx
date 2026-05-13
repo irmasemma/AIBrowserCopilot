@@ -82,7 +82,7 @@ export const SiteAccessBanner: FunctionalComponent = () => {
       } else {
         setError(
           'Permission was not granted. You can also enable it manually at ' +
-          'edge://extensions → Details on AI Browser CoPilot → Site access → "On all sites".',
+          'edge://extensions → Details on Pilotwave → Site access → "On all sites".',
         );
       }
     } catch (e) {

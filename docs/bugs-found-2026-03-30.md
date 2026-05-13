@@ -78,7 +78,7 @@
 
 **Root cause:** The installer wrote the global config (correct for customers), and a manual project-scoped config was added during development. They competed for port 7483.
 
-**Fix:** Removed the manual project config. Running the installer (`npx ai-browser-copilot-setup --yes`) correctly configures the global MCP entry. This is the same path customers follow.
+**Fix:** Removed the manual project config. Running the installer (`npx pilotwave-setup --yes`) correctly configures the global MCP entry. This is the same path customers follow.
 
 **Lesson:** Never manually edit `.claude.json` for MCP config — always use the installer.
 

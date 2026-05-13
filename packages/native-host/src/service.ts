@@ -448,7 +448,7 @@ function handleMcpMessage(clientId: string, raw: string, reply: (msg: unknown) =
         result: {
           protocolVersion: '2024-11-05',
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'ai-browser-copilot', version: VERSION },
+          serverInfo: { name: 'pilotwave', version: VERSION },
         },
       });
       return;
@@ -550,11 +550,11 @@ function zodToJsonSchema(z: unknown): Record<string, unknown> {
 function getBridgeLogPath(): string {
   switch (osPlatform()) {
     case 'win32':
-      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'ai-browser-copilot', 'bridge.log');
+      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'pilotwave', 'bridge.log');
     case 'darwin':
-      return join(homedir(), 'Library', 'Application Support', 'ai-browser-copilot', 'bridge.log');
+      return join(homedir(), 'Library', 'Application Support', 'pilotwave', 'bridge.log');
     default:
-      return join(homedir(), '.local', 'share', 'ai-browser-copilot', 'bridge.log');
+      return join(homedir(), '.local', 'share', 'pilotwave', 'bridge.log');
   }
 }
 

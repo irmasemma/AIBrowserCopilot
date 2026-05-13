@@ -536,7 +536,7 @@ test.describe('form-react.html', () => {
 
   test('fills entire form and submits via click', async () => {
     await fillForm(tabId, [
-      { selector: '#product-name', value: 'AI Browser CoPilot' },
+      { selector: '#product-name', value: 'Pilotwave' },
       { selector: '#tagline', value: 'Connect AI to your browser' },
       { selector: '#description', value: 'A Chrome extension for AI integration.' },
       { selector: '#website-url', value: 'https://aibrowsercopilot.com' },
@@ -551,7 +551,7 @@ test.describe('form-react.html', () => {
     await page.waitForTimeout(300);
 
     const output = await page.textContent('#form-output');
-    expect(output).toContain('AI Browser CoPilot');
+    expect(output).toContain('Pilotwave');
     expect(output).toContain('ai');
     expect(output).toContain('true'); // agree-terms
   });

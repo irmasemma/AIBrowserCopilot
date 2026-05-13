@@ -1,7 +1,7 @@
-# Is AI Browser CoPilot Safe?
+# Is Pilotwave Safe?
 
 ## What does this extension do?
-AI Browser CoPilot connects your browser to your AI assistant (like Claude) so the AI can read pages, fill forms, and extract data on your behalf.
+Pilotwave connects your browser to your AI assistant (like Claude) so the AI can read pages, fill forms, and extract data on your behalf.
 
 ## Does it send my data anywhere?
 No. All data stays on your machine. The extension communicates with a local program (the browser bridge) running on your computer. Nothing is sent to external servers.
@@ -23,4 +23,4 @@ Yes. Every tool has an on/off toggle in the side panel. You choose which capabil
 Yes. Every action the AI takes is logged in the side panel with timestamp, tool used, and target URL. You can review everything at any time.
 
 ## Who built this?
-AI Browser CoPilot is built by an independent developer. It's not affiliated with Anthropic, Google, or any AI company.
+Pilotwave is built by an independent developer. It's not affiliated with Anthropic, Google, or any AI company.

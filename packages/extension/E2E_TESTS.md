@@ -10,10 +10,10 @@ Both specs are opt-in. They will kill any running browser session: gate is `COPI
 
 | Test | What it covers |
 | --- | --- |
-| Test A — clean reinstall | Snapshot install state → full `--uninstall --yes` if anything's there → verify everything's gone → install from local working tree → verify all artifacts land → launch real browser with extension → side panel reaches **Connected** → two `claude -p` turns each invoke `mcp__ai-browser-copilot__list_tabs` and return ≥ 1 tab with a non-empty url. |
+| Test A — clean reinstall | Snapshot install state → full `--uninstall --yes` if anything's there → verify everything's gone → install from local working tree → verify all artifacts land → launch real browser with extension → side panel reaches **Connected** → two `claude -p` turns each invoke `mcp__pilotwave__list_tabs` and return ≥ 1 tab with a non-empty url. |
 | Test B — stale-installer reinstall | Same install state seeding, but **without** running `--uninstall` first. The old bridge from the prior install is still running. New install must kill those PIDs and overwrite the binary. Side panel reaches **Connected**; same two `claude -p` list_tabs round-trips. This is the regression test for the multi-instance image-name kill fix. |
 
-Chat assertions go through Anthropic's `claude` CLI (Claude Code) — `ai-browser-copilot` is registered as an MCP server during install, so `claude -p` invokes the bridge over MCP for the `list_tabs` tool. Uses the user's existing Claude Code login (`~/.claude/.credentials.json`); no extra API key needed.
+Chat assertions go through Anthropic's `claude` CLI (Claude Code) — `pilotwave` is registered as an MCP server during install, so `claude -p` invokes the bridge over MCP for the `list_tabs` tool. Uses the user's existing Claude Code login (`~/.claude/.credentials.json`); no extra API key needed.
 
 ### Run
 
@@ -71,7 +71,7 @@ If a key is invalid, the diagnostic dumps the chat transcript, the count of erro
 
 ### Why Test E exists
 
-When the user runs the test suite (which uninstalls everything) and then manually runs `npx ai-browser-copilot-setup --update`, the side panel sometimes got stuck in contradictory states like "Setup incomplete" + "Helper available / Helper returned no data". Root cause traced to four issues in the extension's recovery flow; all fixed (see `docs/test-findings.md` §6). Test E is the regression that proves the recovery loop now works.
+When the user runs the test suite (which uninstalls everything) and then manually runs `npx pilotwave-setup --update`, the side panel sometimes got stuck in contradictory states like "Setup incomplete" + "Helper available / Helper returned no data". Root cause traced to four issues in the extension's recovery flow; all fixed (see `docs/test-findings.md` §6). Test E is the regression that proves the recovery loop now works.
 
 ## Shared helpers (under `tests/e2e/helpers/`)
 
@@ -79,7 +79,7 @@ When the user runs the test suite (which uninstalls everything) and then manuall
 | --- | --- |
 | `real-chrome.ts` | Browser-agnostic launch (Chrome / Edge), junction workaround for the CDP gate, Developer-Mode bootstrap, SW discovery + wake-up |
 | `install-state.ts` | Snapshot install state on disk + registry; `isFullyInstalled` / `isFullyUninstalled` predicates |
-| `installer-cli.ts` | Wraps the local installer build (`packages/installer/dist/index.js`) — never calls the published `npx ai-browser-copilot-setup` |
+| `installer-cli.ts` | Wraps the local installer build (`packages/installer/dist/index.js`) — never calls the published `npx pilotwave-setup` |
 | `sidepanel.ts` | Drives the side-panel UI — chat tabs, status badge, `chrome.runtime.sendMessage` dispatch helpers, etc. |
 | `claude-cli.ts` | Spawns `claude --print --output-format stream-json`, parses tool_use + tool_result events, exposes `findListTabsCall` / `parseListTabsResult` |
 

@@ -55,13 +55,13 @@ describe('Claude Desktop Detector', () => {
     expect(result.hasExistingMcp).toBe(false);
   });
 
-  it('detects existing ai-browser-copilot MCP entry', async () => {
+  it('detects existing pilotwave MCP entry', async () => {
     const platform = testPlatform('linux');
     const configDir = join(TEST_DIR, '.config', 'Claude');
     mkdirSync(configDir, { recursive: true });
     writeFileSync(
       join(configDir, 'claude_desktop_config.json'),
-      JSON.stringify({ mcpServers: { 'ai-browser-copilot': { command: 'old' } } }),
+      JSON.stringify({ mcpServers: { 'pilotwave': { command: 'old' } } }),
     );
 
     const result = await claudeDesktopDetector.detect(platform);
@@ -79,7 +79,7 @@ describe('Claude Desktop Detector', () => {
 
     const configPath = getDesktopConfigPath(platform);
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(written.mcpServers['ai-browser-copilot'].command).toBe('/path/to/binary');
+    expect(written.mcpServers['pilotwave'].command).toBe('/path/to/binary');
   });
 
   it('writeConfig merges preserving existing entries', async () => {
@@ -104,7 +104,7 @@ describe('Claude Desktop Detector', () => {
     expect(written.theme).toBe('dark');
     expect(written.mcpServers.filesystem.command).toBe('npx');
     expect(written.mcpServers.github.command).toBe('gh-mcp');
-    expect(written.mcpServers['ai-browser-copilot'].command).toBe('/path/to/binary');
+    expect(written.mcpServers['pilotwave'].command).toBe('/path/to/binary');
   });
 
   it('writeConfig skips malformed JSON', async () => {
@@ -159,7 +159,7 @@ describe('Claude Code Detector', () => {
 
     const configPath = getCodeConfigPath(platform);
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(written.mcpServers['ai-browser-copilot'].command).toBe('/path/to/binary');
+    expect(written.mcpServers['pilotwave'].command).toBe('/path/to/binary');
   });
 
   it('writeConfig merges into existing .claude.json', async () => {
@@ -175,7 +175,7 @@ describe('Claude Code Detector', () => {
     const written = JSON.parse(readFileSync(join(TEST_DIR, '.claude.json'), 'utf-8'));
     expect(written.existingSetting).toBe(true);
     expect(written.mcpServers.other).toEqual({});
-    expect(written.mcpServers['ai-browser-copilot'].command).toBe('/binary');
+    expect(written.mcpServers['pilotwave'].command).toBe('/binary');
   });
 });
 
@@ -212,14 +212,14 @@ describe('VS Code Detector', () => {
     const mcpJsonPath = getVscodeConfigPath(platform);
     expect(existsSync(mcpJsonPath)).toBe(true);
     const written = JSON.parse(readFileSync(mcpJsonPath, 'utf-8'));
-    expect(written.servers['ai-browser-copilot'].command).toBe('/binary');
-    expect(written.servers['ai-browser-copilot'].type).toBe('stdio');
+    expect(written.servers['pilotwave'].command).toBe('/binary');
+    expect(written.servers['pilotwave'].type).toBe('stdio');
     expect(written.inputs).toEqual([]);
     // Must NOT touch settings.json `mcp.servers` shape
     const settingsPath = getVscodeSettingsPath(platform);
     if (existsSync(settingsPath)) {
       const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-      expect(settings.mcp?.servers?.['ai-browser-copilot']).toBeUndefined();
+      expect(settings.mcp?.servers?.['pilotwave']).toBeUndefined();
     }
   });
 
@@ -238,11 +238,11 @@ describe('VS Code Detector', () => {
 
     const written = JSON.parse(readFileSync(mcpJsonPath, 'utf-8'));
     expect(written.servers['other-tool']).toEqual({ command: 'other', args: [] });
-    expect(written.servers['ai-browser-copilot'].command).toBe('/binary');
+    expect(written.servers['pilotwave'].command).toBe('/binary');
     expect(written.inputs).toEqual([{ id: 'token', type: 'promptString' }]);
   });
 
-  it('replaces (not deep-merges) the ai-browser-copilot entry', async () => {
+  it('replaces (not deep-merges) the pilotwave entry', async () => {
     const platform = testPlatform('linux');
     const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(settingsDir, { recursive: true });
@@ -250,7 +250,7 @@ describe('VS Code Detector', () => {
     const mcpJsonPath = getVscodeConfigPath(platform);
     writeFileSync(mcpJsonPath, JSON.stringify({
       servers: {
-        'ai-browser-copilot': {
+        'pilotwave': {
           command: '/old/path',
           args: ['--legacy-flag'],
           env: { OLD: '1' },
@@ -263,45 +263,45 @@ describe('VS Code Detector', () => {
     await vscodeDetector.writeConfig(platform, '/new/binary');
 
     const written = JSON.parse(readFileSync(mcpJsonPath, 'utf-8'));
-    expect(written.servers['ai-browser-copilot'].command).toBe('/new/binary');
-    expect(written.servers['ai-browser-copilot'].args).toEqual([]);
-    expect(written.servers['ai-browser-copilot'].env).toBeUndefined();
-    expect(written.servers['ai-browser-copilot'].disabled).toBeUndefined();
+    expect(written.servers['pilotwave'].command).toBe('/new/binary');
+    expect(written.servers['pilotwave'].args).toEqual([]);
+    expect(written.servers['pilotwave'].env).toBeUndefined();
+    expect(written.servers['pilotwave'].disabled).toBeUndefined();
   });
 
-  it('detects existing ai-browser-copilot in new mcp.json (top-level servers)', async () => {
+  it('detects existing pilotwave in new mcp.json (top-level servers)', async () => {
     const platform = testPlatform('linux');
     const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(settingsDir, { recursive: true });
     writeFileSync(
       getVscodeConfigPath(platform),
-      JSON.stringify({ servers: { 'ai-browser-copilot': {} }, inputs: [] }),
+      JSON.stringify({ servers: { 'pilotwave': {} }, inputs: [] }),
     );
 
     const result = await vscodeDetector.detect(platform);
     expect(result.hasExistingMcp).toBe(true);
   });
 
-  it('detects existing ai-browser-copilot in legacy settings.json (mcp.servers)', async () => {
+  it('detects existing pilotwave in legacy settings.json (mcp.servers)', async () => {
     const platform = testPlatform('linux');
     const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(settingsDir, { recursive: true });
     writeFileSync(
       getVscodeSettingsPath(platform),
-      JSON.stringify({ mcp: { servers: { 'ai-browser-copilot': {} } } }),
+      JSON.stringify({ mcp: { servers: { 'pilotwave': {} } } }),
     );
 
     const result = await vscodeDetector.detect(platform);
     expect(result.hasExistingMcp).toBe(true);
   });
 
-  it('migrates legacy entry: install removes ai-browser-copilot from settings.json', async () => {
+  it('migrates legacy entry: install removes pilotwave from settings.json', async () => {
     const platform = testPlatform('linux');
     const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(settingsDir, { recursive: true });
     writeFileSync(getVscodeSettingsPath(platform), JSON.stringify({
       'editor.fontSize': 14,
-      mcp: { servers: { 'ai-browser-copilot': { command: '/old' } } },
+      mcp: { servers: { 'pilotwave': { command: '/old' } } },
     }, null, 2) + '\n');
 
     await vscodeDetector.writeConfig(platform, '/new');
@@ -312,7 +312,7 @@ describe('VS Code Detector', () => {
     expect(settings.mcp).toBeUndefined();
     // New entry lives in mcp.json
     const newJson = JSON.parse(readFileSync(getVscodeConfigPath(platform), 'utf-8'));
-    expect(newJson.servers['ai-browser-copilot'].command).toBe('/new');
+    expect(newJson.servers['pilotwave'].command).toBe('/new');
   });
 
   it('cleanupLegacyVscodeSettings prunes empty mcp block (entry already absent)', () => {
@@ -340,7 +340,7 @@ describe('VS Code Detector', () => {
     writeFileSync(getVscodeSettingsPath(platform), JSON.stringify({
       'editor.fontSize': 14,
       mcp: {
-        servers: { 'ai-browser-copilot': {}, 'keep-me': { command: 'k' } },
+        servers: { 'pilotwave': {}, 'keep-me': { command: 'k' } },
         'gallery.enabled': true,
       },
     }, null, 2) + '\n');
@@ -349,7 +349,7 @@ describe('VS Code Detector', () => {
     expect(result.cleaned).toBe(true);
 
     const settings = JSON.parse(readFileSync(getVscodeSettingsPath(platform), 'utf-8'));
-    expect(settings.mcp.servers['ai-browser-copilot']).toBeUndefined();
+    expect(settings.mcp.servers['pilotwave']).toBeUndefined();
     expect(settings.mcp.servers['keep-me']).toEqual({ command: 'k' });
     expect(settings.mcp['gallery.enabled']).toBe(true);
   });
@@ -372,14 +372,14 @@ describe('VS Code Detector', () => {
     const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(settingsDir, { recursive: true });
     writeFileSync(getVscodeSettingsPath(platform), JSON.stringify({
-      mcp: { servers: { 'ai-browser-copilot': {}, other: { command: 'o' } } },
+      mcp: { servers: { 'pilotwave': {}, other: { command: 'o' } } },
     }, null, 2) + '\n');
 
     const result = cleanupLegacyVscodeSettings(platform);
     expect(result.cleaned).toBe(true);
 
     const settings = JSON.parse(readFileSync(getVscodeSettingsPath(platform), 'utf-8'));
-    expect(settings.mcp.servers['ai-browser-copilot']).toBeUndefined();
+    expect(settings.mcp.servers['pilotwave']).toBeUndefined();
     expect(settings.mcp.servers.other).toEqual({ command: 'o' });
   });
 
@@ -399,12 +399,12 @@ describe('VS Code Detector', () => {
     const settingsDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(settingsDir, { recursive: true });
     writeFileSync(getVscodeConfigPath(platform), JSON.stringify({
-      servers: { 'ai-browser-copilot': { command: '/x' }, 'other': {} },
+      servers: { 'pilotwave': { command: '/x' }, 'other': {} },
       inputs: [],
     }, null, 2) + '\n');
     writeFileSync(getVscodeSettingsPath(platform), JSON.stringify({
       'editor.fontSize': 14,
-      mcp: { servers: { 'ai-browser-copilot': {} } },
+      mcp: { servers: { 'pilotwave': {} } },
     }, null, 2) + '\n');
 
     const result = removeAiBrowserCopilotFromVscode(platform);
@@ -412,7 +412,7 @@ describe('VS Code Detector', () => {
     expect(result.errors).toEqual([]);
 
     const newJson = JSON.parse(readFileSync(getVscodeConfigPath(platform), 'utf-8'));
-    expect(newJson.servers['ai-browser-copilot']).toBeUndefined();
+    expect(newJson.servers['pilotwave']).toBeUndefined();
     expect(newJson.servers.other).toEqual({});
 
     const settings = JSON.parse(readFileSync(getVscodeSettingsPath(platform), 'utf-8'));
@@ -459,7 +459,7 @@ describe('Cursor Detector', () => {
     await cursorDetector.writeConfig(platform, '/binary');
 
     const written = JSON.parse(readFileSync(join(settingsDir, 'settings.json'), 'utf-8'));
-    expect(written.mcp.servers['ai-browser-copilot']).toBeDefined();
+    expect(written.mcp.servers['pilotwave']).toBeDefined();
   });
 
   it('preserves existing Cursor settings', async () => {
@@ -475,7 +475,7 @@ describe('Cursor Detector', () => {
 
     const written = JSON.parse(readFileSync(join(settingsDir, 'settings.json'), 'utf-8'));
     expect(written['cursor.aiModel']).toBe('gpt-4');
-    expect(written.mcp.servers['ai-browser-copilot'].command).toBe('/binary');
+    expect(written.mcp.servers['pilotwave'].command).toBe('/binary');
   });
 });
 
@@ -503,7 +503,7 @@ describe('Windsurf Detector', () => {
     await windsurfDetector.writeConfig(platform, '/binary');
 
     const written = JSON.parse(readFileSync(join(settingsDir, 'settings.json'), 'utf-8'));
-    expect(written.mcp.servers['ai-browser-copilot']).toBeDefined();
+    expect(written.mcp.servers['pilotwave']).toBeDefined();
     expect(written.mcpServers).toBeUndefined();
   });
 
@@ -520,7 +520,7 @@ describe('Windsurf Detector', () => {
 
     const written = JSON.parse(readFileSync(join(settingsDir, 'settings.json'), 'utf-8'));
     expect(written['editor.theme']).toBe('dark');
-    expect(written.mcp.servers['ai-browser-copilot'].command).toBe('/binary');
+    expect(written.mcp.servers['pilotwave'].command).toBe('/binary');
   });
 });
 
@@ -564,7 +564,7 @@ describe('JetBrains IDE Detector', () => {
 
     const configPath = getJetbrainsConfigPath(platform);
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(written.mcpServers['ai-browser-copilot'].command).toBe('/binary');
+    expect(written.mcpServers['pilotwave'].command).toBe('/binary');
   });
 
   it('preserves existing entries', async () => {
@@ -580,7 +580,7 @@ describe('JetBrains IDE Detector', () => {
 
     const written = JSON.parse(readFileSync(join(configDir, 'mcp.json'), 'utf-8'));
     expect(written.mcpServers.existing.command).toBe('test');
-    expect(written.mcpServers['ai-browser-copilot'].command).toBe('/binary');
+    expect(written.mcpServers['pilotwave'].command).toBe('/binary');
   });
 });
 
@@ -608,7 +608,7 @@ describe('Zed Detector', () => {
     await zedDetector.writeConfig(platform, '/binary');
 
     const written = JSON.parse(readFileSync(join(configDir, 'settings.json'), 'utf-8'));
-    expect(written.mcp.servers['ai-browser-copilot']).toBeDefined();
+    expect(written.mcp.servers['pilotwave']).toBeDefined();
   });
 
   it('preserves existing settings', async () => {
@@ -625,7 +625,7 @@ describe('Zed Detector', () => {
     const written = JSON.parse(readFileSync(join(configDir, 'settings.json'), 'utf-8'));
     expect(written.theme).toBe('one-dark');
     expect(written.vim_mode).toBe(true);
-    expect(written.mcp.servers['ai-browser-copilot'].command).toBe('/binary');
+    expect(written.mcp.servers['pilotwave'].command).toBe('/binary');
   });
 });
 
@@ -653,7 +653,7 @@ describe('Continue.dev Detector', () => {
 
     const configPath = getContinueConfigPath(platform);
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(written.mcpServers['ai-browser-copilot'].command).toBe('/binary');
+    expect(written.mcpServers['pilotwave'].command).toBe('/binary');
   });
 
   it('preserves existing config', async () => {
@@ -673,16 +673,16 @@ describe('Continue.dev Detector', () => {
     const written = JSON.parse(readFileSync(join(continueDir, 'config.json'), 'utf-8'));
     expect(written.models).toHaveLength(1);
     expect(written.mcpServers.existing.command).toBe('test');
-    expect(written.mcpServers['ai-browser-copilot'].command).toBe('/binary');
+    expect(written.mcpServers['pilotwave'].command).toBe('/binary');
   });
 
-  it('detects existing ai-browser-copilot entry', async () => {
+  it('detects existing pilotwave entry', async () => {
     const platform = testPlatform('linux');
     const continueDir = join(TEST_DIR, '.continue');
     mkdirSync(continueDir, { recursive: true });
     writeFileSync(
       join(continueDir, 'config.json'),
-      JSON.stringify({ mcpServers: { 'ai-browser-copilot': { command: 'old' } } }),
+      JSON.stringify({ mcpServers: { 'pilotwave': { command: 'old' } } }),
     );
 
     const result = await continueDevDetector.detect(platform);

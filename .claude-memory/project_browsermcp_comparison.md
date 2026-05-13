@@ -48,7 +48,7 @@ Done a deep read of github.com/browsermcp/mcp on 2026-04-30. The strategic and a
 
 ## Concrete state on this developer's machine (as of 2026-04-30)
 
-- CoPilot is **registered for VS Code only**: `c:\Dev\1M\ai-browser-copilot\.vscode\mcp.json` exists with `ai-browser-copilot` entry pointing at `packages/native-host/dist/index.js` (dev path, not the production `.exe`).
+- CoPilot is **registered for VS Code only**: `c:\Dev\1M\pilotwave\.vscode\mcp.json` exists with `pilotwave` entry pointing at `packages/native-host/dist/index.js` (dev path, not the production `.exe`).
 - CoPilot is **NOT registered for Claude Code** in either `~/.claude.json` (empty mcpServers) or `c:\Dev\1M\.mcp.json` (only browsermcp). That's why `claude mcp` doesn't list it. The installer's Claude Code detector probably failed at install time (Claude Code not yet installed when installer ran, or `claude` not on PATH then). No retry surface in the extension.
-- Chrome native-messaging registry is correctly populated (`com.copilot.native_host`, `com.copilot.native_host_helper`).
+- Chrome native-messaging registry is correctly populated (`com.pilotwave.native_host`, `com.pilotwave.native_host_helper`).
 - `browsermcp` (the third-party product, `@browsermcp/mcp` from npm) is also configured at `c:\Dev\1M\.mcp.json` — confusingly similar name, completely separate codebase.

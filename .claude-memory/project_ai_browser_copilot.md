@@ -1,23 +1,23 @@
 ---
-name: AI Browser CoPilot Project Status
+name: Pilotwave Project Status
 description: Chrome extension bridging browser to AI via MCP — connection layer redesign in progress (18 stories, 15/18 done), 435+ tests across 4 packages, multi-browser support added.
 type: project
 ---
 
 ## Product
-- "AI Browser CoPilot" Chrome extension connecting professionals to AI via MCP
+- "Pilotwave" Chrome extension connecting professionals to AI via MCP
 - **Target market: business/non-technical users** (sales, marketing, SEO, ops) — NOT developers. Developer-facing MCP was first available distribution channel, not the intended audience.
 - Paid-first freemium: 3 free tools, 5 Pro tools. **Pricing: $15/mo** (updated 2026-04-04, market supports $15-50/mo for business automation tools)
 - **Core value proposition (2026-04-04):** AI-powered data extraction + form filling across AUTHENTICATED web apps. The auth advantage is the moat — no scraper can access logged-in Salesforce, internal tools, government portals.
 - AI-agnostic: works with Claude Desktop, Claude Code, VS Code, Cursor, Windsurf, JetBrains, Zed, Continue.dev
-- **Strategic direction (2026-04-01 research):** Multi-protocol architecture to reach ChatGPT (60.4%) and Gemini (15.2%) users, not just Claude/Cursor ecosystem (~4.5%). See `_bmad-output/planning-artifacts/strategic-pivot-ai-browser-copilot-2026-04-01.md`
+- **Strategic direction (2026-04-01 research):** Multi-protocol architecture to reach ChatGPT (60.4%) and Gemini (15.2%) users, not just Claude/Cursor ecosystem (~4.5%). See `_bmad-output/planning-artifacts/strategic-pivot-pilotwave-2026-04-01.md`
 
 ## Current Status (2026-03-31)
 - **Connection layer redesign IN PROGRESS** — 15 of 18 stories completed
 - **435+ tests** across 4 packages (extension 153, native-host 21, installer 257, NM helper 4)
 - **New package:** `packages/native-host-helper/` — NM discovery helper binary
-- **Published:** npm (ai-browser-copilot-setup@0.1.2), GitHub releases v0.2.0
-- Code: `C:\Dev\1M\ai-browser-copilot\`
+- **Published:** npm (pilotwave-setup@0.1.2), GitHub releases v0.2.0
+- Code: `C:\Dev\1M\pilotwave\`
 - Monorepo: `packages/extension` + `packages/native-host` + `packages/installer` + `packages/native-host-helper`
 
 ## Connection Layer Redesign (2026-03-31)
@@ -61,7 +61,7 @@ type: project
 - Native host starts → checks lock file for existing instance → finds available port (prefer 7483, fallback dynamic) → generates auth token → writes lock file → starts WebSocket server
 - Extension wakes → calls NM helper to read lock file → gets port + token → connects `ws://127.0.0.1:<port>?token=<hex>` → receives server_info handshake → state: connected → heartbeat starts (20s)
 - Lost connection → state machine: reconnecting → gRPC backoff (1s/1.6x/30s max) → circuit breaker (5 fails → error, 60s half-open)
-- Lock file: `%LOCALAPPDATA%\ai-browser-copilot\server.lock` (Win) / `~/Library/Application Support/ai-browser-copilot/server.lock` (Mac)
+- Lock file: `%LOCALAPPDATA%\pilotwave\server.lock` (Win) / `~/Library/Application Support/pilotwave/server.lock` (Mac)
 
 ## MCP Tools (8 total)
 Free tier: `get_page_content`, `take_screenshot`, `list_tabs`
@@ -76,7 +76,7 @@ Pro tier: `get_page_metadata`, `navigate`, `fill_form`, `click_element`, `extrac
 
 ## npm account
 - Username: tech.mom_us
-- Package: ai-browser-copilot-setup (public)
+- Package: pilotwave-setup (public)
 
 ## What's Left to Launch
 1. **Finish connection wiring** — update background.ts to use connection-manager, wire uninstall multi-browser

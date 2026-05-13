@@ -269,7 +269,7 @@ test.describe('fill_form on complex page', () => {
 
   test('fills text inputs by selector', async () => {
     const result = await fillForm(tabId, [
-      { selector: '#product-name', value: 'AI Browser CoPilot' },
+      { selector: '#product-name', value: 'Pilotwave' },
       { selector: '#product-url', value: 'https://copilot.example.com' },
       { selector: '#tagline', value: 'Connect your browser to AI' },
     ]);
@@ -278,7 +278,7 @@ test.describe('fill_form on complex page', () => {
     result.forEach((r: { success: boolean }) => expect(r.success).toBe(true));
 
     // Verify values on the actual page
-    expect(await page.inputValue('#product-name')).toBe('AI Browser CoPilot');
+    expect(await page.inputValue('#product-name')).toBe('Pilotwave');
     expect(await page.inputValue('#product-url')).toBe('https://copilot.example.com');
     expect(await page.inputValue('#tagline')).toBe('Connect your browser to AI');
   });
@@ -310,7 +310,7 @@ test.describe('fill_form on complex page', () => {
   test('fills complete product submission form', async () => {
     // Fill all text fields
     const result = await fillForm(tabId, [
-      { selector: '#product-name', value: 'AI Browser CoPilot' },
+      { selector: '#product-name', value: 'Pilotwave' },
       { selector: '#product-url', value: 'https://aibrowsercopilot.com' },
       { selector: '#tagline', value: 'Let AI see your browser' },
       { selector: '#description', value: 'Connect Claude, ChatGPT, or Cursor to your Chrome tabs.' },
@@ -355,7 +355,7 @@ test.describe('fill_form on complex page', () => {
     }, tabId);
 
     // Verify everything
-    expect(await page.inputValue('#product-name')).toBe('AI Browser CoPilot');
+    expect(await page.inputValue('#product-name')).toBe('Pilotwave');
     expect(await page.inputValue('#category')).toBe('ai');
     expect(await page.isChecked('input[name="type"][value="new"]')).toBe(true);
     expect(await page.isChecked('#agree-terms')).toBe(true);

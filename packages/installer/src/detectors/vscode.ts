@@ -11,7 +11,7 @@ import {
 } from '../installers/config-merger.js';
 import { isCommandAvailable } from './utils.js';
 
-const ENTRY_KEY = 'ai-browser-copilot';
+const ENTRY_KEY = 'pilotwave';
 
 const getSettingsDir = (platform: PlatformInfo): string => {
   switch (platform.os) {
@@ -59,7 +59,7 @@ const isPlainObject = (val: unknown): val is Record<string, unknown> =>
 
 /**
  * Check both the new mcp.json and legacy settings.json locations for an
- * `ai-browser-copilot` entry.
+ * `pilotwave` entry.
  */
 const hasExistingVscodeMcp = (platform: PlatformInfo): boolean => {
   const newJson = safeReadJson(getConfigPath(platform));
@@ -87,7 +87,7 @@ const atomicWriteJson = (filePath: string, value: unknown, raw?: string): void =
 };
 
 /**
- * Replace (not deep-merge) the `ai-browser-copilot` entry under the top-level
+ * Replace (not deep-merge) the `pilotwave` entry under the top-level
  * `servers` key in mcp.json. Replacing wholesale ensures stale sibling keys
  * (env, disabled, type, etc.) from prior installs are dropped.
  */
@@ -143,7 +143,7 @@ export interface LegacyCleanupResult {
 }
 
 /**
- * Remove the `ai-browser-copilot` entry from VS Code's legacy
+ * Remove the `pilotwave` entry from VS Code's legacy
  * settings.json `mcp.servers` block, AND prune empty `mcp.servers` /
  * empty `mcp` containers. VS Code emits a deprecation notification
  * whenever `settings.json` contains a `mcp` key — even if its `servers`
@@ -198,7 +198,7 @@ export const cleanupLegacyVscodeSettings = (
 };
 
 /**
- * Remove the `ai-browser-copilot` entry from mcp.json. Leaves the file
+ * Remove the `pilotwave` entry from mcp.json. Leaves the file
  * intact (with empty `servers` / `inputs`) so the user's other server
  * registrations are preserved and the file stays valid for VS Code.
  * Idempotent.
@@ -290,7 +290,7 @@ export const vscodeDetector: ToolDetector = {
     const writeResult = writeMcpJsonEntry(platform, binaryPath);
     if (!writeResult.success) return writeResult;
 
-    // Migration: prune any leftover ai-browser-copilot entry / empty mcp
+    // Migration: prune any leftover pilotwave entry / empty mcp
     // block from settings.json so VS Code stops nagging about
     // user-settings-based MCP config.
     const cleanup = cleanupLegacyVscodeSettings(platform);

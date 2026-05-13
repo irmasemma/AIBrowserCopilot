@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "ai-browser-copilot": {
-      "command": "${env:LOCALAPPDATA}/ai-browser-copilot/ai-browser-copilot-win-x64.exe",
+    "pilotwave": {
+      "command": "${env:LOCALAPPDATA}/pilotwave/pilotwave-win-x64.exe",
       "args": []
     },
     "browsermcp": {

@@ -1,13 +1,13 @@
 # Chrome Web Store Listing
 
 ## Extension Name
-AI Browser CoPilot
+Pilotwave
 
 ## Short Description (132 chars max)
 Connect your browser to your AI assistant. Read pages, take screenshots, fill forms, and extract data — all from your AI.
 
 ## Detailed Description
-AI Browser CoPilot bridges your browser and your AI assistant (Claude, VS Code Copilot, etc.) using the Model Context Protocol (MCP). Your AI can now see and interact with the web pages you're viewing.
+Pilotwave bridges your browser and your AI assistant (Claude, VS Code Copilot, etc.) using the Model Context Protocol (MCP). Your AI can now see and interact with the web pages you're viewing.
 
 **What can your AI do with CoPilot?**
 
@@ -31,7 +31,7 @@ PRO TOOLS:
 
 **How it works:**
 1. Install the extension
-2. Run the one-command setup: npx ai-browser-copilot-setup
+2. Run the one-command setup: npx pilotwave-setup
 3. Your AI tool is automatically detected and configured
 4. Start asking your AI about what's on your screen
 

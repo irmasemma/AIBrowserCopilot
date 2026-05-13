@@ -46,11 +46,11 @@ const REPO_ROOT = path.resolve(__dirname, '../..');
 const EXTENSION_PATH = path.resolve(REPO_ROOT, 'packages/extension/dist/chrome-mv3');
 const NATIVE_HOST_BIN = path.resolve(
   REPO_ROOT,
-  'packages/native-host/bin/ai-browser-copilot-win-x64.exe',
+  'packages/native-host/bin/pilotwave-win-x64.exe',
 );
 const HELPER_BIN = path.resolve(
   REPO_ROOT,
-  'packages/native-host-helper/bin/ai-browser-copilot-helper-win-x64.exe',
+  'packages/native-host-helper/bin/pilotwave-helper-win-x64.exe',
 );
 
 const PLATFORM = detectPlatform();
@@ -351,8 +351,8 @@ test('3.1 uninstall removes binary, manifest, lock file, registry', async () => 
   // Arrange: ensure binary + a fake manifest + a fake lock file exist.
   ensureInstallDir();
   placeFreshBinary();
-  const manifestPath = path.join(INSTALL_DIR, 'com.copilot.native_host.json');
-  writeFileSync(manifestPath, JSON.stringify({ name: 'com.copilot.native_host' }));
+  const manifestPath = path.join(INSTALL_DIR, 'com.pilotwave.native_host.json');
+  writeFileSync(manifestPath, JSON.stringify({ name: 'com.pilotwave.native_host' }));
   const lockPath = path.join(INSTALL_DIR, 'server.lock');
   writeFileSync(
     lockPath,

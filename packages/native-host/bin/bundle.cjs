@@ -7932,11 +7932,11 @@ var import_node_os = require("node:os");
 function getLockDir() {
   switch ((0, import_node_os.platform)()) {
     case "win32":
-      return (0, import_node_path.join)(process.env.LOCALAPPDATA ?? (0, import_node_path.join)((0, import_node_os.homedir)(), "AppData", "Local"), "ai-browser-copilot");
+      return (0, import_node_path.join)(process.env.LOCALAPPDATA ?? (0, import_node_path.join)((0, import_node_os.homedir)(), "AppData", "Local"), "pilotwave");
     case "darwin":
-      return (0, import_node_path.join)((0, import_node_os.homedir)(), "Library", "Application Support", "ai-browser-copilot");
+      return (0, import_node_path.join)((0, import_node_os.homedir)(), "Library", "Application Support", "pilotwave");
     default:
-      return (0, import_node_path.join)((0, import_node_os.homedir)(), ".local", "share", "ai-browser-copilot");
+      return (0, import_node_path.join)((0, import_node_os.homedir)(), ".local", "share", "pilotwave");
   }
 }
 function getLockFilePath() {
@@ -8245,7 +8245,7 @@ function handleMcpMessage(clientId, raw, reply) {
         result: {
           protocolVersion: "2024-11-05",
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: "ai-browser-copilot", version: VERSION }
+          serverInfo: { name: "pilotwave", version: VERSION }
         }
       });
       return;
@@ -8337,11 +8337,11 @@ function zodToJsonSchema(z) {
 function getBridgeLogPath() {
   switch ((0, import_node_os2.platform)()) {
     case "win32":
-      return (0, import_node_path2.join)(process.env.LOCALAPPDATA ?? (0, import_node_path2.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "ai-browser-copilot", "bridge.log");
+      return (0, import_node_path2.join)(process.env.LOCALAPPDATA ?? (0, import_node_path2.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "pilotwave", "bridge.log");
     case "darwin":
-      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "ai-browser-copilot", "bridge.log");
+      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "pilotwave", "bridge.log");
     default:
-      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".local", "share", "ai-browser-copilot", "bridge.log");
+      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".local", "share", "pilotwave", "bridge.log");
   }
 }
 function appendBridgeLog(line) {

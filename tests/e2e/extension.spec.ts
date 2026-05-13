@@ -75,7 +75,7 @@ test('1. Extension loads successfully', async () => {
   const page = await context.newPage();
   await page.goto(`chrome-extension://${extensionId}/manifest.json`);
   const text = await page.textContent('body');
-  expect(text).toContain('AI Browser CoPilot');
+  expect(text).toContain('Pilotwave');
   console.log('Extension is accessible');
   await page.close();
 });
@@ -315,7 +315,7 @@ test('8. Manifest is valid and has correct permissions', async () => {
   console.log('Version:', manifest.version);
   console.log('Permissions:', manifest.permissions);
 
-  expect(manifest.name).toBe('AI Browser CoPilot');
+  expect(manifest.name).toBe('Pilotwave');
   expect(manifest.manifest_version).toBe(3);
   expect(manifest.permissions).toContain('activeTab');
   expect(manifest.permissions).toContain('tabs');

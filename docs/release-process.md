@@ -1,6 +1,6 @@
 # Release Process
 
-How to cut a new release of AI Browser CoPilot.
+How to cut a new release of Pilotwave.
 
 ## TL;DR
 
@@ -44,8 +44,8 @@ extension build:
 
 | Asset | Source | Purpose |
 |---|---|---|
-| `ai-browser-copilot-{platform}-{arch}` (or `.exe`) | `packages/native-host` | The bridge — long-lived process, owns the WS to the extension |
-| `ai-browser-copilot-helper-{platform}-{arch}` (or `.exe`) | `packages/native-host-helper` | Native-messaging endpoint Chrome calls for diagnostics, MCP registration check, and native-host spawn |
+| `pilotwave-{platform}-{arch}` (or `.exe`) | `packages/native-host` | The bridge — long-lived process, owns the WS to the extension |
+| `pilotwave-helper-{platform}-{arch}` (or `.exe`) | `packages/native-host-helper` | Native-messaging endpoint Chrome calls for diagnostics, MCP registration check, and native-host spawn |
 | `extension-build.zip` | `packages/extension/.output/chrome-mv3/` | Built extension for Chrome Web Store submission |
 
 **Both bridge and helper are required.** If only the bridge ships (as happened
@@ -57,11 +57,11 @@ Per platform, the matrix produces:
 
 | Platform | Bridge asset | Helper asset |
 |---|---|---|
-| Windows x64 | `ai-browser-copilot-win-x64.exe` | `ai-browser-copilot-helper-win-x64.exe` |
-| macOS x64 | `ai-browser-copilot-macos-x64` | `ai-browser-copilot-helper-macos-x64` |
-| macOS arm64 | `ai-browser-copilot-macos-arm64` | `ai-browser-copilot-helper-macos-arm64` |
-| Linux x64 | `ai-browser-copilot-linux-x64` | `ai-browser-copilot-helper-linux-x64` |
-| Linux arm64 | `ai-browser-copilot-linux-arm64` | `ai-browser-copilot-helper-linux-arm64` |
+| Windows x64 | `pilotwave-win-x64.exe` | `pilotwave-helper-win-x64.exe` |
+| macOS x64 | `pilotwave-macos-x64` | `pilotwave-helper-macos-x64` |
+| macOS arm64 | `pilotwave-macos-arm64` | `pilotwave-helper-macos-arm64` |
+| Linux x64 | `pilotwave-linux-x64` | `pilotwave-helper-linux-x64` |
+| Linux arm64 | `pilotwave-linux-arm64` | `pilotwave-helper-linux-arm64` |
 
 ---
 
@@ -79,8 +79,8 @@ ls packages/native-host/bin/
 ls packages/native-host-helper/bin/
 
 # --version on each — should match the version you're about to tag
-.\packages\native-host\bin\ai-browser-copilot-win-x64.exe --version
-.\packages\native-host-helper\bin\ai-browser-copilot-helper-win-x64.exe --version
+.\packages\native-host\bin\pilotwave-win-x64.exe --version
+.\packages\native-host-helper\bin\pilotwave-helper-win-x64.exe --version
 
 # Run unit tests (optional — release CI marks these non-blocking)
 npm test --workspaces --if-present
@@ -119,7 +119,7 @@ Total runtime: ~2–3 minutes for the whole pipeline.
 Almost always: the release didn't ship the helper binary, so the installer
 couldn't refresh it. Fix:
 
-1. Verify the release page lists `ai-browser-copilot-helper-*` assets:
+1. Verify the release page lists `pilotwave-helper-*` assets:
    `gh release view vX.Y.Z`
 2. If they're missing, the matrix in `release.yml` has been narrowed —
    compare against the version of `release.yml` documented above and
@@ -157,9 +157,9 @@ If a release was already published at the old tag, delete it first:
 
 ## What is NOT in this release process (yet)
 
-- **`npm publish` for `ai-browser-copilot-setup`** — the installer code on
+- **`npm publish` for `pilotwave-setup`** — the installer code on
   this branch is more recent than what's on npm (v0.1.2). If you want
-  `npx ai-browser-copilot-setup` to pull the latest installer, run
+  `npx pilotwave-setup` to pull the latest installer, run
   `npm publish` from `packages/installer/` separately. Tag-based CI does
   NOT do this automatically.
 - **Code signing** — placeholders exist in `release.yml` for macOS notarization

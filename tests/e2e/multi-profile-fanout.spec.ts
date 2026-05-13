@@ -88,9 +88,9 @@ test.beforeAll(async () => {
   //    relaunch the binary after the test, but with the old code — that's
   //    fine for production traffic; we only need the new code under test.
   if (process.platform === 'win32') {
-    try { execSync('taskkill /F /IM ai-browser-copilot-win-x64.exe', { stdio: 'ignore' }); } catch { /* not running */ }
+    try { execSync('taskkill /F /IM pilotwave-win-x64.exe', { stdio: 'ignore' }); } catch { /* not running */ }
   } else {
-    try { execSync('pkill -f ai-browser-copilot', { stdio: 'ignore' }); } catch { /* not running */ }
+    try { execSync('pkill -f pilotwave', { stdio: 'ignore' }); } catch { /* not running */ }
   }
   await new Promise((r) => setTimeout(r, 500));
 

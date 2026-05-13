@@ -267,8 +267,8 @@ const executeContentScript = async <T>(tabId: number, func: () => T): Promise<T>
       throw Object.assign(
         new Error(
           'This tab is blocked by the browser\'s per-extension Site Access setting. ' +
-          'Open the AI Browser CoPilot side panel and click "Grant access to all sites", ' +
-          'or open edge://extensions, click "Details" on AI Browser CoPilot, and set ' +
+          'Open the Pilotwave side panel and click "Grant access to all sites", ' +
+          'or open edge://extensions, click "Details" on Pilotwave, and set ' +
           '"Site access" to "On all sites". Then retry.',
         ),
         { code: 'SITE_ACCESS_BLOCKED' },

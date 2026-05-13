@@ -6,7 +6,7 @@ export default defineConfig({
   outDir: 'dist',
   manifest: {
     name: 'Pilotwave: AI Chat + MCP for Claude, Cursor, ChatGPT — Forms, Data',
-    version: '0.1.0',
+    version: '0.4.0',
     description: 'Let AI control your real Chrome — your tabs, sessions, logins. Chat sidebar + MCP for Claude, Cursor, ChatGPT, VS Code.',
     permissions: ['tabs', 'sidePanel', 'nativeMessaging', 'storage', 'scripting', 'debugger', 'alarms'],
     host_permissions: [

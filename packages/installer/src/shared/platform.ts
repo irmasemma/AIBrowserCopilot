@@ -54,12 +54,12 @@ export const getInstallDir = (platform: PlatformInfo): string => {
     case 'windows':
       return join(
         process.env['LOCALAPPDATA'] ?? join(platform.homeDir, 'AppData', 'Local'),
-        'ai-browser-copilot',
+        'pilotwave',
       );
     case 'macos':
-      return join(platform.homeDir, 'Library', 'Application Support', 'ai-browser-copilot');
+      return join(platform.homeDir, 'Library', 'Application Support', 'pilotwave');
     case 'linux':
-      return join(platform.homeDir, '.local', 'share', 'ai-browser-copilot');
+      return join(platform.homeDir, '.local', 'share', 'pilotwave');
     default:
       throw new Error(`Unsupported platform: ${platform.os}`);
   }

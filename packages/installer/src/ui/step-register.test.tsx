@@ -15,12 +15,12 @@ describe('StepRegister', () => {
     const { lastFrame } = render(
       <StepRegister
         status="complete"
-        manifestPath="C:\\Users\\test\\AppData\\Local\\ai-browser-copilot\\com.copilot.native_host.json"
+        manifestPath="C:\\Users\\test\\AppData\\Local\\pilotwave\\com.pilotwave.native_host.json"
       />,
     );
     const frame = lastFrame();
     expect(frame).toContain('registered');
-    expect(frame).toContain('com.copilot.native_host.json');
+    expect(frame).toContain('com.pilotwave.native_host.json');
   });
 
   it('renders error state with message', () => {

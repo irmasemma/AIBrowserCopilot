@@ -29,7 +29,7 @@ export interface ConfigRemovalResult {
 
 /**
  * Remove the native host binaries (bridge + helper) and their install directory
- * if it ends up empty. Both binaries live side-by-side in `%LOCALAPPDATA%\ai-browser-copilot\`
+ * if it ends up empty. Both binaries live side-by-side in `%LOCALAPPDATA%\pilotwave\`
  * on Windows; missing the helper here leaves a stale .exe behind and prevents
  * the install dir from being garbage-collected.
  */
@@ -101,7 +101,7 @@ const removeRegistryKey = (platform: PlatformInfo): { removed: boolean; error?: 
 };
 
 /**
- * Remove ai-browser-copilot MCP entries from all detected tool configs.
+ * Remove pilotwave MCP entries from all detected tool configs.
  */
 const removeConfigs = async (platform: PlatformInfo): Promise<ConfigRemovalResult[]> => {
   clear();
@@ -124,7 +124,7 @@ const removeConfigs = async (platform: PlatformInfo): Promise<ConfigRemovalResul
         continue;
       }
 
-      const result = removeConfigEntry(detection.configPath, 'ai-browser-copilot');
+      const result = removeConfigEntry(detection.configPath, 'pilotwave');
       results.push({
         tool: detector.name,
         removed: result.success,

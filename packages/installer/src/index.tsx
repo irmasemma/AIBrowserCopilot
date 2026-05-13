@@ -21,7 +21,7 @@ const main = (): void => {
   const cli = meow(
     `
     Usage
-      $ ai-browser-copilot-setup
+      $ pilotwave-setup
 
     Options
       --yes          Skip confirmation prompts
@@ -34,12 +34,12 @@ const main = (): void => {
                      or the project root (looks in packages/*/bin/).
 
     Examples
-      $ ai-browser-copilot-setup
-      $ ai-browser-copilot-setup --yes
-      $ ai-browser-copilot-setup --tools vscode,cursor
-      $ ai-browser-copilot-setup --update
-      $ ai-browser-copilot-setup --uninstall
-      $ ai-browser-copilot-setup --from-local . --extension-id <id>
+      $ pilotwave-setup
+      $ pilotwave-setup --yes
+      $ pilotwave-setup --tools vscode,cursor
+      $ pilotwave-setup --update
+      $ pilotwave-setup --uninstall
+      $ pilotwave-setup --from-local . --extension-id <id>
   `,
     {
       importMeta: import.meta,

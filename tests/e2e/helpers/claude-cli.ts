@@ -1,15 +1,15 @@
 /**
  * Drive Anthropic's Claude Code CLI in --print/stream-json mode and assert
- * that an `ai-browser-copilot` MCP tool was invoked with a real result.
+ * that an `pilotwave` MCP tool was invoked with a real result.
  *
  * Usage assumes `claude` is on PATH and the user is logged in (sk-ant-oat OAuth
  * token under ~/.claude/.credentials.json). The installer is expected to have
- * registered the ai-browser-copilot MCP server before this runs — verify with
+ * registered the pilotwave MCP server before this runs — verify with
  * `claude mcp list` if assertions fail.
  */
 import { spawn } from 'node:child_process';
 
-const MCP_TOOL_LIST_TABS = 'mcp__ai-browser-copilot__list_tabs';
+const MCP_TOOL_LIST_TABS = 'mcp__pilotwave__list_tabs';
 
 export interface ToolUseEvent {
   toolName: string;
@@ -184,7 +184,7 @@ export interface ListTabsTab {
 }
 
 /**
- * Parse the text payload of an ai-browser-copilot list_tabs tool_result. The
+ * Parse the text payload of an pilotwave list_tabs tool_result. The
  * MCP tool returns shapes seen in practice:
  *   - `{ "tabs": [...] }`                 (current bridge serialisation)
  *   - `[...]`                              (bare array, in case shape changes)

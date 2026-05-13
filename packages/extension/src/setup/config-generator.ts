@@ -1,6 +1,6 @@
 import { NATIVE_HOST_NAME } from '../shared/constants.js';
 
-const BINARY_PREFIX = 'ai-browser-copilot';
+const BINARY_PREFIX = 'pilotwave';
 
 interface McpConfig {
   mcpServers: Record<string, {
@@ -28,11 +28,11 @@ export const getNativeHostInstallDir = (): string => {
   const platform = detectPlatform();
   switch (platform) {
     case 'windows':
-      return '%LOCALAPPDATA%\\ai-browser-copilot';
+      return '%LOCALAPPDATA%\\pilotwave';
     case 'macos':
-      return '~/Library/Application Support/ai-browser-copilot';
+      return '~/Library/Application Support/pilotwave';
     default:
-      return '~/.local/share/ai-browser-copilot';
+      return '~/.local/share/pilotwave';
   }
 };
 
@@ -41,17 +41,17 @@ const getBinaryPath = (): string => {
   const binaryName = getBinaryName();
   switch (platform) {
     case 'windows':
-      return `%LOCALAPPDATA%\\\\ai-browser-copilot\\\\${binaryName}`;
+      return `%LOCALAPPDATA%\\\\pilotwave\\\\${binaryName}`;
     case 'macos':
-      return `~/Library/Application Support/ai-browser-copilot/${binaryName}`;
+      return `~/Library/Application Support/pilotwave/${binaryName}`;
     default:
-      return `~/.local/share/ai-browser-copilot/${binaryName}`;
+      return `~/.local/share/pilotwave/${binaryName}`;
   }
 };
 
 export const generateMcpConfig = (): McpConfig => ({
   mcpServers: {
-    'ai-browser-copilot': {
+    'pilotwave': {
       command: getBinaryPath(),
       args: [],
     },
@@ -90,7 +90,7 @@ const getClaudeConfigPath = (): string => {
 
 export const getNativeMessagingManifest = (hostPath: string): object => ({
   name: NATIVE_HOST_NAME,
-  description: 'AI Browser CoPilot Native Messaging Host',
+  description: 'Pilotwave Native Messaging Host',
   path: hostPath,
   type: 'stdio',
   allowed_origins: [`chrome-extension://${chrome.runtime.id}/`],

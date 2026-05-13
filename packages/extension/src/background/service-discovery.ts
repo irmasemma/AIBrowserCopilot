@@ -1,7 +1,7 @@
 import type { DiagnosticReason } from '../shared/types';
 import { getBrowserInstanceId } from '../shared/browser-instance-id';
 
-const NM_HELPER_NAME = 'com.copilot.native_host_helper';
+const NM_HELPER_NAME = 'com.pilotwave.native_host_helper';
 const DEFAULT_PORT = 7483;
 
 export interface LockFileInfo {
@@ -117,7 +117,7 @@ export function createServiceDiscovery(): ServiceDiscovery {
       return response as unknown as ServiceStatus;
     }
     // Helper responded but with an unexpected shape — usually a version skew
-    // (e.g. user manually ran `npx ai-browser-copilot-setup` which installs an
+    // (e.g. user manually ran `npx pilotwave-setup` which installs an
     // older published helper whose response format the current extension
     // doesn't recognise). Surface as a recoverable "bridge not running" state
     // so auto-recovery (or the user's "Start CoPilot service" click) can call

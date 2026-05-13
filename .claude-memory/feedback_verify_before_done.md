@@ -10,9 +10,9 @@ Never tell the user "it should work" or "restart and try". Always verify the ful
 
 **How to apply:**
 1. **ALWAYS rebuild the production artifact** — `npm run compile:win` for the native host binary. NEVER just rebuild TS source. NEVER point configs to dev/source versions.
-2. **ALWAYS deploy compiled artifacts to install locations.** The running native host uses the binary at `%LOCALAPPDATA%/ai-browser-copilot/ai-browser-copilot-win-x64.exe`, NOT the one in `packages/native-host/bin/`. After recompiling:
+2. **ALWAYS deploy compiled artifacts to install locations.** The running native host uses the binary at `%LOCALAPPDATA%/pilotwave/pilotwave-win-x64.exe`, NOT the one in `packages/native-host/bin/`. After recompiling:
    - Kill the running native host process (check `netstat -ano | grep 7483` for PID)
-   - Copy the new binary: `cp packages/native-host/bin/ai-browser-copilot-win-x64.exe "$LOCALAPPDATA/ai-browser-copilot/"`
+   - Copy the new binary: `cp packages/native-host/bin/pilotwave-win-x64.exe "$LOCALAPPDATA/pilotwave/"`
    - Restart the native host from the install location
    - This applies to ALL compiled outputs (exe, dll, etc.) — always check where the runtime reads from and deploy there.
 3. **ALWAYS publish a GitHub release when pushing code that changes the native host binary.** The installer downloads from `https://github.com/irmasemma/AIBrowserCopilot/releases/latest/download/`. If the release binary is stale, every customer who runs the installer gets the old broken version. Use `gh release create` to publish after compiling.

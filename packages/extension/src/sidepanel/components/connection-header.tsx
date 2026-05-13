@@ -11,7 +11,7 @@ interface ActionButton {
   variant: 'primary' | 'secondary';
 }
 
-const INSTALL_COMMAND = 'npx ai-browser-copilot-setup --update';
+const INSTALL_COMMAND = 'npx pilotwave-setup --update';
 
 /**
  * Pure mapping from connection-context shape to a UI title + subtitle + buttons.

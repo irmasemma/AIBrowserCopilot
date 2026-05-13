@@ -40,7 +40,7 @@ export const continueDevDetector: ToolDetector = {
     const configPath = getConfigPath(platform);
     return mergeConfig(configPath, {
       mcpServers: {
-        'ai-browser-copilot': {
+        'pilotwave': {
           command: binaryPath,
           args: [],
         },
@@ -49,6 +49,6 @@ export const continueDevDetector: ToolDetector = {
   },
 
   async verifyConfig(platform: PlatformInfo): Promise<boolean> {
-    return verifyEntryAtPath(getConfigPath(platform), ['mcpServers', 'ai-browser-copilot']);
+    return verifyEntryAtPath(getConfigPath(platform), ['mcpServers', 'pilotwave']);
   },
 };

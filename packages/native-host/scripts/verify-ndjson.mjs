@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const BINARY = path.resolve(here, '..', 'bin', 'ai-browser-copilot-win-x64.exe');
+const BINARY = path.resolve(here, '..', 'bin', 'pilotwave-win-x64.exe');
 
 const child = spawn(BINARY, [], { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -43,7 +43,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       if (line.startsWith('{')) {
         console.log('[recv]', line);
         const msg = JSON.parse(line);
-        if (msg.id === 1 && msg.result?.serverInfo?.name === 'ai-browser-copilot') {
+        if (msg.id === 1 && msg.result?.serverInfo?.name === 'pilotwave') {
           console.log('OK: NDJSON initialize round-trip succeeded');
           child.kill();
           process.exit(0);

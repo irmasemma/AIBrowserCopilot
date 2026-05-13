@@ -4,7 +4,7 @@
  *
  * The launcher writes tests/e2e/.edge-debug.json with the port + extension
  * path. This module reads that file, connects via CDP, and locates the
- * AI Browser CoPilot service worker (matched by manifest name so it works
+ * Pilotwave service worker (matched by manifest name so it works
  * even when other extensions are also installed in the user's profile).
  */
 import { chromium, type Browser, type BrowserContext, type Worker } from '@playwright/test';
@@ -15,7 +15,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const STATE_FILE = path.resolve(REPO_ROOT, 'tests/e2e/.edge-debug.json');
 
-const EXTENSION_NAME = 'AI Browser CoPilot';
+const EXTENSION_NAME = 'Pilotwave';
 
 export interface EdgeDebugState {
   port: number;

@@ -3,7 +3,7 @@ Here's a single comprehensive prompt covering both tests. Paste it into a fresh 
 ---
 
 ````
-We're working in C:\Dev\1M\ai-browser-copilot — a multi-package monorepo for the AI Browser CoPilot Chrome extension. Project context lives in CLAUDE.md and docs/. Read both before starting.
+We're working in C:\Dev\1M\pilotwave — a multi-package monorepo for the Pilotwave Chrome extension. Project context lives in CLAUDE.md and docs/. Read both before starting.
 
 # Goal
 
@@ -15,8 +15,8 @@ Output one new spec file at: tests/e2e/install-and-connect.spec.ts. Add helpers 
 
 ## Test A — "Clean reinstall"
 
-1. Detect whether AI Browser CoPilot is currently installed on this machine (extension AND native host).
-2. If anything is installed, uninstall **completely**: extension + native-host bridge + helper + native-messaging manifests + Windows registry keys + autostart entry + lock file + MCP config entries from every detected AI tool. Use `npx ai-browser-copilot-setup --uninstall --yes` (or `node packages/installer/dist/cli.js --uninstall --yes` if running from the local tree). After uninstall, none of the artifacts in §"State to verify" below should exist.
+1. Detect whether Pilotwave is currently installed on this machine (extension AND native host).
+2. If anything is installed, uninstall **completely**: extension + native-host bridge + helper + native-messaging manifests + Windows registry keys + autostart entry + lock file + MCP config entries from every detected AI tool. Use `npx pilotwave-setup --uninstall --yes` (or `node packages/installer/dist/cli.js --uninstall --yes` if running from the local tree). After uninstall, none of the artifacts in §"State to verify" below should exist.
 3. Install from the local working tree: `node <local-installer-cli> --from-local . --extension-id ehchmchlmggdigicfjfmlgcbhdcdcmll --yes`. The installer auto-discovers binaries under packages/native-host/bin/ and packages/native-host-helper/bin/. Make sure those exist first — if not, build them: `npm run compile:win -w packages/native-host && npm run compile:win -w packages/native-host-helper`.
 4. Build the extension: `npm run build:extension` (output lands at packages/extension/dist/chrome-mv3/).
 5. Launch the user's real Chrome with `--load-extension=<that path>` and the user's user-data-dir (see §"Real Chrome launch"). Open the side panel.
@@ -49,31 +49,31 @@ Defined in packages/installer/src/index.tsx (argparse around lines 21–55).
 
 Flags: `--yes`, `--tools <csv>`, `--update`, `--uninstall`, `--extension-id <id>`, `--from-local <path>`.
 
-Local invocation: build the installer first (`npm run build -w packages/installer`), then call `node packages/installer/dist/cli.js …`. Or use `npx ai-browser-copilot-setup …` if you want to test the published path — but for these tests, the **local** path is what we want, because we're verifying the working-tree code.
+Local invocation: build the installer first (`npm run build -w packages/installer`), then call `node packages/installer/dist/cli.js …`. Or use `npx pilotwave-setup …` if you want to test the published path — but for these tests, the **local** path is what we want, because we're verifying the working-tree code.
 
 Uninstall flow lives in packages/installer/src/installers/uninstaller.ts (lines 195–243). It removes:
-- Bridge + helper binaries from %LOCALAPPDATA%\ai-browser-copilot\
-- Native-messaging manifests com.copilot.native_host.json and com.copilot.native_host_helper.json from the same dir
+- Bridge + helper binaries from %LOCALAPPDATA%\pilotwave\
+- Native-messaging manifests com.pilotwave.native_host.json and com.pilotwave.native_host_helper.json from the same dir
 - Lock file server.lock from the same dir
-- Registry keys under HKCU\SOFTWARE\Google\Chrome\NativeMessagingHosts\com.copilot.native_host and …\com.copilot.native_host_helper (and equivalent for Edge, Brave, Arc, Vivaldi if detected)
+- Registry keys under HKCU\SOFTWARE\Google\Chrome\NativeMessagingHosts\com.pilotwave.native_host and …\com.pilotwave.native_host_helper (and equivalent for Edge, Brave, Arc, Vivaldi if detected)
 - Autostart key HKCU\Software\Microsoft\Windows\CurrentVersion\Run\AIBrowserCopilot
 - MCP config entries from every detected AI tool (Claude Desktop, Claude Code, VS Code, Cursor, etc.)
 
 ## State to verify on this Windows machine
 
-Install dir: `%LOCALAPPDATA%\ai-browser-copilot\` (resolved by packages/installer/src/shared/platform.ts line ~56).
+Install dir: `%LOCALAPPDATA%\pilotwave\` (resolved by packages/installer/src/shared/platform.ts line ~56).
 
 Files inside (when installed):
-- ai-browser-copilot-win-x64.exe (bridge)
-- ai-browser-copilot-helper-win-x64.exe (helper)
-- com.copilot.native_host.json (manifest)
-- com.copilot.native_host_helper.json (manifest)
+- pilotwave-win-x64.exe (bridge)
+- pilotwave-helper-win-x64.exe (helper)
+- com.pilotwave.native_host.json (manifest)
+- com.pilotwave.native_host_helper.json (manifest)
 - server.lock (JSON: { port, token, pid, startedBy })
 
 Registry (HKCU):
-- SOFTWARE\Google\Chrome\NativeMessagingHosts\com.copilot.native_host → manifest path
-- SOFTWARE\Google\Chrome\NativeMessagingHosts\com.copilot.native_host_helper → manifest path
-- Software\Microsoft\Windows\CurrentVersion\Run\AIBrowserCopilot → "<install-dir>\ai-browser-copilot-win-x64.exe" --service
+- SOFTWARE\Google\Chrome\NativeMessagingHosts\com.pilotwave.native_host → manifest path
+- SOFTWARE\Google\Chrome\NativeMessagingHosts\com.pilotwave.native_host_helper → manifest path
+- Software\Microsoft\Windows\CurrentVersion\Run\AIBrowserCopilot → "<install-dir>\pilotwave-win-x64.exe" --service
 
 Use `reg query` and `Test-Path` (or `fs.existsSync`) to verify presence/absence between phases.
 
@@ -143,7 +143,7 @@ Run the test. If it fails:
 # Constraints / things to avoid
 
 - No mocks. No stubbing of native messaging, the bridge, or the WebSocket. Real binaries, real Chrome, real WebSocket, real tool dispatch.
-- No tests against npm-published `ai-browser-copilot-setup` (it's stale at 0.1.2). Always use the local installer build.
+- No tests against npm-published `pilotwave-setup` (it's stale at 0.1.2). Always use the local installer build.
 - Don't add new dependencies unless you can justify why an existing one (playwright, node:child_process, node:fs, node:net) won't do.
 - Don't commit. Don't push. Don't tag. Don't open PRs.
 - If the user's real Chrome profile is the only Chrome process running on this machine, killing it interrupts their work — the COPILOT_TEST_KILL_CHROME env-gate exists so the test refuses to run without explicit opt-in. Keep that gate.

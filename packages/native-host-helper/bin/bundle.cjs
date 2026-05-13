@@ -3769,11 +3769,11 @@ function hasCopilotEntry(mcpValue) {
   if (mcpValue === null || mcpValue === void 0) return false;
   if (Array.isArray(mcpValue)) {
     return mcpValue.some(
-      (item) => typeof item === "object" && item !== null && ("ai-browser-copilot" in item || item.name === "ai-browser-copilot")
+      (item) => typeof item === "object" && item !== null && ("pilotwave" in item || item.name === "pilotwave")
     );
   }
   if (typeof mcpValue === "object") {
-    return "ai-browser-copilot" in mcpValue;
+    return "pilotwave" in mcpValue;
   }
   return false;
 }
@@ -3805,22 +3805,22 @@ var getClaudeCodeConfigPath = () => (0, import_node_path2.join)((0, import_node_
 var getInstallDir = () => {
   switch ((0, import_node_os2.platform)()) {
     case "win32":
-      return (0, import_node_path2.join)(process.env.LOCALAPPDATA ?? (0, import_node_path2.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "ai-browser-copilot");
+      return (0, import_node_path2.join)(process.env.LOCALAPPDATA ?? (0, import_node_path2.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "pilotwave");
     case "darwin":
-      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "ai-browser-copilot");
+      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "pilotwave");
     default:
-      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".local", "share", "ai-browser-copilot");
+      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".local", "share", "pilotwave");
   }
 };
 var getNativeHostBinaryName = () => {
   const arch = (0, import_node_os2.arch)();
   switch ((0, import_node_os2.platform)()) {
     case "win32":
-      return `ai-browser-copilot-win-${arch === "arm64" ? "arm64" : "x64"}.exe`;
+      return `pilotwave-win-${arch === "arm64" ? "arm64" : "x64"}.exe`;
     case "darwin":
-      return `ai-browser-copilot-macos-${arch === "arm64" ? "arm64" : "x64"}`;
+      return `pilotwave-macos-${arch === "arm64" ? "arm64" : "x64"}`;
     default:
-      return `ai-browser-copilot-linux-${arch === "arm64" ? "arm64" : "x64"}`;
+      return `pilotwave-linux-${arch === "arm64" ? "arm64" : "x64"}`;
   }
 };
 var getNativeHostBinaryPath = () => (0, import_node_path2.join)(getInstallDir(), getNativeHostBinaryName());
@@ -3834,7 +3834,7 @@ var detectIndent = (content) => {
 };
 var hasEntry = (mcpServers) => {
   if (!isPlainObject(mcpServers)) return false;
-  const entry = mcpServers["ai-browser-copilot"];
+  const entry = mcpServers["pilotwave"];
   return isPlainObject(entry) && typeof entry.command === "string";
 };
 var checkClaudeCodeRegistration = () => {
@@ -3929,7 +3929,7 @@ var repairClaudeCodeRegistration = () => {
     (0, import_node_fs2.copyFileSync)(configPath, backupPath);
   }
   const mcpServers = isPlainObject(existing.mcpServers) ? { ...existing.mcpServers } : {};
-  mcpServers["ai-browser-copilot"] = newEntry;
+  mcpServers["pilotwave"] = newEntry;
   const merged = { ...existing, mcpServers };
   let output = JSON.stringify(merged, null, indentStr);
   if (trailingNewline) output += "\n";
@@ -3973,11 +3973,11 @@ var WS_PROBE_TIMEOUT_MS = 3e3;
 function getInstallDir2() {
   switch ((0, import_node_os3.platform)()) {
     case "win32":
-      return (0, import_node_path3.join)(process.env.LOCALAPPDATA ?? (0, import_node_path3.join)((0, import_node_os3.homedir)(), "AppData", "Local"), "ai-browser-copilot");
+      return (0, import_node_path3.join)(process.env.LOCALAPPDATA ?? (0, import_node_path3.join)((0, import_node_os3.homedir)(), "AppData", "Local"), "pilotwave");
     case "darwin":
-      return (0, import_node_path3.join)((0, import_node_os3.homedir)(), "Library", "Application Support", "ai-browser-copilot");
+      return (0, import_node_path3.join)((0, import_node_os3.homedir)(), "Library", "Application Support", "pilotwave");
     default:
-      return (0, import_node_path3.join)((0, import_node_os3.homedir)(), ".local", "share", "ai-browser-copilot");
+      return (0, import_node_path3.join)((0, import_node_os3.homedir)(), ".local", "share", "pilotwave");
   }
 }
 function getLockFilePath() {
@@ -3987,11 +3987,11 @@ function getBinaryPath() {
   const dir = getInstallDir2();
   switch ((0, import_node_os3.platform)()) {
     case "win32":
-      return (0, import_node_path3.join)(dir, "ai-browser-copilot-win-x64.exe");
+      return (0, import_node_path3.join)(dir, "pilotwave-win-x64.exe");
     case "darwin":
-      return (0, import_node_path3.join)(dir, process.arch === "arm64" ? "ai-browser-copilot-macos-arm64" : "ai-browser-copilot-macos-x64");
+      return (0, import_node_path3.join)(dir, process.arch === "arm64" ? "pilotwave-macos-arm64" : "pilotwave-macos-x64");
     default:
-      return (0, import_node_path3.join)(dir, process.arch === "arm64" ? "ai-browser-copilot-linux-arm64" : "ai-browser-copilot-linux-x64");
+      return (0, import_node_path3.join)(dir, process.arch === "arm64" ? "pilotwave-linux-arm64" : "pilotwave-linux-x64");
   }
 }
 function readLockFile() {

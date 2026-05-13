@@ -63,7 +63,7 @@ describe('StepInstall', () => {
       <StepInstall
         platform={makePlatform()}
         status="complete"
-        binaryPath="C:\\Users\\test\\AppData\\Local\\ai-browser-copilot\\ai-browser-copilot-win-x64.exe"
+        binaryPath="C:\\Users\\test\\AppData\\Local\\pilotwave\\pilotwave-win-x64.exe"
       />,
     );
     const frame = lastFrame();
@@ -90,7 +90,7 @@ describe('StepInstall', () => {
         progress={{ bytesReceived: 250, totalBytes: 1000, percent: 25 }}
       />,
     );
-    expect(lastFrame()).toContain('ai-browser-copilot-macos-arm64');
+    expect(lastFrame()).toContain('pilotwave-macos-arm64');
   });
 
   it('shows progress bar visual representation', () => {

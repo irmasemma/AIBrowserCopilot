@@ -1,7 +1,7 @@
 /**
  * Launch the user's real browser (Chrome by default, or Edge with
  * COPILOT_TEST_BROWSER=edge) — real profile, real credentials — and locate the
- * AI Browser CoPilot extension's service worker.
+ * Pilotwave extension's service worker.
  *
  * Real-profile launch is gated by COPILOT_TEST_KILL_CHROME=1 because attaching
  * to a profile that's already in use requires killing the user's running

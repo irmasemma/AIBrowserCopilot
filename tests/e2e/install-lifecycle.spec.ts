@@ -143,7 +143,7 @@ test.describe('Fresh install — clean state', () => {
 
     // The install command should include the real extension ID
     const commandBlock = await page.locator('pre').textContent();
-    expect(commandBlock).toContain('npx ai-browser-copilot-setup');
+    expect(commandBlock).toContain('npx pilotwave-setup');
     expect(commandBlock).toContain('--extension-id');
     expect(commandBlock).toContain(extensionId);
 
@@ -562,7 +562,7 @@ test.describe('Connection state transitions — every state has an exit', () => 
 
     // Simulate relay giving up (max reconnect attempts exceeded)
     await setConnectionState(page, 'setup-needed', {
-      error: 'Native host not found. Run: npx ai-browser-copilot-setup',
+      error: 'Native host not found. Run: npx pilotwave-setup',
     });
     await page.reload();
     await page.waitForTimeout(1000);
@@ -936,7 +936,7 @@ test.describe('Uninstall and reinstall — clean slate', () => {
     // Verify setup wizard
     let body = await page.textContent('body');
     expect(body).toContain('Setup Assistant');
-    expect(body).toContain('npx ai-browser-copilot-setup');
+    expect(body).toContain('npx pilotwave-setup');
 
     // Simulate successful install — connection established
     await setConnectionState(page, 'connected');
@@ -973,7 +973,7 @@ test.describe('Uninstall and reinstall — clean slate', () => {
     // Command should still contain the correct extension ID
     const commandBlock = await page.locator('pre').textContent();
     expect(commandBlock).toContain(extensionId);
-    expect(commandBlock).toContain('npx ai-browser-copilot-setup');
+    expect(commandBlock).toContain('npx pilotwave-setup');
 
     console.log('PASS: Reinstall command has correct extension ID');
     await clearAllStorage(page);
@@ -1026,7 +1026,7 @@ test.describe('Relay reconnection limit — max 3 attempts', () => {
 
     // Simulate the relay client giving up after 3 failed attempts
     await setConnectionState(page, 'setup-needed', {
-      error: 'Native host not found. Run: npx ai-browser-copilot-setup',
+      error: 'Native host not found. Run: npx pilotwave-setup',
     });
     await page.reload();
     await page.waitForTimeout(1000);
@@ -1047,7 +1047,7 @@ test.describe('Relay reconnection limit — max 3 attempts', () => {
     // Use popup page to avoid setup wizard polling interference
     const popup = await openPopup(context, extensionId);
     await setConnectionState(popup, 'setup-needed', {
-      error: 'Native host not found. Run: npx ai-browser-copilot-setup',
+      error: 'Native host not found. Run: npx pilotwave-setup',
     });
     await popup.waitForTimeout(500);
 
@@ -1327,7 +1327,7 @@ test.describe('Instructions clarity — user should never be lost', () => {
 
     // Must have clear action instruction
     expect(body).toContain('terminal');
-    expect(body).toContain('npx ai-browser-copilot-setup');
+    expect(body).toContain('npx pilotwave-setup');
 
     // Must explain what will happen
     expect(body).toContain('bridge');
@@ -1358,14 +1358,14 @@ test.describe('Instructions clarity — user should never be lost', () => {
   test('10.3 Setup-needed error message includes install command', async () => {
     const page = await openSidePanel(context, extensionId);
     await setConnectionState(page, 'setup-needed', {
-      error: 'Native host not found. Run: npx ai-browser-copilot-setup',
+      error: 'Native host not found. Run: npx pilotwave-setup',
     });
     await page.reload();
     await page.waitForTimeout(1000);
 
     // The setup wizard should show the command
     const body = await page.textContent('body');
-    expect(body).toContain('npx ai-browser-copilot-setup');
+    expect(body).toContain('npx pilotwave-setup');
 
     console.log('PASS: Setup-needed error includes install command');
     await clearAllStorage(page);

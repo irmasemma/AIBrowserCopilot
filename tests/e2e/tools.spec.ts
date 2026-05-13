@@ -223,7 +223,7 @@ test.describe('Tool: get_page_metadata', () => {
     });
 
     expect(metadata.title).toBe('CoPilot Test Page');
-    expect(metadata.description).toBe('Test page for AI Browser CoPilot E2E tests');
+    expect(metadata.description).toBe('Test page for Pilotwave E2E tests');
     expect(metadata.ogTitle).toBe('OG Test Title');
     expect(metadata.ogImage).toBe('https://example.com/og-image.png');
     expect(metadata.favicon).toContain('favicon.ico');
