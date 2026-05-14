@@ -19,8 +19,8 @@ export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete 
 
   const extId = chrome.runtime?.id ?? '';
   const installCommand = extId
-    ? `npx agenthub-setup --extension-id ${extId}`
-    : 'npx agenthub-setup';
+    ? `npx agenthub-setup@latest --extension-id ${extId}`
+    : 'npx agenthub-setup@latest';
 
   useEffect(() => {
     trackSetupEvent('setup_started');

@@ -11,7 +11,7 @@ interface ActionButton {
   variant: 'primary' | 'secondary';
 }
 
-const INSTALL_COMMAND = 'npx agenthub-setup --update';
+const INSTALL_COMMAND = 'npx agenthub-setup@latest --update';
 
 /**
  * Pure mapping from connection-context shape to a UI title + subtitle + buttons.

@@ -83,7 +83,8 @@ const buildSteps = (
       label: 'Lock file present',
       status: 'fail',
       detail: 'No service lock file. Bridge isn\u2019t running.',
-      hint: 'Click "Start AgentHub service" in the header.',
+      hint: 'Use the action button in the header above to start the bridge, or re-run the installer to refresh everything:',
+      command: installCommand,
     });
     return steps;
   }
@@ -98,7 +99,8 @@ const buildSteps = (
       label: 'Process alive',
       status: 'fail',
       detail: 'Lock file is stale — bridge process exited.',
-      hint: 'Click "Start AgentHub service" to spawn a fresh bridge.',
+      hint: 'Use the action button in the header above to spawn a fresh bridge, or re-run the installer to refresh everything:',
+      command: installCommand,
     });
     return steps;
   }
@@ -266,8 +268,8 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
 
   const extId = chrome.runtime?.id ?? '';
   const installCommand = extId
-    ? `npx agenthub-setup --update --extension-id ${extId}`
-    : 'npx agenthub-setup --update';
+    ? `npx agenthub-setup@latest --update --extension-id ${extId}`
+    : 'npx agenthub-setup@latest --update';
   const steps = buildSteps(status, connectionContext, installCommand);
 
   return (

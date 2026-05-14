@@ -193,8 +193,21 @@ test.describe('install-and-chat', () => {
     }
   });
 
-  test.afterAll(() => {
+  test.afterAll(async () => {
     killAllChrome();
+    // Explicitly kill the helper and bridge so the next spec (typically
+    // install-and-connect) starts with file handles fully released — Windows
+    // can hold the .exe locked for a beat after the parent Edge exits, which
+    // makes runUninstall leave the helper binary on disk and trips Test A's
+    // isFullyUninstalled assertion.
+    try {
+      const { execSync } = await import('node:child_process');
+      execSync('taskkill /IM agenthub-helper-win-x64.exe /F', { stdio: 'ignore' });
+      execSync('taskkill /IM agenthub-win-x64.exe /F', { stdio: 'ignore' });
+    } catch {
+      // taskkill exits non-zero when nothing matches — fine.
+    }
+    await new Promise((r) => setTimeout(r, 800));
   });
 
   const ensureFullyUninstalled = () => {
@@ -378,6 +391,115 @@ test.describe('install-and-chat', () => {
         `Test E summary: firstHeaderTitle="${firstHeaderTitle}" ` +
           `installerExit=${installerExit} recoveredAtMs=${recoveredAtMs}`,
       );
+      await closeChrome(launched.context);
+    }
+  });
+
+  test('Test F — chat history is preserved across provider switch + Clear button wipes it', async () => {
+    test.setTimeout(8 * 60_000);
+
+    // Requires BOTH OpenAI and Anthropic keys so we can verify the provider
+    // switch path itself. If either is missing we skip cleanly.
+    const openaiRun = runs.find((r) => r.provider === 'openai');
+    const anthropicRun = runs.find((r) => r.provider === 'anthropic');
+    test.skip(
+      !openaiRun || !anthropicRun,
+      'Test F requires both AGENTHUB_TEST_OPENAI_KEY and AGENTHUB_TEST_ANTHROPIC_KEY',
+    );
+    if (!openaiRun || !anthropicRun) return; // narrow types
+
+    // Make sure we have a working install + bridge so list_tabs works
+    // through the chat path on each provider.
+    ensureFullyUninstalled();
+    const ir = runInstall(EXPECTED_EXTENSION_ID);
+    expect(
+      ir.ok,
+      `installer --from-local failed (exit=${ir.exitCode}):\nstdout:\n${ir.stdout}\nstderr:\n${ir.stderr}`,
+    ).toBe(true);
+
+    const launched = await launchRealChrome({ extensionDist: EXTENSION_DIST });
+    try {
+      expect(launched.extensionId).toBe(EXPECTED_EXTENSION_ID);
+      const page: Page = await openSidePanel(launched.context, launched.extensionId);
+
+      // Seed BOTH keys + start on OpenAI. setupComplete=true bypasses the
+      // SetupWizard so the tab strip + chat render directly.
+      await page.evaluate(
+        ({ openaiKey, anthropicKey }) =>
+          chrome.storage.local.set({
+            setupComplete: true,
+            openaiApiKey: openaiKey,
+            anthropicApiKey: anthropicKey,
+            chatProvider: 'openai',
+            chatModel: 'gpt-4.1-mini',
+          }),
+        { openaiKey: openaiRun.apiKey, anthropicKey: anthropicRun.apiKey },
+      );
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('[data-testid="connection-header"]', { timeout: 10_000 });
+      assertConnected(await waitForConnected(page));
+      await switchToChatTab(page);
+
+      // ---- Turn 1: send on OpenAI ----
+      await sendChatMessage(page, LIST_TABS_PROMPT);
+      const openaiCall = await waitForToolCall(page, 'list_tabs', { timeoutMs: 90_000 });
+      expect(openaiCall.ok, 'OpenAI list_tabs call should succeed').toBe(true);
+
+      const entriesAfterOpenai = await page.locator('[data-testid="chat-entry"]').count();
+      expect(
+        entriesAfterOpenai,
+        'chat should have at least one entry after sending on OpenAI',
+      ).toBeGreaterThan(0);
+
+      // ---- Switch provider to Anthropic ----
+      // The provider toggle buttons live in the picker bar; find the one
+      // whose title is "Anthropic". (Provider buttons set title={m.label}.)
+      await page.getByRole('button', { name: 'Anthropic', exact: true }).click();
+      await page.waitForTimeout(500); // let onProviderChange settle
+
+      // Verify the Anthropic button is now pressed (UI state changed)
+      const anthropicPressed = await page
+        .getByRole('button', { name: 'Anthropic', exact: true })
+        .getAttribute('aria-pressed');
+      expect(anthropicPressed, 'Anthropic button should be aria-pressed=true').toBe('true');
+
+      // Critical assertion: entries from OpenAI conversation MUST still be visible.
+      const entriesAfterSwitch = await page.locator('[data-testid="chat-entry"]').count();
+      expect(
+        entriesAfterSwitch,
+        `chat history must be preserved across provider switch ` +
+          `(was ${entriesAfterOpenai}, after switch ${entriesAfterSwitch})`,
+      ).toBe(entriesAfterOpenai);
+
+      // ---- Turn 2: send on Anthropic (fresh API conversation but UI keeps the OpenAI history) ----
+      await sendChatMessage(page, LIST_TABS_PROMPT);
+      const anthropicCall = await waitForToolCall(page, 'list_tabs', { timeoutMs: 90_000 });
+      expect(anthropicCall.ok, 'Anthropic list_tabs call should succeed').toBe(true);
+
+      const entriesAfterAnthropic = await page.locator('[data-testid="chat-entry"]').count();
+      expect(
+        entriesAfterAnthropic,
+        'sending on Anthropic should add to the existing history, not replace it',
+      ).toBeGreaterThan(entriesAfterSwitch);
+
+      // ---- Clear button ----
+      const clearBtn = page.locator('[data-testid="chat-new-button"]');
+      await expect(clearBtn, 'Clear button should be visible while transcript has entries').toBeVisible({
+        timeout: 3_000,
+      });
+      const clearLabel = (await clearBtn.textContent())?.trim();
+      expect(clearLabel, 'button label should be "Clear" (not "New")').toBe('Clear');
+      await clearBtn.click();
+      await page.waitForTimeout(300);
+
+      const entriesAfterClear = await page.locator('[data-testid="chat-entry"]').count();
+      expect(entriesAfterClear, 'Clear must wipe all entries').toBe(0);
+
+      // Verify Clear button hides itself when entries are empty (renders only when entries.length > 0)
+      await expect(clearBtn, 'Clear button should hide after wiping history').not.toBeVisible({
+        timeout: 2_000,
+      });
+    } finally {
       await closeChrome(launched.context);
     }
   });

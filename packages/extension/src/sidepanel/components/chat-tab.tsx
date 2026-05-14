@@ -147,10 +147,13 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) =
     const fallback = DEFAULT_MODEL_BY_PROVIDER[p];
     setModel(fallback);
     persistSelection(p, fallback, customModel);
-    // Reset transcript on provider switch — message shapes don't carry across.
-    transcriptRef.current = [];
-    setEntries([]);
     setKeyDraft('');
+    // Reset the canonical-message buffer because each provider has its own
+    // message shape (Anthropic tool_use vs OpenAI tool_calls vs Gemini parts)
+    // and replaying one shape into another fails. The visible transcript
+    // (`entries`) is preserved so the user keeps their conversation history;
+    // the next send starts a fresh API conversation with the new provider.
+    transcriptRef.current = [];
   };
 
   const onModelChange = (id: string) => {
@@ -337,10 +340,10 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) =
             <button
               class="text-xs text-neutral-500 hover:text-neutral-800 px-1"
               onClick={newConversation}
-              title="Start a new conversation"
+              title="Clear chat history"
               data-testid="chat-new-button"
             >
-              New
+              Clear
             </button>
           )}
         </div>
@@ -476,7 +479,7 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) =
 const ChatBubble: FunctionalComponent<{ entry: DisplayEntry }> = ({ entry }) => {
   if (entry.kind === 'user') {
     return (
-      <div class="flex justify-end">
+      <div class="flex justify-end" data-testid="chat-entry" data-entry-kind="user">
         <div class="max-w-[85%] rounded-xl rounded-br-sm bg-brand-primary text-white px-3 py-2 text-sm whitespace-pre-wrap shadow-sm">
           {entry.text}
         </div>
@@ -485,7 +488,7 @@ const ChatBubble: FunctionalComponent<{ entry: DisplayEntry }> = ({ entry }) => 
   }
   if (entry.kind === 'assistant') {
     return (
-      <div class="flex justify-start">
+      <div class="flex justify-start" data-testid="chat-entry" data-entry-kind="assistant">
         <div class="max-w-[85%] rounded-xl rounded-bl-sm bg-white border border-card-border px-3 py-2 text-sm whitespace-pre-wrap shadow-sm">
           {entry.text}
         </div>
@@ -494,7 +497,7 @@ const ChatBubble: FunctionalComponent<{ entry: DisplayEntry }> = ({ entry }) => 
   }
   if (entry.kind === 'tool') {
     return (
-      <div class="flex justify-start">
+      <div class="flex justify-start" data-testid="chat-entry" data-entry-kind="tool">
         <div
           class={`text-xs px-2.5 py-1 rounded-md border font-mono ${
             entry.ok
@@ -511,7 +514,7 @@ const ChatBubble: FunctionalComponent<{ entry: DisplayEntry }> = ({ entry }) => 
     );
   }
   return (
-    <div class="flex justify-start">
+    <div class="flex justify-start" data-testid="chat-entry" data-entry-kind="error">
       <div class="max-w-[85%] rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-800 whitespace-pre-wrap">
         {entry.text}
       </div>

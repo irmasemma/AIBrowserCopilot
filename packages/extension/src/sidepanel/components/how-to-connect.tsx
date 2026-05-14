@@ -8,7 +8,7 @@ interface ToolGuide {
   docsUrl?: string;
 }
 
-const INSTALL_BASE = 'npx agenthub-setup';
+const INSTALL_BASE = 'npx agenthub-setup@latest';
 
 const TOOL_GUIDES: ToolGuide[] = [
   {
