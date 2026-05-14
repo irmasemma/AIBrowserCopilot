@@ -170,14 +170,26 @@ const App = () => {
         />
       )}
       <TabStrip active={activeTab} onChange={setActiveTab} />
+      {/*
+        Tab panels are always mounted; visibility is toggled with `hidden`
+        so per-tab state (chat transcript, in-flight model run, drafts,
+        revealed keys, etc.) survives tab switches. Unmounting these
+        components on every switch would discard the chat history and
+        cancel any active conversation, which was the prior behavior.
+      */}
       <div class="flex-1 min-h-0">
-        {activeTab === 'chat' && <ChatTab onOpenSettings={() => setActiveTab('settings')} />}
-        {activeTab === 'tools' && <ToolsTab />}
-        {activeTab === 'settings' && (
-          <div class="h-full overflow-y-auto">
-            <SettingsTab />
-          </div>
-        )}
+        <div class={`h-full ${activeTab === 'chat' ? '' : 'hidden'}`}>
+          <ChatTab
+            isActive={activeTab === 'chat'}
+            onOpenSettings={() => setActiveTab('settings')}
+          />
+        </div>
+        <div class={`h-full ${activeTab === 'tools' ? '' : 'hidden'}`}>
+          <ToolsTab />
+        </div>
+        <div class={`h-full overflow-y-auto ${activeTab === 'settings' ? '' : 'hidden'}`}>
+          <SettingsTab />
+        </div>
       </div>
     </div>
   );

@@ -21,6 +21,11 @@ import { composeTabId } from '../../shared/tab-id.js';
 
 interface ChatTabProps {
   onOpenSettings: () => void;
+  // Active = this tab's panel is currently visible. We need this because the
+  // panel is always mounted (so chat history survives tab switches) and
+  // display:none zeroes out scrollHeight — auto-scroll on new entries while
+  // hidden is a no-op, so we re-anchor to the bottom when the tab returns.
+  isActive?: boolean;
 }
 
 interface DisplayEntry {
@@ -59,7 +64,7 @@ const ProviderIcon: FunctionalComponent<{ provider: ProviderId; className?: stri
   );
 };
 
-export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) => {
+export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings, isActive = true }) => {
   const toolPermissions = useStore((s) => s.toolPermissions);
 
   // Per-provider key state. null = still loading.
@@ -195,6 +200,17 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) =
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [entries.length]);
+
+  // When the tab becomes visible again (e.g., after the user visited Tools or
+  // Settings), re-anchor the transcript scroll to the bottom. The scroll-on-
+  // entries effect above is a no-op while this panel is display:none because
+  // scrollHeight reports 0 for hidden elements, so any messages that arrived
+  // while we were hidden would otherwise leave the user looking at the top.
+  useEffect(() => {
+    if (isActive) {
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+    }
+  }, [isActive]);
 
   // ---------- Save key inline ----------
   const saveKey = async () => {
