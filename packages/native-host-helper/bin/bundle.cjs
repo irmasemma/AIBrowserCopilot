@@ -4172,7 +4172,7 @@ async function startNativeHost(opts = {}) {
 }
 
 // src/version.ts
-var HELPER_VERSION = "0.3.2";
+var HELPER_VERSION = "0.5.1";
 
 // src/index.ts
 function readMessage() {
