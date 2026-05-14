@@ -7922,7 +7922,7 @@ var toolRegistry = [
 ];
 
 // src/version.ts
-var VERSION = "0.5.1";
+var VERSION = "0.5.2";
 var BUILD_ID = process.env.BUILD_ID ?? "dev";
 
 // src/lock-file-manager.ts

@@ -6,7 +6,7 @@ export default defineConfig({
   outDir: 'dist',
   manifest: {
     name: 'AgentHub: AI Chat + MCP for Claude, Cursor, ChatGPT — Forms, Data',
-    version: '0.5.1',
+    version: '0.5.2',
     description: 'Let AI control your real Chrome — your tabs, sessions, logins. Chat sidebar + MCP for Claude, Cursor, ChatGPT, VS Code.',
     permissions: ['tabs', 'sidePanel', 'nativeMessaging', 'storage', 'scripting', 'debugger', 'alarms'],
     host_permissions: [
