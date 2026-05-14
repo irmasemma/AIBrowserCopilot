@@ -1,4 +1,4 @@
-import { createWriteStream, existsSync, mkdirSync, unlinkSync, renameSync, chmodSync, copyFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, unlinkSync, renameSync, chmodSync, copyFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { get as httpsGet } from 'node:https';
 import { get as httpGet, type IncomingMessage } from 'node:http';
@@ -86,12 +86,91 @@ const downloadOnce = async (
     res.pipe(file);
   });
 
-  // Atomic rename from temp to target
-  renameSync(tempPath, targetPath);
+  // Atomic rename from temp to target — with Windows lock fallback.
+  renameWithLockFallback(tempPath, targetPath, platform.os);
 
   // Set executable permissions on macOS/Linux
   if (platform.os !== 'windows') {
     chmodSync(targetPath, 0o755);
+  }
+};
+
+export interface RenameWithLockFallbackOptions {
+  /** Test seam — override the underlying rename. */
+  renameImpl?: (from: string, to: string) => void;
+  /** Test seam — override the existence check on `targetPath`. */
+  existsImpl?: (path: string) => boolean;
+  /** Test seam — override the timestamp suffix for deterministic asserts. */
+  timestampImpl?: () => number;
+}
+
+/**
+ * Rename `tempPath` over `targetPath` with Windows lock-aside fallback.
+ *
+ * On Windows, if the destination .exe is held open by a running process
+ * (Chrome / Edge re-spawned a helper → bridge during our download window —
+ * see docs/installer-rename-eperm.md for the full race), the rename fails
+ * with EPERM/EBUSY/EACCES. The fallback uses Windows' FILE_SHARE_DELETE
+ * semantics: a running .exe cannot be deleted-content, but its directory
+ * entry can be renamed. We move the locked file out of the way and drop
+ * the new binary into the freed-up name. The next install start sweeps
+ * up the .delete-me-* files (best-effort).
+ *
+ * Non-Windows platforms allow overwriting a running binary in place, so the
+ * fallback is Windows-only.
+ */
+export function renameWithLockFallback(
+  tempPath: string,
+  targetPath: string,
+  os: PlatformInfo['os'],
+  options: RenameWithLockFallbackOptions = {},
+): void {
+  const rename = options.renameImpl ?? renameSync;
+  const exists = options.existsImpl ?? existsSync;
+  const now = options.timestampImpl ?? Date.now;
+  try {
+    rename(tempPath, targetPath);
+    return;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    const isLockError = code === 'EPERM' || code === 'EBUSY' || code === 'EACCES';
+    if (!isLockError || os !== 'windows' || !exists(targetPath)) {
+      throw err;
+    }
+    const sideName = `${targetPath}.delete-me-${now()}`;
+    rename(targetPath, sideName);
+    try {
+      rename(tempPath, targetPath);
+    } catch (retryErr) {
+      // Roll back the side-aside so we don't leave the user with no .exe.
+      try { rename(sideName, targetPath); } catch { /* nothing more we can do */ }
+      throw retryErr;
+    }
+    // The old .exe is still running from the renamed inode; it will exit
+    // when the user closes its driving client, and the leftover file becomes
+    // deletable. We don't block on it.
+  }
+}
+
+/**
+ * Best-effort cleanup of leftover `*.delete-me-<timestamp>` files from a
+ * prior install that hit the rename-aside path. Runs once per install at
+ * the top so we don't accumulate them indefinitely. Files that are still
+ * locked (process still running) silently stay; we'll retry next time.
+ */
+export const cleanupDeleteMeFiles = (installDir: string): void => {
+  if (!existsSync(installDir)) return;
+  try {
+    for (const entry of readdirSync(installDir)) {
+      if (!entry.includes('.delete-me-')) continue;
+      try {
+        unlinkSync(join(installDir, entry));
+      } catch {
+        // File still locked by a running process — leave it for next time.
+      }
+    }
+  } catch {
+    // readdir failure is non-fatal; the installer keeps going.
   }
 };
 
@@ -116,6 +195,11 @@ export const downloadBinary = async (
   if (!existsSync(installDir)) {
     mkdirSync(installDir, { recursive: true });
   }
+
+  // Sweep up any leftover `.delete-me-*` files from a prior install that
+  // had to use the rename-aside fallback. Files still locked by a running
+  // process are silently skipped and retried on the next install.
+  cleanupDeleteMeFiles(installDir);
 
   // Stop any running native host so the binary file can be replaced.
   // On Windows the running .exe holds an exclusive lock; without this step
@@ -269,14 +353,31 @@ const installFromLocal = (
     return { success: false, binaryPath: targetPath, error: resolved.error, attempts: 0 };
   }
 
+  // Route the local-install path through the same temp-file + rename-aside
+  // fallback the network path uses. Without this, a Windows --from-local
+  // install with Chrome/Edge running hits the same EPERM-on-overwrite race
+  // (copyFileSync over a locked .exe fails identically to rename over a
+  // locked .exe). See docs/installer-rename-eperm.md for the full race.
+  const stageAndPlace = (sourcePath: string, finalPath: string): void => {
+    const tempPath = `${finalPath}.tmp`;
+    if (existsSync(tempPath)) unlinkSync(tempPath);
+    copyFileSync(sourcePath, tempPath);
+    try {
+      renameWithLockFallback(tempPath, finalPath, platform.os);
+    } catch (err) {
+      try { unlinkSync(tempPath); } catch { /* best-effort cleanup */ }
+      throw err;
+    }
+  };
+
   try {
-    copyFileSync(resolved.binaryPath, targetPath);
+    stageAndPlace(resolved.binaryPath, targetPath);
     if (platform.os !== 'windows') {
       chmodSync(targetPath, 0o755);
     }
 
     if (resolved.helperPath) {
-      copyFileSync(resolved.helperPath, helperTargetPath);
+      stageAndPlace(resolved.helperPath, helperTargetPath);
       if (platform.os !== 'windows') {
         chmodSync(helperTargetPath, 0o755);
       }

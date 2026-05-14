@@ -7996,9 +7996,59 @@ function extractBrowserIdFromTabId(input) {
   if (!/^[0-9]+$/.test(rawSuffix)) return "";
   return s.slice(0, lastColon);
 }
-function isAllowedOrigin(origin) {
+var EXTENSION_SCHEMES = ["chrome-extension://", "moz-extension://", "safari-web-extension://"];
+function extensionIdFromOrigin(origin) {
+  for (const scheme of EXTENSION_SCHEMES) {
+    if (origin.startsWith(scheme)) {
+      const rest = origin.slice(scheme.length);
+      const slash = rest.indexOf("/");
+      return slash === -1 ? rest : rest.slice(0, slash);
+    }
+  }
+  return "";
+}
+function isAllowedOrigin(origin, allowedExtensionIds) {
   if (!origin) return true;
-  return origin.startsWith("chrome-extension://") || origin.startsWith("moz-extension://") || origin.startsWith("safari-web-extension://");
+  const id = extensionIdFromOrigin(origin);
+  if (!id) return false;
+  if (!allowedExtensionIds || allowedExtensionIds.size === 0) return true;
+  return allowedExtensionIds.has(id);
+}
+function loadAllowedExtensionIds(opts) {
+  const env = opts?.env ?? process.env;
+  const result = /* @__PURE__ */ new Set();
+  const envValue = env.AGENTHUB_ALLOWED_EXTENSION_IDS;
+  if (envValue) {
+    for (const raw of envValue.split(",")) {
+      const id = raw.trim();
+      if (id) result.add(id);
+    }
+  }
+  if (result.size > 0) return result;
+  const installDir = opts?.installDir ?? defaultInstallDir();
+  if (!installDir) return result;
+  try {
+    const configPath = (0, import_node_path2.join)(installDir, "extension-ids.json");
+    if (!(0, import_node_fs2.existsSync)(configPath)) return result;
+    const parsed = JSON.parse((0, import_node_fs2.readFileSync)(configPath, "utf-8"));
+    if (Array.isArray(parsed)) {
+      for (const entry of parsed) {
+        if (typeof entry === "string" && entry.trim()) result.add(entry.trim());
+      }
+    }
+  } catch {
+  }
+  return result;
+}
+function defaultInstallDir() {
+  switch ((0, import_node_os2.platform)()) {
+    case "win32":
+      return (0, import_node_path2.join)(process.env.LOCALAPPDATA ?? (0, import_node_path2.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "agenthub");
+    case "darwin":
+      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "agenthub");
+    default:
+      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".local", "share", "agenthub");
+  }
 }
 function indexBrowser(browserId, ws) {
   const existing = browserSockets.get(browserId);
@@ -8357,11 +8407,22 @@ function appendBridgeLog(line) {
 }
 function startServer(port) {
   serverPort = port;
+  const allowedExtensionIds = loadAllowedExtensionIds();
+  if (allowedExtensionIds.size > 0) {
+    process.stderr.write(
+      `Origin allowlist active: ${Array.from(allowedExtensionIds).join(", ")}
+`
+    );
+  } else {
+    process.stderr.write(
+      "Origin allowlist not configured \u2014 accepting any chrome-extension:// origin. Set AGENTHUB_ALLOWED_EXTENSION_IDS or write <installDir>/extension-ids.json to pin.\n"
+    );
+  }
   const wss = new import_websocket_server.default({
     host: "127.0.0.1",
     port,
     verifyClient: (info, done) => {
-      if (isAllowedOrigin(info.origin)) {
+      if (isAllowedOrigin(info.origin, allowedExtensionIds)) {
         done(true);
       } else {
         process.stderr.write(`Rejected WS upgrade from disallowed origin: ${info.origin}

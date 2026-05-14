@@ -77,6 +77,15 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) =
   const transcriptRef = useRef<CanonicalMessage[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Generation counter — bumped any time the conversation context is reset
+  // (Clear button or provider switch). Each dispatched send() captures the
+  // generation it belongs to and refuses to mutate transcriptRef / push
+  // entries once the generation has advanced. Without this, a long-running
+  // tool call resolves *after* the user has switched provider or cleared
+  // the chat, and pollutes the new context with the previous one's output
+  // (Anthropic tool_use frames into an OpenAI transcript, an assistant
+  // response inside a freshly-emptied chat, etc.).
+  const runIdRef = useRef(0);
 
   // ---------- Load persisted state ----------
   useEffect(() => {
@@ -142,6 +151,15 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) =
 
   const onProviderChange = (p: ProviderId) => {
     if (p === provider) return;
+    // Abort any in-flight send before we change provider context — without
+    // this the still-running runChat resolves into the new transcript shape
+    // with the previous provider's tool_use/tool_calls frames, breaking the
+    // next turn. The runIdRef bump below also makes the late resolution a
+    // no-op (defense in depth).
+    abortRef.current?.abort();
+    abortRef.current = null;
+    runIdRef.current += 1;
+    setBusy(false);
     setProvider(p);
     setIsCustomMode(false);
     const fallback = DEFAULT_MODEL_BY_PROVIDER[p];
@@ -209,8 +227,19 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) =
 
     const ac = new AbortController();
     abortRef.current = ac;
+    // Snapshot the generation this send belongs to. Clear / provider switch
+    // bumps runIdRef. We use two distinct guards downstream:
+    //   - sameRun()   → ok to tear down busy/abortRef in finally even on abort
+    //   - isLive()    → ok to mutate the visible transcript / push entries
+    // Without this split, clicking Stop would abort the AC, isLive() flips
+    // false, and the finally block would skip setBusy(false) — leaving the
+    // UI stuck on "Working…" forever (caught in pre-commit critique).
+    const myRunId = runIdRef.current;
+    const sameRun = () => runIdRef.current === myRunId;
+    const isLive = () => sameRun() && !ac.signal.aborted;
 
     const onToolCall = (event: ToolCallEvent) => {
+      if (!isLive()) return;
       setEntries((prev) => [
         ...prev,
         {
@@ -251,6 +280,7 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) =
         onToolCall,
         boundTabId,
       });
+      if (!isLive()) return;
       transcriptRef.current.push(...result.appendedMessages);
       if (result.finalText) {
         setEntries((prev) => [
@@ -259,14 +289,20 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) =
         ]);
       }
     } catch (err) {
+      if (!isLive()) return;
       const message = err instanceof Error ? err.message : 'Unknown error';
       setEntries((prev) => [
         ...prev,
         { id: crypto.randomUUID(), kind: 'error', text: message },
       ]);
     } finally {
-      abortRef.current = null;
-      setBusy(false);
+      // Tear down busy state on user-initiated abort (Stop) as well as
+      // normal completion. sameRun() rules out the post-Clear / post-switch
+      // late-arrivals (which have already had their state reset).
+      if (sameRun()) {
+        abortRef.current = null;
+        setBusy(false);
+      }
     }
   };
 
@@ -275,6 +311,13 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) =
   };
 
   const newConversation = () => {
+    // Abort the in-flight run so its result / error never resolves into the
+    // freshly-empty transcript. The runIdRef bump also rejects any late
+    // onToolCall events from the doomed run.
+    abortRef.current?.abort();
+    abortRef.current = null;
+    runIdRef.current += 1;
+    setBusy(false);
     transcriptRef.current = [];
     setEntries([]);
   };

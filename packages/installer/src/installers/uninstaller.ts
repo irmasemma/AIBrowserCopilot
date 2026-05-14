@@ -37,9 +37,10 @@ const removeBinary = (platform: PlatformInfo): { removed: boolean; error?: strin
   const installDir = getInstallDir(platform);
   const bridgePath = join(installDir, getAssetName(platform.os, platform.arch));
   const helperPath = join(installDir, getHelperAssetName(platform.os, platform.arch));
+  const allowedIdsPath = join(installDir, 'extension-ids.json');
 
   try {
-    for (const p of [bridgePath, helperPath]) {
+    for (const p of [bridgePath, helperPath, allowedIdsPath]) {
       if (existsSync(p)) unlinkSync(p);
     }
 

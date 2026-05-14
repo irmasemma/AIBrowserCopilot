@@ -5,6 +5,8 @@ import {
   extractBrowserIdFromTabId,
   mergeFanOutListTabs,
   isAllowedOrigin,
+  extensionIdFromOrigin,
+  loadAllowedExtensionIds,
   type FanOutResult,
   type FanOutError,
 } from './service.js';
@@ -264,6 +266,129 @@ describe('isAllowedOrigin', () => {
   it('rejects spoofing attempts (substring matches must be at start)', () => {
     expect(isAllowedOrigin('https://chrome-extension.attacker.com')).toBe(false);
     expect(isAllowedOrigin('http://moz-extension.attacker.com')).toBe(false);
+  });
+});
+
+describe('isAllowedOrigin (pinned to extension IDs)', () => {
+  const ourId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const otherId = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  const allowlist = new Set([ourId]);
+
+  it('accepts chrome-extension:// origin with a listed ID', () => {
+    expect(isAllowedOrigin(`chrome-extension://${ourId}`, allowlist)).toBe(true);
+  });
+
+  it('rejects chrome-extension:// origin with an unlisted ID', () => {
+    // This is the defense-in-depth case: a co-installed malicious extension
+    // can no longer drive the bridge via chrome.debugger blast radius.
+    expect(isAllowedOrigin(`chrome-extension://${otherId}`, allowlist)).toBe(false);
+  });
+
+  it('rejects moz-extension:// when allowlist is for chrome IDs', () => {
+    // Same allowlist applies to all extension schemes — an attacker can't
+    // bypass by claiming a different scheme.
+    expect(isAllowedOrigin(`moz-extension://${otherId}`, allowlist)).toBe(false);
+  });
+
+  it('still accepts missing Origin (Node MCP clients) when allowlist is set', () => {
+    expect(isAllowedOrigin(undefined, allowlist)).toBe(true);
+    expect(isAllowedOrigin('', allowlist)).toBe(true);
+  });
+
+  it('empty allowlist falls back to accepting any extension-scheme origin', () => {
+    const empty = new Set<string>();
+    expect(isAllowedOrigin(`chrome-extension://${otherId}`, empty)).toBe(true);
+    expect(isAllowedOrigin(`moz-extension://${otherId}`, empty)).toBe(true);
+  });
+
+  it('rejects non-extension origins regardless of allowlist', () => {
+    expect(isAllowedOrigin('https://attacker.com', allowlist)).toBe(false);
+    expect(isAllowedOrigin('http://localhost:5173', allowlist)).toBe(false);
+  });
+
+  it('accepts when extension ID has a trailing path segment', () => {
+    // Some browsers append a path: chrome-extension://<id>/popup.html → "/"
+    expect(isAllowedOrigin(`chrome-extension://${ourId}/`, allowlist)).toBe(true);
+  });
+});
+
+describe('extensionIdFromOrigin', () => {
+  it('extracts the bare ID', () => {
+    expect(extensionIdFromOrigin('chrome-extension://abcdef')).toBe('abcdef');
+    expect(extensionIdFromOrigin('moz-extension://uuid-here')).toBe('uuid-here');
+  });
+
+  it('stops at the first path slash', () => {
+    expect(extensionIdFromOrigin('chrome-extension://abc/popup.html')).toBe('abc');
+  });
+
+  it('returns empty string for non-extension origins', () => {
+    expect(extensionIdFromOrigin('https://example.com')).toBe('');
+    expect(extensionIdFromOrigin('http://localhost:5173/foo')).toBe('');
+    expect(extensionIdFromOrigin('')).toBe('');
+  });
+});
+
+describe('loadAllowedExtensionIds', () => {
+  it('parses comma-separated env var', () => {
+    const ids = loadAllowedExtensionIds({
+      env: { AGENTHUB_ALLOWED_EXTENSION_IDS: 'aaa,bbb, ccc , ' },
+      installDir: '/nonexistent-for-test',
+    });
+    expect(Array.from(ids).sort()).toEqual(['aaa', 'bbb', 'ccc']);
+  });
+
+  it('returns empty set when env unset and config file absent', () => {
+    const ids = loadAllowedExtensionIds({
+      env: {},
+      installDir: '/nonexistent-for-test',
+    });
+    expect(ids.size).toBe(0);
+  });
+
+  it('reads extension-ids.json when env unset', () => {
+    const { mkdtempSync, writeFileSync, rmSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const { join } = require('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'agenthub-allowlist-'));
+    try {
+      writeFileSync(join(dir, 'extension-ids.json'), JSON.stringify(['file-id-1', 'file-id-2']));
+      const ids = loadAllowedExtensionIds({ env: {}, installDir: dir });
+      expect(Array.from(ids).sort()).toEqual(['file-id-1', 'file-id-2']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('env var takes precedence over config file when both present', () => {
+    const { mkdtempSync, writeFileSync, rmSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const { join } = require('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'agenthub-allowlist-'));
+    try {
+      writeFileSync(join(dir, 'extension-ids.json'), JSON.stringify(['file-only']));
+      const ids = loadAllowedExtensionIds({
+        env: { AGENTHUB_ALLOWED_EXTENSION_IDS: 'env-wins' },
+        installDir: dir,
+      });
+      expect(Array.from(ids)).toEqual(['env-wins']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('survives malformed config file (returns empty set, no throw)', () => {
+    const { mkdtempSync, writeFileSync, rmSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const { join } = require('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'agenthub-allowlist-'));
+    try {
+      writeFileSync(join(dir, 'extension-ids.json'), 'not-json {{');
+      const ids = loadAllowedExtensionIds({ env: {}, installDir: dir });
+      expect(ids.size).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

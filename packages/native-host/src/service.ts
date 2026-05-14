@@ -12,7 +12,7 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir, platform as osPlatform } from 'node:os';
 import { toolRegistry } from './tools/index.js';
@@ -73,11 +73,96 @@ export function extractBrowserIdFromTabId(input: unknown): string {
 // "moz-extension://<id>". Headless local clients (Node/Python MCP servers)
 // send no Origin header — those are accepted by absence (the loopback
 // bind keeps remote attackers out of that bucket).
-export function isAllowedOrigin(origin: string | undefined): boolean {
+//
+// Defense-in-depth: when `allowedExtensionIds` is non-empty, we further pin
+// chrome-extension:// (and moz-/safari-) origins to known IDs so a
+// co-installed malicious extension cannot drive the bridge. When the set is
+// empty, fall back to accepting any extension scheme (back-compat for
+// installs predating the AgentHub CWS publish, where the production ID is
+// not yet known).
+
+const EXTENSION_SCHEMES = ['chrome-extension://', 'moz-extension://', 'safari-web-extension://'] as const;
+
+/**
+ * Extract the extension ID portion of an extension-scheme Origin.
+ * Returns the empty string for non-extension origins or unparseable input.
+ *   "chrome-extension://abc..."   → "abc..."
+ *   "chrome-extension://abc/path" → "abc"
+ *   "https://example.com"         → ""
+ */
+export function extensionIdFromOrigin(origin: string): string {
+  for (const scheme of EXTENSION_SCHEMES) {
+    if (origin.startsWith(scheme)) {
+      const rest = origin.slice(scheme.length);
+      const slash = rest.indexOf('/');
+      return slash === -1 ? rest : rest.slice(0, slash);
+    }
+  }
+  return '';
+}
+
+export function isAllowedOrigin(
+  origin: string | undefined,
+  allowedExtensionIds?: ReadonlySet<string>,
+): boolean {
   if (!origin) return true;
-  return origin.startsWith('chrome-extension://')
-    || origin.startsWith('moz-extension://')
-    || origin.startsWith('safari-web-extension://');
+  const id = extensionIdFromOrigin(origin);
+  if (!id) return false;
+  // No allowlist configured → accept any extension-scheme origin (back-compat).
+  // Allowlist configured → only accept IDs in the set.
+  if (!allowedExtensionIds || allowedExtensionIds.size === 0) return true;
+  return allowedExtensionIds.has(id);
+}
+
+/**
+ * Resolve the set of extension IDs the WS server should accept, in priority
+ * order:
+ *   1. `AGENTHUB_ALLOWED_EXTENSION_IDS` env var (comma-separated).
+ *   2. `<installDir>/extension-ids.json` config file (string array).
+ *   3. Empty set → back-compat: accept any extension-scheme Origin.
+ *
+ * Exported for tests; the production wiring lives inside `startServer`.
+ */
+export function loadAllowedExtensionIds(opts?: {
+  env?: NodeJS.ProcessEnv;
+  installDir?: string;
+}): Set<string> {
+  const env = opts?.env ?? process.env;
+  const result = new Set<string>();
+  const envValue = env.AGENTHUB_ALLOWED_EXTENSION_IDS;
+  if (envValue) {
+    for (const raw of envValue.split(',')) {
+      const id = raw.trim();
+      if (id) result.add(id);
+    }
+  }
+  if (result.size > 0) return result;
+  const installDir = opts?.installDir ?? defaultInstallDir();
+  if (!installDir) return result;
+  try {
+    const configPath = join(installDir, 'extension-ids.json');
+    if (!existsSync(configPath)) return result;
+    const parsed = JSON.parse(readFileSync(configPath, 'utf-8'));
+    if (Array.isArray(parsed)) {
+      for (const entry of parsed) {
+        if (typeof entry === 'string' && entry.trim()) result.add(entry.trim());
+      }
+    }
+  } catch {
+    // Best-effort: malformed config falls back to back-compat behavior.
+  }
+  return result;
+}
+
+function defaultInstallDir(): string {
+  switch (osPlatform()) {
+    case 'win32':
+      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'agenthub');
+    case 'darwin':
+      return join(homedir(), 'Library', 'Application Support', 'agenthub');
+    default:
+      return join(homedir(), '.local', 'share', 'agenthub');
+  }
 }
 
 function indexBrowser(browserId: string, ws: WebSocket): void {
@@ -573,6 +658,23 @@ function appendBridgeLog(line: string): void {
 // ── Start server ──────────────────────────────────────────────────────────
 export function startServer(port: number): void {
   serverPort = port;
+  // Resolve the configured extension-id allowlist once at startup. The set
+  // can stay empty — in that case verifyClient falls back to accepting any
+  // chrome-extension:// origin (back-compat with installs predating the
+  // CWS publish of AgentHub). When populated, only the listed extension IDs
+  // are accepted: a co-installed malicious extension can no longer drive
+  // the bridge via chrome.debugger blast radius.
+  const allowedExtensionIds = loadAllowedExtensionIds();
+  if (allowedExtensionIds.size > 0) {
+    process.stderr.write(
+      `Origin allowlist active: ${Array.from(allowedExtensionIds).join(', ')}\n`,
+    );
+  } else {
+    process.stderr.write(
+      'Origin allowlist not configured — accepting any chrome-extension:// origin. ' +
+      'Set AGENTHUB_ALLOWED_EXTENSION_IDS or write <installDir>/extension-ids.json to pin.\n',
+    );
+  }
   // Origin check via verifyClient runs DURING the HTTP upgrade, before the
   // WS handshake completes. This means a disallowed origin sees an HTTP 401,
   // never gets an `open` event, and cannot send any data. The alternative
@@ -582,7 +684,7 @@ export function startServer(port: number): void {
     host: '127.0.0.1',
     port,
     verifyClient: (info, done) => {
-      if (isAllowedOrigin(info.origin)) {
+      if (isAllowedOrigin(info.origin, allowedExtensionIds)) {
         done(true);
       } else {
         process.stderr.write(`Rejected WS upgrade from disallowed origin: ${info.origin}\n`);

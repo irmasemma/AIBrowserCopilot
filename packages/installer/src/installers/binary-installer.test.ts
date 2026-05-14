@@ -1,8 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync, rmSync, readdirSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { isBinaryInstalled, resolveLocalBinaries, downloadBinary } from './binary-installer.js';
+import {
+  isBinaryInstalled,
+  resolveLocalBinaries,
+  downloadBinary,
+  renameWithLockFallback,
+  cleanupDeleteMeFiles,
+} from './binary-installer.js';
 import { detectPlatform } from '../shared/platform.js';
 
 const TEST_DIR = join(tmpdir(), `agenthub-test-${Date.now()}`);
@@ -233,5 +239,191 @@ describe('downloadBinary --from-local path', () => {
 
     expect(result.success).toBe(true);
     expect(readFileSync(join(dst, binaryName), 'utf-8')).toBe('new-version');
+  });
+});
+
+describe('renameWithLockFallback — Windows EPERM rename-aside', () => {
+  // These tests run on any host because the helper accepts injected fs
+  // operations. The bug they protect against is Windows-specific (file
+  // locks on running .exe), but the logic is platform-independent given
+  // the injected primitives.
+
+  const binaryName = 'agenthub-win-x64.exe';
+
+  it('happy path: simple rename succeeds on first try', () => {
+    const dir = join(TEST_DIR, 'rename-happy');
+    mkdirSync(dir, { recursive: true });
+    const tempPath = join(dir, `${binaryName}.tmp`);
+    const targetPath = join(dir, binaryName);
+    writeFileSync(tempPath, 'new-binary');
+
+    renameWithLockFallback(tempPath, targetPath, 'windows');
+
+    expect(existsSync(tempPath)).toBe(false);
+    expect(readFileSync(targetPath, 'utf-8')).toBe('new-binary');
+    // No side files should have been created.
+    expect(readdirSync(dir).filter((n) => n.includes('.delete-me-'))).toEqual([]);
+  });
+
+  it('on EPERM with target locked, renames the locked target aside and lands the new binary', () => {
+    // Simulate the production race: target exists, first rename throws
+    // EPERM, second rename (after side-aside) succeeds.
+    const tempPath = 'C:\\fake\\bin.tmp';
+    const targetPath = 'C:\\fake\\bin.exe';
+    const calls: Array<[string, string]> = [];
+    let firstRename = true;
+    const renameImpl = (from: string, to: string) => {
+      calls.push([from, to]);
+      if (firstRename) {
+        firstRename = false;
+        const err = new Error('EPERM: operation not permitted, rename') as NodeJS.ErrnoException;
+        err.code = 'EPERM';
+        throw err;
+      }
+    };
+    renameWithLockFallback(tempPath, targetPath, 'windows', {
+      renameImpl,
+      existsImpl: () => true,
+      timestampImpl: () => 1234567890,
+    });
+    expect(calls).toEqual([
+      [tempPath, targetPath],                         // first attempt (throws)
+      [targetPath, `${targetPath}.delete-me-1234567890`], // move locked file aside
+      [tempPath, targetPath],                         // retry with target slot free
+    ]);
+  });
+
+  it('on EBUSY (a flavor of the same Windows lock error), same fallback', () => {
+    let firstRename = true;
+    const calls: Array<[string, string]> = [];
+    renameWithLockFallback('a.tmp', 'b.exe', 'windows', {
+      renameImpl: (from, to) => {
+        calls.push([from, to]);
+        if (firstRename) {
+          firstRename = false;
+          const err = new Error('EBUSY') as NodeJS.ErrnoException;
+          err.code = 'EBUSY';
+          throw err;
+        }
+      },
+      existsImpl: () => true,
+      timestampImpl: () => 9,
+    });
+    expect(calls).toHaveLength(3);
+    expect(calls[1][1]).toBe('b.exe.delete-me-9');
+  });
+
+  it('on EPERM but non-Windows, surfaces the error (no fallback)', () => {
+    // The fallback exists only for Windows. On macOS/Linux a rename that
+    // truly fails with EPERM (permission issue, not a lock) should surface
+    // so the user sees the actual error, not a silent rename-aside.
+    expect(() => {
+      renameWithLockFallback('a.tmp', 'b.exe', 'macos', {
+        renameImpl: () => {
+          const err = new Error('EPERM') as NodeJS.ErrnoException;
+          err.code = 'EPERM';
+          throw err;
+        },
+        existsImpl: () => true,
+      });
+    }).toThrow(/EPERM/);
+  });
+
+  it('on EPERM but target does not exist, surfaces the error (nothing to rename aside)', () => {
+    // If the destination .exe doesn't exist, EPERM cannot mean "file locked"
+    // — it means a directory permission issue. Don't paper over it.
+    expect(() => {
+      renameWithLockFallback('a.tmp', 'b.exe', 'windows', {
+        renameImpl: () => {
+          const err = new Error('EPERM') as NodeJS.ErrnoException;
+          err.code = 'EPERM';
+          throw err;
+        },
+        existsImpl: () => false,
+      });
+    }).toThrow(/EPERM/);
+  });
+
+  it('on non-lock error, surfaces immediately without fallback', () => {
+    expect(() => {
+      renameWithLockFallback('a.tmp', 'b.exe', 'windows', {
+        renameImpl: () => {
+          const err = new Error('ENOSPC') as NodeJS.ErrnoException;
+          err.code = 'ENOSPC';
+          throw err;
+        },
+        existsImpl: () => true,
+      });
+    }).toThrow(/ENOSPC/);
+  });
+
+  it('rolls back the side-aside when the retry rename also fails', () => {
+    // If the second rename also fails, the side-aside should be undone so
+    // the user does not end up with NO .exe at all. Verifies the catch /
+    // rollback path inside renameWithLockFallback.
+    const calls: Array<[string, string]> = [];
+    let n = 0;
+    const renameImpl = (from: string, to: string) => {
+      calls.push([from, to]);
+      n += 1;
+      if (n === 1) {
+        const err = new Error('EPERM') as NodeJS.ErrnoException;
+        err.code = 'EPERM';
+        throw err;
+      }
+      if (n === 3) {
+        // Retry rename .tmp → .exe fails (e.g. AV holds the .tmp now).
+        const err = new Error('EPERM') as NodeJS.ErrnoException;
+        err.code = 'EPERM';
+        throw err;
+      }
+      // n===2 (rename target → side-name) and n===4 (rollback) succeed.
+    };
+    expect(() => {
+      renameWithLockFallback('a.tmp', 'b.exe', 'windows', {
+        renameImpl,
+        existsImpl: () => true,
+        timestampImpl: () => 42,
+      });
+    }).toThrow(/EPERM/);
+    expect(calls).toEqual([
+      ['a.tmp', 'b.exe'],
+      ['b.exe', 'b.exe.delete-me-42'],
+      ['a.tmp', 'b.exe'],
+      ['b.exe.delete-me-42', 'b.exe'], // rollback
+    ]);
+  });
+});
+
+describe('cleanupDeleteMeFiles', () => {
+  it('removes all .delete-me-* files in the install dir', () => {
+    const dir = join(TEST_DIR, 'cleanup');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'agenthub-win-x64.exe'), 'live');
+    writeFileSync(join(dir, 'agenthub-win-x64.exe.delete-me-100'), 'stale-1');
+    writeFileSync(join(dir, 'agenthub-helper-win-x64.exe.delete-me-200'), 'stale-2');
+
+    cleanupDeleteMeFiles(dir);
+
+    expect(existsSync(join(dir, 'agenthub-win-x64.exe'))).toBe(true);
+    expect(existsSync(join(dir, 'agenthub-win-x64.exe.delete-me-100'))).toBe(false);
+    expect(existsSync(join(dir, 'agenthub-helper-win-x64.exe.delete-me-200'))).toBe(false);
+  });
+
+  it('no-op when the install dir does not exist', () => {
+    // Must not throw — first-install runs this before the dir is created.
+    expect(() => cleanupDeleteMeFiles(join(TEST_DIR, 'never-existed'))).not.toThrow();
+  });
+
+  it('survives a file that cannot be deleted (still locked)', () => {
+    // We can't simulate a true Windows lock cross-platform, but we can
+    // verify the helper doesn't throw when it encounters an unrelated file.
+    const dir = join(TEST_DIR, 'cleanup-mixed');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'normal.txt'), 'ok');
+    writeFileSync(join(dir, 'sweep.delete-me-1'), 'to-clean');
+    expect(() => cleanupDeleteMeFiles(dir)).not.toThrow();
+    expect(existsSync(join(dir, 'normal.txt'))).toBe(true);
+    expect(existsSync(join(dir, 'sweep.delete-me-1'))).toBe(false);
   });
 });

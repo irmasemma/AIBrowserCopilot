@@ -8,6 +8,7 @@ import type { ToolDetectionSummary } from '../detectors/types.js';
 import { downloadBinary, isBinaryInstalled } from '../installers/binary-installer.js';
 import { registerHost } from '../installers/host-registrar.js';
 import { registerAllBrowsers } from '../installers/browser-registrar.js';
+import { writeAllowedExtensionIds, ALLOWED_IDS_FILENAME } from '../installers/allowed-ids-writer.js';
 import { checkBinaryHealth } from '../installers/health-check.js';
 import { getHelperAssetName } from '../shared/constants.js';
 import { uninstall, type UninstallResult } from '../installers/uninstaller.js';
@@ -229,6 +230,23 @@ export const App: React.FC<AppProps> = ({
           registerAllBrowsers(platform, binPath, helperBinPath, extensionIds);
         } catch {
           // Helper registration is best-effort — extension falls back to default port if helper unavailable
+        }
+
+        // Write the bridge's Origin allowlist config when --extension-id was
+        // provided. The bridge reads this at startup; without it the WS
+        // server accepts any chrome-extension:// origin (defense-in-depth
+        // back-compat). With it, only the listed IDs can drive the bridge.
+        // Best-effort: a failure here logs nothing but the bridge keeps
+        // running in back-compat mode, so install does not fail.
+        if (flags.extensionId) {
+          try {
+            writeAllowedExtensionIds(
+              join(getInstallDir(platform), ALLOWED_IDS_FILENAME),
+              [flags.extensionId],
+            );
+          } catch {
+            // Fall through — bridge stays in back-compat mode.
+          }
         }
 
         if (regResult.success) {

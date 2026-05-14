@@ -16,7 +16,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir, platform } from 'node:os';
+import { homedir, platform, arch as osArch } from 'node:os';
 import { createConnection } from 'node:net';
 import { WebSocket } from 'ws';
 
@@ -81,13 +81,19 @@ export function getLockFilePath(): string {
 
 export function getBinaryPath(): string {
   const dir = getInstallDir();
+  // os.arch() reflects the *runtime* architecture of the Node binary we're
+  // executing as. On Windows ARM64 the user runs an arm64 helper, expects an
+  // arm64 bridge — hardcoding x64 here means the bridge never starts on
+  // ARM64 laptops (Surface Pro X / Snapdragon X). Mirror mcp-registrar.ts's
+  // resolution so the helper agrees with itself across modules.
+  const arch = osArch() === 'arm64' ? 'arm64' : 'x64';
   switch (platform()) {
     case 'win32':
-      return join(dir, 'agenthub-win-x64.exe');
+      return join(dir, `agenthub-win-${arch}.exe`);
     case 'darwin':
-      return join(dir, process.arch === 'arm64' ? 'agenthub-macos-arm64' : 'agenthub-macos-x64');
+      return join(dir, `agenthub-macos-${arch}`);
     default:
-      return join(dir, process.arch === 'arm64' ? 'agenthub-linux-arm64' : 'agenthub-linux-x64');
+      return join(dir, `agenthub-linux-${arch}`);
   }
 }
 

@@ -3985,13 +3985,14 @@ function getLockFilePath() {
 }
 function getBinaryPath() {
   const dir = getInstallDir2();
+  const arch = (0, import_node_os3.arch)() === "arm64" ? "arm64" : "x64";
   switch ((0, import_node_os3.platform)()) {
     case "win32":
-      return (0, import_node_path3.join)(dir, "agenthub-win-x64.exe");
+      return (0, import_node_path3.join)(dir, `agenthub-win-${arch}.exe`);
     case "darwin":
-      return (0, import_node_path3.join)(dir, process.arch === "arm64" ? "agenthub-macos-arm64" : "agenthub-macos-x64");
+      return (0, import_node_path3.join)(dir, `agenthub-macos-${arch}`);
     default:
-      return (0, import_node_path3.join)(dir, process.arch === "arm64" ? "agenthub-linux-arm64" : "agenthub-linux-x64");
+      return (0, import_node_path3.join)(dir, `agenthub-linux-${arch}`);
   }
 }
 function readLockFile() {

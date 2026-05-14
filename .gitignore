@@ -16,3 +16,6 @@ _bmad/
 _bmad-output/
 .agents/
 .claude-memory/
+
+# CWS upload artifacts (rebuilt per release — never commit)
+packages/extension/dist/*.zip
