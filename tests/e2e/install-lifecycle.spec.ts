@@ -102,6 +102,25 @@ test.describe('SetupWizard surface', () => {
   test.beforeAll(async () => {
     context = await launchContext();
     extensionId = await discoverExtensionId(context);
+    // Block verify_connection at the chrome.runtime.sendMessage layer.
+    // ConnectionHeader fires this on mount; the SW honours it and (when
+    // a real bridge is autostarted on this machine) overwrites our fake
+    // connectionContext with state='connected', which hides the
+    // SetupWizard before our assertions can run. Same shape as the
+    // ConnectionHeader-state-transitions describe block below.
+    await context.addInitScript(() => {
+      const orig = chrome.runtime?.sendMessage;
+      if (orig) {
+        // @ts-expect-error overload override
+        chrome.runtime.sendMessage = function (msg: unknown, ...rest: unknown[]) {
+          if (msg && typeof msg === 'object' && (msg as { type?: string }).type === 'verify_connection') {
+            return Promise.resolve(undefined);
+          }
+          // @ts-expect-error spread original signature
+          return orig.call(chrome.runtime, msg, ...rest);
+        };
+      }
+    });
   });
 
   test.afterAll(async () => {
