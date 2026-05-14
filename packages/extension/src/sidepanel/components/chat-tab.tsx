@@ -294,9 +294,9 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) =
   const hasKey = apiKey.trim().length > 0;
 
   return (
-    <div class="flex flex-col h-full bg-neutral-50">
+    <div class="flex flex-col h-full bg-panel">
       {/* Provider + model picker bar */}
-      <div class="border-b border-neutral-200 bg-white px-3 py-2 space-y-2">
+      <div class="border-b border-card-border bg-white px-3 py-2 space-y-2">
         <div class="flex items-center gap-1">
           {PROVIDER_ORDER.map((p) => {
             const m = PROVIDER_META[p];
@@ -433,7 +433,7 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings }) =
       </div>
 
       {/* Composer */}
-      <div class="border-t border-neutral-200 bg-white p-2">
+      <div class="border-t border-card-border bg-white p-2">
         <div class="flex gap-2">
           <textarea
             class="flex-1 resize-none rounded border border-neutral-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-primary disabled:bg-neutral-100"
@@ -477,7 +477,7 @@ const ChatBubble: FunctionalComponent<{ entry: DisplayEntry }> = ({ entry }) => 
   if (entry.kind === 'user') {
     return (
       <div class="flex justify-end">
-        <div class="max-w-[85%] rounded-lg bg-brand-primary text-white px-3 py-2 text-sm whitespace-pre-wrap shadow-sm">
+        <div class="max-w-[85%] rounded-xl rounded-br-sm bg-brand-primary text-white px-3 py-2 text-sm whitespace-pre-wrap shadow-sm">
           {entry.text}
         </div>
       </div>
@@ -486,7 +486,7 @@ const ChatBubble: FunctionalComponent<{ entry: DisplayEntry }> = ({ entry }) => 
   if (entry.kind === 'assistant') {
     return (
       <div class="flex justify-start">
-        <div class="max-w-[85%] rounded-lg bg-white border border-neutral-200 px-3 py-2 text-sm whitespace-pre-wrap shadow-sm">
+        <div class="max-w-[85%] rounded-xl rounded-bl-sm bg-white border border-card-border px-3 py-2 text-sm whitespace-pre-wrap shadow-sm">
           {entry.text}
         </div>
       </div>
@@ -496,14 +496,16 @@ const ChatBubble: FunctionalComponent<{ entry: DisplayEntry }> = ({ entry }) => 
     return (
       <div class="flex justify-start">
         <div
-          class={`text-xs px-2 py-1 rounded ${
-            entry.ok ? 'bg-neutral-100 text-neutral-600' : 'bg-red-50 text-red-700'
+          class={`text-xs px-2.5 py-1 rounded-md border font-mono ${
+            entry.ok
+              ? 'bg-neutral-50 border-card-border text-neutral-700'
+              : 'bg-red-50 border-red-200 text-red-700'
           }`}
           data-testid="chat-tool-call"
           data-tool-name={entry.toolName ?? ''}
           data-tool-ok={entry.ok ? 'true' : 'false'}
         >
-          {entry.ok ? '✓' : '✗'} {entry.text}
+          <span class={entry.ok ? 'text-status-connected' : 'text-red-600'}>{entry.ok ? '✓' : '✗'}</span> {entry.text}
         </div>
       </div>
     );

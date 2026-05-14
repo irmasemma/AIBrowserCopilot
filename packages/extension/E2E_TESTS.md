@@ -30,7 +30,7 @@ Default browser is Chrome — but Google Chrome stable (138+) silently ignores `
 
 ### Prereqs picked up automatically (no manual setup)
 
-- Junction at `%TEMP%\agenthub-real-edge-userdata` → real Edge user-data-dir (works around the Chrome/Edge "no remote debugging on default profile" gate).
+- Junction at `%TEMP%\copilot-real-edge-userdata` → real Edge user-data-dir (works around the Chrome/Edge "no remote debugging on default profile" gate).
 - Bootstrap launch flips the `developer-mode` toggle in `edge://extensions/` (works around the Chrome 128+ unpacked-extension block).
 - Wake-up navigation forces the lazy MV3 service worker to activate before SW discovery.
 

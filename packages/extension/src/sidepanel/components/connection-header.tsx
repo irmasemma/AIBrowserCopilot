@@ -280,9 +280,15 @@ export const ConnectionHeader: FunctionalComponent = () => {
     : header.severity === 'warn' ? 'text-amber-700'
     : 'text-neutral-900';
 
+  const statusLabel =
+    header.severity === 'ok' ? 'text-status-connected'
+    : header.severity === 'warn' ? 'text-amber-700'
+    : 'text-red-600';
+
   return (
-    <header class="border-b border-neutral-200 bg-white" role="banner" data-testid="connection-header">
+    <header class="border-b border-card-border bg-white" role="banner" data-testid="connection-header">
       <div class="flex items-center justify-between px-4 py-3">
+        <span class="text-base font-semibold text-neutral-900 tracking-tight">AgentHub</span>
         <button
           class="flex items-center gap-1.5 cursor-pointer hover:opacity-80"
           onClick={() => setShowDiag(!showDiag)}
@@ -292,15 +298,13 @@ export const ConnectionHeader: FunctionalComponent = () => {
         >
           <StatusBadge state={displayState} compact />
           <span
-            class={`text-xs font-medium ${titleColor}`}
+            class={`text-xs font-medium ${header.severity === 'ok' ? statusLabel : titleColor}`}
             data-testid="connection-header-title"
           >
             {header.title}
           </span>
           <span class={`text-[10px] text-neutral-400 transition-transform ${showDiag ? 'rotate-180' : ''}`} aria-hidden="true">{'\u25BE'}</span>
         </button>
-        <span class="text-base font-semibold text-neutral-900">AgentHub</span>
-        <span class="w-4" aria-hidden="true" />
       </div>
       {header.subtitle && (
         <div class="px-4 pb-2">

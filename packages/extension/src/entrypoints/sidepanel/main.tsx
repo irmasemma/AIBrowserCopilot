@@ -21,7 +21,7 @@ const TabStrip = ({ active, onChange }: { active: TabId; onChange: (id: TabId) =
     { id: 'settings', label: 'Settings' },
   ];
   return (
-    <nav class="flex border-b border-neutral-200 bg-white" role="tablist">
+    <nav class="flex border-b border-card-border bg-white" role="tablist">
       {tabs.map((t) => {
         const isActive = active === t.id;
         return (
@@ -50,16 +50,16 @@ const ToolsTab = () => {
   const toggleTool = useStore((s) => s.toggleTool);
 
   return (
-    <div class="h-full overflow-y-auto">
-      <section class="py-4">
-        <h2 class="px-4 text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-2">
-          Tools
+    <div class="h-full overflow-y-auto px-3 py-3 space-y-3">
+      <section>
+        <h2 class="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
+          Permissions
         </h2>
-        <p class="px-4 text-xs text-neutral-500 mb-2">
+        <p class="text-xs text-neutral-500 mb-2">
           Toggle which browser actions external AI tools (and the Chat tab) are
           allowed to use. All tools are free.
         </p>
-        <div class="divide-y divide-neutral-100">
+        <div class="bg-white border border-card-border rounded-lg overflow-hidden divide-y divide-neutral-100">
           {TOOL_DEFINITIONS.map((tool) => (
             <ToolCard
               key={tool.name}
@@ -73,17 +73,17 @@ const ToolsTab = () => {
           ))}
         </div>
       </section>
-      <section class="py-4 border-t border-neutral-200">
-        <h2 class="px-4 text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-2">
-          Activity
+      <section>
+        <h2 class="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
+          Activity Log
         </h2>
         {activityLog.length === 0 ? (
-          <p class="px-4 text-xs text-neutral-400 py-4">
+          <div class="bg-log-bg text-log-text rounded-lg px-3 py-3 font-mono text-[11px] text-neutral-400 italic">
             No activity yet — try asking AgentHub to do something, or connect an
             MCP-capable AI tool.
-          </p>
+          </div>
         ) : (
-          <div class="divide-y divide-neutral-100">
+          <div class="bg-log-bg rounded-lg py-2 max-h-96 overflow-y-auto">
             {activityLog.slice(0, 50).map((entry) => (
               <ActivityEntryComponent key={entry.id} entry={entry} />
             ))}
@@ -150,7 +150,7 @@ const App = () => {
 
   if (needsSetup) {
     return (
-      <div class="flex flex-col h-screen bg-neutral-50">
+      <div class="flex flex-col h-screen bg-panel">
         <ConnectionHeader />
         <div class="flex-1 overflow-y-auto">
           <SetupWizard onComplete={handleSetupComplete} />
@@ -160,7 +160,7 @@ const App = () => {
   }
 
   return (
-    <div class="flex flex-col h-screen bg-neutral-50">
+    <div class="flex flex-col h-screen bg-panel">
       <ConnectionHeader />
       <SiteAccessBanner />
       {connectionContext.versionStatus === 'outdated' && (

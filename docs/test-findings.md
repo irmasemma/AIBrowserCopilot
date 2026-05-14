@@ -123,7 +123,7 @@ Chromium 136+ refuses remote debugging (both `--remote-debugging-pipe` and `--re
 
 ### Fix applied (test-side, not product)
 
-`tests/e2e/helpers/real-chrome.ts`: present the real user-data-dir to Chrome via a directory junction at `%TEMP%\agenthub-real-chrome-userdata`. Chrome sees a non-default path string, the gate passes, and the real profile data (cookies, signed-in sessions, extensions, chrome.storage) loads through the junction. The junction is idempotent — created once on the first run, reused after.
+`tests/e2e/helpers/real-chrome.ts`: present the real user-data-dir to Chrome via a directory junction at `%TEMP%\copilot-real-chrome-userdata`. Chrome sees a non-default path string, the gate passes, and the real profile data (cookies, signed-in sessions, extensions, chrome.storage) loads through the junction. The junction is idempotent — created once on the first run, reused after.
 
 ## 3. Test-only fix: Chrome 128+ refuses unpacked extensions until Developer Mode is on
 
@@ -200,7 +200,7 @@ AGENTHUB_TEST_KILL_CHROME=1 AGENTHUB_TEST_BROWSER=edge \
 ```
 
 Prerequisites baked into the test (handled automatically — no manual setup):
-- Junction at `%TEMP%\agenthub-real-edge-userdata` → `%LOCALAPPDATA%\Microsoft\Edge\User Data` (CDP gate workaround).
+- Junction at `%TEMP%\copilot-real-edge-userdata` → `%LOCALAPPDATA%\Microsoft\Edge\User Data` (CDP gate workaround).
 - Bootstrap launch flips `developer-mode` toggle in `edge://extensions/` (extension-load gate).
 - Wake-up navigation forces the MV3 service worker to activate.
 
@@ -256,4 +256,4 @@ Once the extension ever connected (which the second profile had), any new diagno
 
 ### Test infra side note
 
-Playwright was running multiple spec files in parallel by default, and the install-and-* specs share a single `%TEMP%\agenthub-real-edge-userdata` junction → second worker hit "Opening in existing browser session" and crashed. Pinned `workers: 1` in `playwright.config.ts`; the affected specs are short and serial within themselves, so single-worker is the right default anyway.
+Playwright was running multiple spec files in parallel by default, and the install-and-* specs share a single `%TEMP%\copilot-real-edge-userdata` junction → second worker hit "Opening in existing browser session" and crashed. Pinned `workers: 1` in `playwright.config.ts`; the affected specs are short and serial within themselves, so single-worker is the right default anyway.

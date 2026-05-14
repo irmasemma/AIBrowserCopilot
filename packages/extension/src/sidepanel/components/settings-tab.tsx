@@ -136,9 +136,11 @@ export const SettingsTab: FunctionalComponent = () => {
   const displayState = getDisplayState(connectionContext);
 
   return (
-    <div class="px-4 py-4 space-y-6 text-sm">
-      <section>
-        <h3 class="font-semibold text-neutral-800 mb-1">AI Provider Keys</h3>
+    <div class="px-3 py-3 space-y-3 text-sm">
+      <section class="bg-white border border-card-border rounded-lg p-4">
+        <h3 class="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
+          AI Provider Keys
+        </h3>
         <p class="text-xs text-neutral-500 mb-3">
           Used by the Chat tab. Stored locally on this device only — never sent to our servers.
         </p>
@@ -151,8 +153,10 @@ export const SettingsTab: FunctionalComponent = () => {
         </div>
       </section>
 
-      <section class="border-t border-neutral-200 pt-4">
-        <h3 class="font-semibold text-neutral-800 mb-1">MCP Connection</h3>
+      <section class="bg-white border border-card-border rounded-lg p-4">
+        <h3 class="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
+          MCP Connection
+        </h3>
         <p class="text-xs text-neutral-500 mb-2">
           Lets external AI tools (Claude Code, Cursor, etc.) drive your browser through this
           extension. Independent from the Chat tab — you can use either or both.
@@ -177,8 +181,10 @@ export const SettingsTab: FunctionalComponent = () => {
 
       <HowToConnect />
 
-      <section class="border-t border-neutral-200 pt-4">
-        <h3 class="font-semibold text-neutral-800 mb-1">Help</h3>
+      <section class="bg-white border border-card-border rounded-lg p-4">
+        <h3 class="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
+          Help
+        </h3>
         <div class="space-x-3 text-xs">
           <a href={SUPPORT_URL} target="_blank" rel="noopener" class="text-brand-primary hover:underline">
             Report a problem

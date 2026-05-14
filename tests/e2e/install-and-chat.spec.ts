@@ -297,12 +297,38 @@ test.describe('install-and-chat', () => {
     try {
       expect(launched.extensionId).toBe(EXPECTED_EXTENSION_ID);
       const page: Page = await openSidePanel(launched.context, launched.extensionId);
-      await page.evaluate(() => chrome.storage.local.set({ setupComplete: true }));
+      // Clear any persisted connection state from prior runs (Test C leaves a
+      // "Connected" connectionContext in chrome.storage). Otherwise the side
+      // panel renders Connected from cache on mount before discovery has a
+      // chance to flip it to the actual broken state. setupComplete bypasses
+      // the SetupWizard so we can read the connection header.
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            chrome.storage.local.set({ setupComplete: true }, () => {
+              chrome.storage.local.remove(
+                ['connectionContext', 'connectionState'],
+                () => resolve(),
+              );
+            });
+          }),
+      );
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.waitForSelector('[data-testid="connection-header"]', { timeout: 10_000 });
 
+      // Wait up to 10 s for the panel to settle into a broken state — the SW
+      // fires verify_connection on side-panel mount, then discovery returns
+      // helper_unavailable / no_lock_file. We retry until the title is
+      // anything other than 'Connected' (or 'Verifying…' which is transient).
       const titleLoc = page.locator('[data-testid="connection-header-title"]').first();
-      firstHeaderTitle = (await titleLoc.textContent())?.trim() ?? '';
+      const settleDeadline = Date.now() + 10_000;
+      while (Date.now() < settleDeadline) {
+        firstHeaderTitle = (await titleLoc.textContent())?.trim() ?? '';
+        if (firstHeaderTitle && firstHeaderTitle !== 'Connected' && !firstHeaderTitle.startsWith('Verifying')) {
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 300));
+      }
       expect(
         firstHeaderTitle,
         'side panel should NOT be Connected before install runs',

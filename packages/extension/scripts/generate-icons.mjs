@@ -15,9 +15,11 @@ const ASSETS_DIR = path.resolve(__dirname, '..', 'public', 'assets');
 mkdirSync(ASSETS_DIR, { recursive: true });
 
 // 128-unit viewBox. Background is a rounded square with a vertical blue
-// gradient; foreground is a bold white wave (two crests) with a small dot
-// above the second crest — reads as motion + an "agent" guiding it. Stroke
-// widths are picked so the silhouette still resolves at 16×16.
+// gradient; foreground is a hub-and-spoke graph — one large central node and
+// three satellite nodes connected by short stems. Reads as "multiple AI
+// agents (Claude / Cursor / VS Code / …) connecting to a central hub" —
+// the product's positioning. Node radii and stroke widths are picked so the
+// silhouette still resolves at 16×16 (the toolbar size).
 const SVG = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
   <defs>
@@ -27,12 +29,23 @@ const SVG = `
     </linearGradient>
   </defs>
   <rect x="0" y="0" width="128" height="128" rx="26" ry="26" fill="url(#bg)"/>
-  <path d="M 22 82
-           Q 40 50, 58 82
-           T 96 82"
-        fill="none" stroke="#FFFFFF" stroke-width="14"
-        stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="100" cy="38" r="9" fill="#FFFFFF"/>
+
+  <!-- Spokes (drawn first so node fills cover the joins). The lines are
+       slightly shorter than the full hub→satellite distance so they don't
+       poke past the satellite circles. -->
+  <g stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" stroke-opacity="0.92">
+    <line x1="64" y1="64" x2="64" y2="32"/>   <!-- up -->
+    <line x1="64" y1="64" x2="36" y2="92"/>   <!-- down-left -->
+    <line x1="64" y1="64" x2="92" y2="92"/>   <!-- down-right -->
+  </g>
+
+  <!-- Satellite nodes (3, equilateral around centre, r = 12) -->
+  <circle cx="64"  cy="26" r="12" fill="#FFFFFF"/>
+  <circle cx="32"  cy="96" r="12" fill="#FFFFFF"/>
+  <circle cx="96"  cy="96" r="12" fill="#FFFFFF"/>
+
+  <!-- Central hub (larger, r = 18) -->
+  <circle cx="64" cy="64" r="18" fill="#FFFFFF"/>
 </svg>`;
 
 const SIZES = [16, 48, 128];

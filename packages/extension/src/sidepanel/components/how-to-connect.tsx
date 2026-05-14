@@ -71,8 +71,8 @@ export const HowToConnect: FunctionalComponent = () => {
   };
 
   return (
-    <section class="border-t border-neutral-200 pt-4">
-      <h3 class="font-semibold text-neutral-800 mb-1">Connect another AI tool</h3>
+    <section class="bg-white border border-card-border rounded-lg p-4">
+      <h3 class="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">Connect another AI tool</h3>
       <p class="text-xs text-neutral-500 mb-3">
         AgentHub is a single bridge that any number of AI tools can talk to. Add it
         once per tool — works alongside any existing MCP setup. No reinstall needed

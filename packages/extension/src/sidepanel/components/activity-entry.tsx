@@ -5,48 +5,36 @@ interface ActivityEntryProps {
   entry: ActivityEntryType;
 }
 
-interface ToolUiInfo {
-  icon: string;
-  /** Past-tense action label, e.g. "Read page", "Captured screenshot". */
-  label: string;
-}
-
-const TOOL_INFO: Record<string, ToolUiInfo> = {
-  get_page_content: { icon: '📄', label: 'Read page' },
-  take_screenshot: { icon: '📸', label: 'Took screenshot' },
-  list_tabs: { icon: '📋', label: 'Listed tabs' },
-  get_page_metadata: { icon: '🔗', label: 'Read metadata' },
-  navigate: { icon: '🧭', label: 'Navigated to' },
-  fill_form: { icon: '✏️', label: 'Filled form on' },
-  click_element: { icon: '👆', label: 'Clicked element on' },
-  press_key: { icon: '⌨️', label: 'Pressed key on' },
-  extract_table: { icon: '📊', label: 'Extracted table from' },
-  read_form: { icon: '📝', label: 'Read form on' },
-  extract_data: { icon: '🔍', label: 'Extracted data from' },
-};
-
 interface StatusUi {
   icon: string;
   color: string;
-  bg: string;
   label: string;
 }
 
 const STATUS_DISPLAY: Record<string, StatusUi> = {
-  success:       { icon: '✓', color: 'text-emerald-700', bg: 'bg-emerald-50', label: 'Success' },
-  error:         { icon: '✕', color: 'text-red-700',     bg: 'bg-red-50',     label: 'Error' },
-  blocked:       { icon: '🚫', color: 'text-red-700',    bg: 'bg-red-50',     label: 'Blocked' },
-  'in-progress': { icon: '⏳', color: 'text-amber-700',   bg: 'bg-amber-50',   label: 'Running' },
+  success:       { icon: '✓', color: 'text-log-meta', label: 'ok' },
+  error:         { icon: '✕', color: 'text-red-400', label: 'err' },
+  blocked:       { icon: '⊘', color: 'text-red-400', label: 'blocked' },
+  'in-progress': { icon: '…', color: 'text-amber-300', label: 'running' },
 };
 
 const formatHostname = (url: string | null, maxLen = 32): string => {
-  if (!url) return 'browser';
+  if (!url) return '—';
   try {
-    const hostname = new URL(url).hostname;
-    return hostname.length > maxLen ? hostname.slice(0, maxLen) + '…' : hostname;
+    const u = new URL(url);
+    const path = `${u.hostname}${u.pathname === '/' ? '' : u.pathname}`;
+    return path.length > maxLen ? path.slice(0, maxLen) + '…' : path;
   } catch {
     return url.slice(0, maxLen);
   }
+};
+
+const formatTimestamp = (timestamp: number): string => {
+  const d = new Date(timestamp);
+  const hh = d.getHours().toString().padStart(2, '0');
+  const mm = d.getMinutes().toString().padStart(2, '0');
+  const ss = d.getSeconds().toString().padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
 };
 
 const formatRelativeTime = (timestamp: number): string => {
@@ -64,43 +52,29 @@ const formatDuration = (ms: number | null): string => {
 };
 
 export const ActivityEntryComponent: FunctionalComponent<ActivityEntryProps> = ({ entry }) => {
-  const tool = TOOL_INFO[entry.tool] ?? { icon: '🔧', label: entry.tool };
   const status = STATUS_DISPLAY[entry.status] ?? STATUS_DISPLAY.error;
   const duration = formatDuration(entry.duration);
   const target = formatHostname(entry.targetUrl);
-  const time = formatRelativeTime(entry.timestamp);
+  const ts = formatTimestamp(entry.timestamp);
+  const relTime = formatRelativeTime(entry.timestamp);
 
   return (
     <div
-      class="flex items-start gap-2 px-4 py-2 text-xs"
+      class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-3 px-3 py-0.5 font-mono text-[11px] leading-relaxed"
       role="log"
       aria-live="polite"
-      title={entry.targetUrl ?? undefined}
+      title={`${entry.targetUrl ?? entry.tool} — ${relTime}`}
     >
-      <span aria-hidden="true" class="text-base leading-tight flex-shrink-0">{tool.icon}</span>
-      <div class="flex-1 min-w-0">
-        <div class="flex items-baseline gap-1.5">
-          <span class="text-neutral-800 font-medium truncate">{tool.label}</span>
-          <span class="text-neutral-600 truncate">{target}</span>
-        </div>
-        <div class="flex items-center gap-2 mt-0.5">
-          <span
-            class={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium ${status.color} ${status.bg}`}
-            aria-label={status.label}
-          >
-            <span aria-hidden="true">{status.icon}</span>
-            <span>{status.label}</span>
-          </span>
-          {entry.errorCode && (
-            <span class="text-[10px] font-mono text-red-600 truncate" title={entry.errorCode}>
-              {entry.errorCode}
-            </span>
-          )}
-          <span class="text-[10px] text-neutral-400 ml-auto whitespace-nowrap">
-            {duration && <>{duration} · </>}{time}
-          </span>
-        </div>
-      </div>
+      <span class="text-log-ts whitespace-nowrap" aria-label={ts}>{ts}</span>
+      <span class="text-log-tool truncate">
+        {entry.tool}
+        <span class="text-log-text/60"> {target}</span>
+      </span>
+      <span class={`whitespace-nowrap ${status.color}`} aria-label={status.label}>
+        <span aria-hidden="true">{status.icon}</span> {status.label}
+        {duration && <span class="text-log-text/50"> · {duration}</span>}
+        {entry.errorCode && <span class="text-red-300"> · {entry.errorCode}</span>}
+      </span>
     </div>
   );
 };
