@@ -5,9 +5,9 @@ export default defineConfig({
   srcDir: 'src',
   outDir: 'dist',
   manifest: {
-    name: 'AgentHub: AI Chat + MCP for Claude, Cursor, ChatGPT — Forms, Data',
-    version: '0.5.4',
-    description: 'Let AI control your real Chrome — your tabs, sessions, logins. Chat sidebar + MCP for Claude, Cursor, ChatGPT, VS Code.',
+    name: 'AgentHub — AI Chat + MCP for Claude, Cursor, ChatGPT',
+    version: '0.5.5',
+    description: 'Let AI control your real Chrome — your tabs, sessions, logins. Chat sidebar + MCP for Claude, Cursor, and ChatGPT.',
     permissions: ['tabs', 'sidePanel', 'nativeMessaging', 'storage', 'scripting', 'debugger', 'alarms'],
     host_permissions: [
       'https://api.openai.com/*',

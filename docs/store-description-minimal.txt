@@ -1,0 +1,24 @@
+AI browser automation — use the built-in chat or connect Claude Code, Cursor, and other MCP-compatible AI tools to automate your browser. Control data flow, stay private. Full MCP to your browser.
+
+Two ways to use it:
+
+MCP integration: Connect external AI tools via Model Context Protocol (MCP) to bring AI to any website. Tested with Claude Code, Cursor, and Claude Desktop out of the box — works with any MCP-compatible client. Full list of tested clients on GitHub: github.com/irmasemma/AIBrowserCopilot
+
+Built-in chat: Chat with OpenAI directly in the browser sidebar to automate tasks, read pages, fill forms.
+
+What you can do:
+• Read and extract page content
+• Fill forms and interact with pages
+• Take screenshots
+• Automate workflows without leaving your browser
+
+Privacy & control:
+• Your OpenAI API key (if using chat) stays local in your browser
+• Data goes directly to your chosen AI provider — never through AgentHub servers
+• Blocklist protects banking and email sites by default
+• Full control over which sites can use AI
+
+Use cases:
+• Research: summarize and extract from any website
+• Automation: fill forms, test sites, scrape data
+• Productivity: get AI help without context-switching

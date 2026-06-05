@@ -1,7 +1,7 @@
 # Chrome Web Store Listing
 
 ## Extension Name
-AgentHub — AI Chat + MCP for Claude, Cursor, ChatGPT
+AgentHub — AI Chat + MCP for Claude, Cursor, and ChatGPT
 
 ## Short Description (132 chars max)
 AI sidebar + MCP bridge for your browser. Let Claude, Cursor, ChatGPT, Gemini read tabs, fill forms & extract data in real Chrome.
@@ -15,7 +15,7 @@ AI sidebar + MCP bridge for your browser. Let Claude, Cursor, ChatGPT, Gemini re
 AgentHub is two things in one extension:
 
 1. **A chat sidebar** in Chrome where you talk to OpenAI, Anthropic Claude, or Google Gemini directly — using your own API keys, all stored locally, never sent to our servers.
-2. **An MCP bridge** that exposes your browser as a set of tools to every major AI tool: Claude Code, Cursor, VS Code, Windsurf, JetBrains IDEs, Zed, Continue.dev, and Claude Desktop.
+2. **An MCP bridge** that exposes your browser as a tool source for Claude Code, Cursor, Claude Desktop, and any other MCP-compatible AI client.
 
 Either way, your AI can read pages, list and switch tabs, take screenshots, fill forms, click elements, extract tables, and pull structured data — all from inside the browser you already use.
 
@@ -31,7 +31,7 @@ Either way, your AI can read pages, list and switch tabs, take screenshots, fill
 
 **Extract anything.** Tables, lists, contacts, prices, reviews, articles — into JSON, markdown, or whatever format you ask for.
 
-**Drive your IDE from the browser, and vice versa.** With MCP enabled, the Claude Code or Cursor running in your terminal can ask the browser questions ("what's on the user's screen?") and act on the answers ("open this URL", "fill this form").
+**Drive your IDE from the browser, and vice versa.** With MCP enabled, the AI agent running in your terminal can ask the browser questions ("what's on the user's screen?") and act on the answers ("open this URL", "fill this form").
 
 ---
 
@@ -43,16 +43,7 @@ Either way, your AI can read pages, list and switch tabs, take screenshots, fill
 - Google Gemini — Gemini 2.5 Pro, Flash, Flash-Lite
 - Custom model IDs supported via the "Custom…" option
 
-**MCP bridge (works alongside the chat tab, or instead of it):**
-- Claude Code (CLI)
-- Claude Desktop
-- Cursor
-- VS Code (with Copilot, Continue, or any MCP-aware extension)
-- Windsurf
-- JetBrains IDEs (IntelliJ, PyCharm, WebStorm, …)
-- Zed
-- Continue.dev
-- Any MCP-compatible AI tool — we register through standard Model Context Protocol so new clients work without extension changes.
+**MCP bridge (works alongside the chat tab, or instead of it):** Claude Code, Cursor, and Claude Desktop are tested and documented out of the box. Any other MCP-compatible AI client works too — we register through the standard Model Context Protocol, so new clients work without changes to the extension. The full tested-client list is in our setup screenshot and on GitHub.
 
 ---
 
@@ -94,7 +85,7 @@ Every tool can be toggled on or off per your preference. Sensitive domains (bank
    ```
    npx agenthub-setup@latest --extension-id <YOUR_ID_FROM_THE_SIDE_PANEL>
    ```
-3. The installer detects your AI tools (Claude Code, Cursor, VS Code, etc.) and registers AgentHub with each automatically.
+3. The installer detects your AI tools (Claude Code and others) and registers AgentHub with each automatically.
 4. Open your AI tool and ask it about the page you're on. Or open the AgentHub sidebar and chat directly.
 
 That's it. No account. No waitlist.
@@ -122,14 +113,6 @@ That's it. No account. No waitlist.
 
 ---
 
-### Keywords / Search terms
-
-*For Chrome Web Store search optimization. These appear naturally in the description above; listed here for indexing.*
-
-AI browser extension · AI sidebar · AI chat sidebar · Claude browser extension · Claude Code browser · Cursor browser · ChatGPT browser extension · Gemini browser extension · OpenAI browser · MCP browser · MCP server · Model Context Protocol Chrome · browser automation AI · let AI control browser · browser AI assistant · AI browser agent · AI fills forms · AI extracts data · AI reads web pages · AI takes screenshots · AI lists tabs · AI navigates browser · multi-tab AI · cross-tab automation · Anthropic browser · OpenAI Chrome extension · VS Code MCP · Cursor MCP · Windsurf MCP · JetBrains MCP · Zed MCP · Continue.dev MCP · Claude Desktop browser · browser bridge for AI · AI productivity Chrome · AI form filler · AI data extractor · AI tab manager · AI assistant for Chrome · Claude side panel · ChatGPT side panel · AI scraper · AI web automation · agent in browser · web agent · browser agent
-
----
-
 ### FAQ
 
 **Is this free?**
@@ -139,10 +122,10 @@ Yes, fully. No pro tier, no trial, no upsell. The setup installer (`agenthub-set
 No. There is no AgentHub server. Browser ↔ AI communication is 100% local via native messaging. API keys for the chat tab are stored in `chrome.storage.local` and never leave your machine. The activity log is local.
 
 **Which AI tools work with this?**
-Out of the box: Claude Code, Claude Desktop, Cursor, VS Code (Copilot / Continue), Windsurf, JetBrains IDEs, Zed, Continue.dev. Plus OpenAI / Anthropic / Gemini direct from the chat sidebar. Any MCP-compatible AI tool works — we use the standard protocol.
+Out of the box: Claude Code, Cursor, and Claude Desktop. Plus OpenAI, Anthropic, and Gemini direct from the chat sidebar. Any other MCP-compatible AI tool works too — we use the standard protocol. The full tested-client list lives in our promotional screenshots and on GitHub.
 
 **Do I need an API key?**
-For the in-extension chat sidebar: yes, you bring your own key for OpenAI, Anthropic, or Gemini. For the MCP bridge to external AI tools (Claude Code, Cursor, etc.): no, those tools handle their own auth — AgentHub just exposes the browser as a tool source for them.
+For the in-extension chat sidebar: yes, you bring your own key for OpenAI, Anthropic, or Gemini. For the MCP bridge to external AI tools: no, those tools handle their own auth — AgentHub just exposes the browser as a tool source for them.
 
 **Is this safe to install?**
 The extension code is open source. The native bridge is a small, audited binary that only talks to your local browser over Chrome's native messaging API — no network sockets, no open ports. Sensitive domains (banking, email) are blocked by default. Every tool can be disabled with a single toggle. Every AI action is logged.
