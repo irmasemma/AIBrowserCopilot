@@ -262,20 +262,21 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
         return;
       }
 
-      // Relay is dead in memory. Check if persisted state claims we're connected.
-      if (context.state === 'connected' || context.state === 'degraded' || context.state === 'reconnecting') {
-        // Persisted state is lying. Attempt rediscovery.
-        stopAll();
-        await refreshUrl();
+      // Relay is dead in memory. Attempt rediscovery regardless of persisted state.
+      // This covers:
+      //   - connected/degraded/reconnecting: persisted state is lying after SW resume
+      //   - disconnected: the sidepanel fast-poll case — server was down, came back,
+      //     but context stayed 'disconnected' because no reconnect was ever dispatched
+      stopAll();
+      await refreshUrl();
 
-        // If discovery found a live server (diagnostic === 'connecting'), try to reconnect
-        if (context.diagnosticReason === 'connecting') {
-          dispatch({ type: 'CONNECT' });
-          openRelay();
-        } else {
-          // No server found — transition to disconnected
-          dispatch({ type: 'DISCONNECT' });
-        }
+      // If discovery found a live server (diagnostic === 'connecting'), try to reconnect
+      if (context.diagnosticReason === 'connecting') {
+        dispatch({ type: 'CONNECT' });
+        openRelay();
+      } else if (context.state !== 'disconnected') {
+        // Server not found and we were supposedly connected — surface the break
+        dispatch({ type: 'DISCONNECT' });
       }
     },
 

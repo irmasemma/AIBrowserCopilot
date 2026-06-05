@@ -193,7 +193,20 @@ function unindexBrowser(browserId: string): void {
     set.delete(browserId);
     if (set.size === 0) brandIndex.delete(brand);
   }
+  // Track the most recent disconnect time so sendToolRequest can
+  // offer a brief reconnection grace window.
+  lastBrowserDisconnectedAt = Date.now();
 }
+
+// Timestamp of the most recent browser disconnect. Used by sendToolRequest
+// to distinguish "no browser ever connected" from "browser just reconnecting".
+let lastBrowserDisconnectedAt = 0;
+
+// How long (ms) after a disconnect to wait for the SW to reconnect before
+// returning "No browser extension connected". Short enough to not degrade the
+// happy path, long enough for Chrome to evict+relaunch the SW (typically <5s).
+const SW_RECONNECT_GRACE_MS = 4_000;
+const SW_RECONNECT_POLL_INTERVAL_MS = 200;
 
 // ── MCP client connections (secondary binaries over WS) ───────────────────
 const mcpClients = new Map<string, WebSocket>();
@@ -356,20 +369,38 @@ function resolveSocket(target: string): WebSocket | null {
 }
 
 // ── Send tool request to browser extension ────────────────────────────────
-function sendToolRequest(
+async function sendToolRequest(
   clientId: string,
   originalId: string | number | null,
   tool: string,
   params: Record<string, unknown>,
   browserId: string,
 ): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const ws = resolveSocket(browserId);
+  let ws = resolveSocket(browserId);
 
-    if (!ws) {
-      reject(new Error('No browser extension connected'));
-      return;
+  // If no socket is available right now, check whether we're inside the
+  // reconnection grace window (SW just evicted/suspended → Chrome is
+  // relaunching it → it will reconnect within a few seconds). Only wait
+  // if there was a recent disconnect; fail immediately when no extension
+  // has ever connected in this server session (user hasn't opened the browser).
+  if (!ws && lastBrowserDisconnectedAt > 0) {
+    const elapsed = Date.now() - lastBrowserDisconnectedAt;
+    if (elapsed < SW_RECONNECT_GRACE_MS) {
+      const remaining = SW_RECONNECT_GRACE_MS - elapsed;
+      const deadline = Date.now() + remaining;
+      while (Date.now() < deadline) {
+        await new Promise<void>((r) => setTimeout(r, SW_RECONNECT_POLL_INTERVAL_MS));
+        ws = resolveSocket(browserId);
+        if (ws) break;
+      }
     }
+  }
+
+  if (!ws) {
+    throw new Error('No browser extension connected');
+  }
+
+  return new Promise((resolve, reject) => {
 
     // Server-generated id, unique across all MCP clients, used as the
     // routing key in pendingRequests and as the id sent to the extension.

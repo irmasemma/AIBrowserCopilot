@@ -67,8 +67,8 @@ tasklist | findstr "<PID_FROM_LOCK_FILE>"
 # 4. Test native-host-helper returns correct data
 node /tmp/test-helper.js  # (create test script that sends read_lock_file via native messaging protocol)
 
-# 5. Test WebSocket connection with token
-# Connect to ws://127.0.0.1:<PORT>?token=<TOKEN> and verify server_info arrives
+# 5. Test WebSocket connection (origin-auth; no token param needed for local test)
+# Connect to ws://127.0.0.1:<PORT>?browserId=test and verify server_info arrives
 
 # 6. Check registry entries
 reg query "HKCU\SOFTWARE\Google\Chrome\NativeMessagingHosts\com.agenthub.native_host_helper"
@@ -81,11 +81,12 @@ cat "$LOCALAPPDATA/agenthub/com.agenthub.native_host.json"
 
 ## Key Architecture Details
 
-- Native host generates a random auth **token** on startup, writes it to `server.lock`
-- Extension uses `com.agenthub.native_host_helper` (native messaging) to read the lock file and discover port + token
-- Extension connects via WebSocket with `?token=xxx` query parameter
-- Without the token, connections are rejected with code 4001 before `server_info` is sent
+- Native host writes `server.lock` on startup with pid, port, and an empty token field
+- Extension uses `com.agenthub.native_host_helper` (native messaging) to read the lock file and discover the port
+- Extension connects via WebSocket with `?browserId=<instance-id>` query parameter
+- **Auth is origin-based**: WS server's `verifyClient` checks the `chrome-extension://<id>/` origin against `extension-ids.json` or `AGENTHUB_ALLOWED_EXTENSION_IDS` env var — connections from unknown extension IDs are rejected with HTTP 401 before the WS handshake. There is no `?token=` parameter check.
 - Lock file location: `%LOCALAPPDATA%/agenthub/server.lock`
+- Extension IDs are stored in `%LOCALAPPDATA%/agenthub/extension-ids.json` — must be a JSON array of real Chrome extension IDs, NOT placeholder values like `"myext123"`
 - Extension ID (dev, Profile 1): `ehchmchlmggdigicfjfmlgcbhdcdcmll`
 
 ## Common Pitfalls
