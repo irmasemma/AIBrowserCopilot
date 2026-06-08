@@ -95,9 +95,19 @@ test.beforeAll(async () => {
   await new Promise((r) => setTimeout(r, 500));
 
   // 1. Spawn the bridge with the freshly compiled code.
+  //    Disable the extension-id allowlist for the test: Playwright's
+  //    bundled Chromium loads the unpacked extension from a temp dir, so
+  //    the path-derived extension ID is unpredictable and won't match the
+  //    user's installed extension-ids.json. We point LOCALAPPDATA at a
+  //    fresh empty dir so the bridge can't find any allowlist file, falling
+  //    back to "accept any chrome-extension:// origin" (back-compat mode).
+  const tempInstallParent = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-e2e-installdir-'));
+  // Bridge looks at LOCALAPPDATA/agenthub/extension-ids.json on Windows.
+  const tempInstallDir = path.join(tempInstallParent, 'agenthub');
+  fs.mkdirSync(tempInstallDir, { recursive: true });
   nativeHost = spawn('node', [nativeHostDist], {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, CLAUDECODE: '1' },
+    env: { ...process.env, CLAUDECODE: '1', LOCALAPPDATA: tempInstallParent },
   });
 
   nativeHostPort = await new Promise<number>((resolve, reject) => {
@@ -446,5 +456,108 @@ test.describe('Q3 — SW eviction prevention', () => {
     expect((ok as { connected: boolean }).connected, 'panel-keepalive port should connect').toBe(true);
 
     await extPage.close();
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// §21 regression: bridge translates extension `tool_error` envelopes to
+// proper MCP results. Before the fix, the bridge did `result: resp.result
+// ?? resp`, which leaked the raw extension envelope as the MCP result with
+// no `content` array — clients rendered tool failures as silent empty
+// responses. The translator (translateExtensionResponse in service.ts) now
+// maps every extension wire shape into a populated MCP `content`.
+//
+// These tests drive the bridge end-to-end: spawn the real bridge (already
+// done in beforeAll), connect as an MCP client over WS, send a real
+// `tools/call`, assert the response shape exactly. The extension is also
+// connected via the launched chromium context, so the bridge actually
+// forwards to it and we see the full round-trip.
+// ──────────────────────────────────────────────────────────────────────────
+
+test.describe('§21 regression — MCP envelope translation end-to-end', () => {
+  /**
+   * Connect to the bridge as an MCP client (?role=mcp) and run a single
+   * JSON-RPC turn. Resolves with the parsed response message. Times out
+   * after 10s to surface bridge hangs.
+   */
+  const callMcp = async (
+    port: number,
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs = 10_000,
+  ): Promise<{ id: number; result?: { content?: Array<{ type: string; text?: string }>; isError?: boolean }; error?: { message?: string } }> => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}?role=mcp`);
+    const reqId = Math.floor(Math.random() * 1_000_000);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        try { ws.close(); } catch { /* noop */ }
+        reject(new Error(`MCP call ${method} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      ws.on('open', () => {
+        ws.send(JSON.stringify({ jsonrpc: '2.0', id: reqId, method, params }));
+      });
+      ws.on('message', (data: Buffer) => {
+        const msg = JSON.parse(data.toString());
+        if (msg.id !== reqId) return; // ignore other notifications
+        clearTimeout(timer);
+        try { ws.close(); } catch { /* noop */ }
+        resolve(msg);
+      });
+      ws.on('error', (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+  };
+
+  test('tools/call for a tab-targeting tool WITHOUT tab_id returns a non-empty isError result, not empty', async () => {
+    test.setTimeout(60_000);
+    // The exact bug from §21: external MCP client omits tab_id, extension
+    // throws, bridge translates the error envelope. Pre-fix this returned
+    // a `result` object with no `content` array → clients rendered empty.
+    // 35s MCP-call timeout covers the bridge's 30s request timeout in case
+    // the extension is slow to respond when running after other tests have
+    // exercised it. Playwright's per-test cap is bumped to 60s for the same
+    // reason.
+    const resp = await callMcp(nativeHostPort, 'tools/call', {
+      name: 'take_screenshot',
+      arguments: {}, // intentionally no tab_id
+    }, 35_000);
+
+    expect(resp.error, `expected a tool-level isError result, got JSON-RPC error: ${JSON.stringify(resp.error)}`).toBeUndefined();
+    expect(resp.result, 'response must have a result body').toBeDefined();
+    expect(resp.result!.isError, 'tool error must set isError=true').toBe(true);
+    expect(resp.result!.content, 'tool error must include content array').toBeDefined();
+    expect(Array.isArray(resp.result!.content), 'content must be an array').toBe(true);
+    expect(resp.result!.content!.length, 'content must be non-empty (this is the §21 regression)').toBeGreaterThan(0);
+
+    const text = resp.result!.content![0]?.text ?? '';
+    expect(text.length, 'first content block text must be non-empty').toBeGreaterThan(0);
+    // Must look like a real error message, not opaque JSON.
+    expect(
+      /tab|not found|required|missing|invalid|fail|error/i.test(text),
+      `expected a readable error message, got: "${text.slice(0, 200)}"`,
+    ).toBe(true);
+  });
+
+  test('tools/call for a successful list_tabs returns a populated content array', async () => {
+    // Sanity check: success path through the translator preserves content.
+    // If this regresses, translateExtensionResponse is corrupting the
+    // happy path too.
+    const resp = await callMcp(nativeHostPort, 'tools/call', {
+      name: 'list_tabs',
+      arguments: {},
+    });
+
+    expect(resp.error).toBeUndefined();
+    expect(resp.result).toBeDefined();
+    expect(resp.result!.isError, 'list_tabs success must not set isError').toBeFalsy();
+    expect(resp.result!.content!.length, 'list_tabs must return content').toBeGreaterThan(0);
+
+    const text = resp.result!.content![0]?.text ?? '';
+    // text is JSON.stringify({ tabs: [...], errors?: [...] }) — must parse
+    // and contain at least one tab (the extension's about:blank etc).
+    const payload = JSON.parse(text);
+    expect(Array.isArray(payload.tabs), 'list_tabs payload must have a tabs array').toBe(true);
   });
 });

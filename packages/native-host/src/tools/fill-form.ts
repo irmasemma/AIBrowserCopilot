@@ -19,6 +19,6 @@ export const fillForm: ToolPlugin = {
       type: z.enum(['text', 'select', 'checkbox', 'radio', 'file', 'date']).optional().describe('Override type detection. Usually unnecessary — type is auto-detected from the DOM.'),
     })).describe('Array of form fields to fill. Each field: provide `ref` (preferred) or one of label/role+name/placeholder/selector, plus `value` (or `values`/`checked`).'),
     iframe: z.string().optional().describe('CSS selector for iframe to target. Used only with non-ref locators (refs work across iframes automatically).'),
-    tab_id: z.number().optional().describe('Specific tab ID to target (defaults to active tab). The tab will be activated automatically.'),
+    tab_id: z.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.'),
   },
 };

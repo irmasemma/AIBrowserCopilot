@@ -8,6 +8,6 @@ export const takeScreenshot: ToolPlugin = {
   inputSchema: {
     format: z.enum(['png', 'jpeg']).default('png').describe('Image format'),
     quality: z.number().min(0).max(100).default(80).describe('JPEG quality (0-100)'),
-    tab_id: z.number().optional().describe('Specific tab ID to target (defaults to active tab). The tab will be activated automatically.'),
+    tab_id: z.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>", e.g. "chrome:abc-123:622786441"). Call `list_tabs` first if you do not have one. The tab will be activated automatically.'),
   },
 };

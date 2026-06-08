@@ -11,6 +11,6 @@ export const scrollPage: ToolPlugin = {
     selector: z.string().optional().describe('CSS selector — scroll element into center of viewport.'),
     text: z.string().optional().describe('Find text on page (case-insensitive) and scroll to it.'),
     wait_for_content: z.boolean().optional().default(true).describe('Wait for lazy-loaded content to settle after scroll. Default: true.'),
-    tab_id: z.number().optional().describe('Specific tab ID (defaults to active tab)'),
+    tab_id: z.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.'),
   },
 };

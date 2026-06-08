@@ -1,6 +1,11 @@
 import type { OsType, ArchType } from './platform.js';
 
-export const GITHUB_REPO = 'irmasemma/AIBrowserCopilot';
+// Public release-assets repo. Source lives in the private `irmasemma/AIBrowserCopilot`
+// monorepo, but compiled binaries are mirrored here so the installer can
+// download them anonymously via `/releases/latest/download/`. GitHub returns
+// 404 for anonymous downloads from private-repo release assets; publishing
+// to a separate public repo solves that without exposing source.
+export const GITHUB_REPO = 'irmasemma/agenthub-releases';
 export const GITHUB_RELEASES_BASE = `https://github.com/${GITHUB_REPO}/releases/latest/download`;
 
 export const NATIVE_HOST_NAME = 'com.agenthub.native_host';

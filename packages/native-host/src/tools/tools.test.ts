@@ -68,3 +68,50 @@ describe('press_key schema', () => {
     expect(desc).toMatch(/escape|dismiss|dialog/);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tab-id schema invariants. Locks the schemas to the truth so a future
+// hand-edit can't reintroduce the "tab_id defaults to active tab" lie
+// that caused docs/session-2026-06-04-postdownloader-overhaul.md §21.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('tab_id schema invariants across the tool registry', () => {
+  const tabTargetingTools = () => toolRegistry.filter(t => t.name !== 'list_tabs');
+
+  it('no tab_id field description mentions the long-removed "active tab" default', () => {
+    // The active-tab fallback was removed in commit 4ee5e28. Any tool that
+    // still claims it defaults to the active tab is lying — that lie is
+    // what caused external MCP clients to omit tab_id and see empty results.
+    for (const tool of tabTargetingTools()) {
+      const tabIdField = tool.inputSchema.tab_id as any;
+      const desc = tabIdField?._def?.description ?? '';
+      expect(
+        desc.toLowerCase(),
+        `${tool.name}.tab_id description still mentions "active tab"`,
+      ).not.toContain('active tab');
+    }
+  });
+
+  it('tab_id is a required ZodString on every tab-targeting tool (not optional, not number)', () => {
+    for (const tool of tabTargetingTools()) {
+      const tabIdField = tool.inputSchema.tab_id as any;
+      expect(tabIdField, `${tool.name} must have a tab_id field`).toBeDefined();
+      const typeName = tabIdField?._def?.typeName;
+      // Must NOT be optional (was z.number().optional() — the bug)
+      expect(typeName, `${tool.name}.tab_id must not be ZodOptional`).not.toBe('ZodOptional');
+      // Must be a string (namespaced ids from list_tabs are strings, e.g. "chrome:abc:622")
+      expect(typeName, `${tool.name}.tab_id should be ZodString`).toBe('ZodString');
+    }
+  });
+
+  it('tab_id description points users at list_tabs (so the agent knows how to recover)', () => {
+    for (const tool of tabTargetingTools()) {
+      const tabIdField = tool.inputSchema.tab_id as any;
+      const desc = tabIdField?._def?.description ?? '';
+      expect(
+        desc.toLowerCase(),
+        `${tool.name}.tab_id description should mention list_tabs`,
+      ).toContain('list_tabs');
+    }
+  });
+});

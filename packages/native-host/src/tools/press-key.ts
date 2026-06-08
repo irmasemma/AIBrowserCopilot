@@ -9,6 +9,6 @@ export const pressKey: ToolPlugin = {
     key: z.string().describe('Key name (Playwright syntax): "Enter", "Escape", "Tab", "Backspace", "ArrowDown", "PageDown", "Control+a", etc.'),
     ref: z.string().optional().describe('PREFERRED: ref ID of the element to focus before pressing (from snapshot, e.g., "e3").'),
     selector: z.string().optional().describe('CSS selector of the element to focus before pressing.'),
-    tab_id: z.number().optional().describe('Specific tab ID to target (defaults to active tab).'),
+    tab_id: z.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.'),
   },
 };

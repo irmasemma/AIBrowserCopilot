@@ -504,9 +504,22 @@ export function mergeFanOutListTabs(results: Array<FanOutResult | FanOutError>):
       continue;
     }
     const resp = r.response as {
+      type?: string;
       result?: { content?: Array<{ type: string; text?: string }>; isError?: boolean };
       error?: { message?: string };
     };
+
+    // Raw extension `tool_error` envelope: { type: 'tool_error', error: { message, code } }.
+    // Extension's relay-client.ts sends this shape when a handler throws.
+    // We need to surface error.message rather than try to parse the
+    // non-existent result.
+    if (resp?.type === 'tool_error') {
+      errors.push({
+        browserId: r.browserId,
+        error: resp.error?.message ?? 'extension tool error',
+      });
+      continue;
+    }
 
     // JSON-RPC error envelope (extension didn't return a result at all).
     if (resp?.error) {
@@ -550,6 +563,61 @@ export function mergeFanOutListTabs(results: Array<FanOutResult | FanOutError>):
 
   return {
     content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
+  };
+}
+
+/**
+ * Translate the response we got from the extension over WS into the MCP
+ * tool-result shape. The extension can emit two flavours:
+ *
+ *   1. Success: `{ type: 'tool_response', id, result: { content: [...] } }`
+ *   2. Error:   `{ type: 'tool_error',    id, error:  { message, code } }`
+ *
+ * Before this translator existed, the host did `result: resp.result ?? resp`,
+ * which leaked the raw `tool_error` envelope into the MCP `result` slot.
+ * MCP clients see no `result.content` array and silently render nothing.
+ * That was the "tools return empty" symptom from §21 of the 2026-06-04
+ * postdownloader session log. Both shapes now map to a well-formed MCP
+ * tool result with `content` populated.
+ */
+export function translateExtensionResponse(response: unknown): {
+  content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+  isError?: boolean;
+} {
+  const resp = response as {
+    type?: string;
+    result?: { content?: Array<{ type: string; text?: string }>; isError?: boolean };
+    error?: { message?: string; code?: string };
+  };
+
+  if (resp?.type === 'tool_error') {
+    const message = resp.error?.message ?? 'extension tool error';
+    return { content: [{ type: 'text', text: message }], isError: true };
+  }
+
+  // Top-level JSON-RPC error envelope: { id, error: { message, code } }.
+  // Some legacy / alternate extension paths send this shape instead of
+  // wrapping in `tool_error`. Surface it as a tool-level error too so
+  // clients render something instead of nothing.
+  if (resp?.error) {
+    const message = resp.error.message ?? 'extension rpc error';
+    return { content: [{ type: 'text', text: message }], isError: true };
+  }
+
+  if (resp?.result?.content) {
+    return resp.result as { content: Array<{ type: string; text?: string }>; isError?: boolean };
+  }
+
+  // Anything else — including legacy success envelopes that put the payload
+  // at the top level — falls back to wrapping the raw response as JSON. This
+  // is the same lossy-but-non-empty behaviour the old code had; it's only
+  // reached for shapes we don't recognise. The `String(response)` fallback
+  // guards against `JSON.stringify(undefined)` returning the actual undefined
+  // value (which would produce an empty MCP text block — the original bug).
+  const serialised = JSON.stringify(response);
+  const text = typeof serialised === 'string' ? serialised : String(response);
+  return {
+    content: [{ type: 'text', text }],
   };
 }
 
@@ -628,8 +696,7 @@ function handleMcpMessage(clientId: string, raw: string, reply: (msg: unknown) =
 
       sendToolRequest(clientId, originalId, toolName, toolArgs, browserId)
         .then((response: unknown) => {
-          const resp = response as { result?: unknown };
-          reply({ jsonrpc: '2.0', id: msg.id, result: resp.result ?? resp });
+          reply({ jsonrpc: '2.0', id: msg.id, result: translateExtensionResponse(response) });
         })
         .catch((err: Error) => {
           reply({

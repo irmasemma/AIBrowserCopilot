@@ -122,7 +122,7 @@ jobs:
         with:
           path: release-artifacts/
 
-      - name: Create GitHub Release
+      - name: Create GitHub Release (private repo — internal tracking)
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
@@ -130,6 +130,50 @@ jobs:
             release-artifacts/native-host-*/**/*
           draft: false
           prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
+
+      # Public release: anonymous installer downloads (`npx agenthub-setup`)
+      # hit `github.com/irmasemma/agenthub-releases/releases/latest/download/`,
+      # which is anonymously reachable only because that repo is public. The
+      # source monorepo stays private; only compiled binaries are mirrored.
+      # See packages/installer/src/shared/constants.ts for the URL constant.
+      - name: Flatten native-host artifacts for public release
+        run: |
+          mkdir -p public-release-assets
+          find release-artifacts/native-host-* -type f -exec cp {} public-release-assets/ \;
+          echo "Assets to upload to public repo:"
+          ls -la public-release-assets/
+      - name: Create GitHub Release (public repo — customer-facing downloads)
+        env:
+          # PAT_RELEASES_PUBLIC must be a GitHub PAT with `contents: write`
+          # scope on the public `irmasemma/agenthub-releases` repo. The
+          # default GITHUB_TOKEN only has access to the current repo (the
+          # private source monorepo), so cross-repo publishing needs a PAT.
+          GH_TOKEN: ${{ secrets.PAT_RELEASES_PUBLIC }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::PAT_RELEASES_PUBLIC secret is not set."
+            echo "::error::Create a fine-grained PAT with Contents:Write on irmasemma/agenthub-releases"
+            echo "::error::and add it as a repository secret named PAT_RELEASES_PUBLIC."
+            exit 1
+          fi
+          TAG="${GITHUB_REF_NAME}"
+          IS_PRERELEASE=""
+          if [[ "$TAG" == *-rc* || "$TAG" == *-beta* || "$TAG" == *-alpha* ]]; then
+            IS_PRERELEASE="--prerelease"
+          fi
+          # `gh release create` is idempotent only if the release doesn't
+          # already exist. If a previous workflow run failed mid-publish and
+          # left a tag, delete it first so this step succeeds.
+          if gh release view "$TAG" --repo irmasemma/agenthub-releases >/dev/null 2>&1; then
+            echo "Release $TAG already exists on agenthub-releases, deleting and recreating"
+            gh release delete "$TAG" --repo irmasemma/agenthub-releases --yes
+          fi
+          gh release create "$TAG" \
+            --repo irmasemma/agenthub-releases \
+            --title "$TAG" \
+            --generate-notes \
+            $IS_PRERELEASE \
+            public-release-assets/*
 
   # Chrome Web Store publish — uncomment when CWS credentials are configured
   # publish-extension:

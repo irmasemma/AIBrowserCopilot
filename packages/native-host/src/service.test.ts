@@ -7,6 +7,7 @@ import {
   isAllowedOrigin,
   extensionIdFromOrigin,
   loadAllowedExtensionIds,
+  translateExtensionResponse,
   type FanOutResult,
   type FanOutError,
 } from './service.js';
@@ -421,5 +422,89 @@ describe('port detection logic', () => {
 
     expect(received).toBe('hello');
     ws.close(); wss.close();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Regression coverage for the "tools return empty" bug reported in
+// docs/session-2026-06-04-postdownloader-overhaul.md §21. Two compounding
+// causes — both addressed by the changes around translateExtensionResponse,
+// preValidateToolCall, and the JSON Schema `required` emission below.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('translateExtensionResponse — extension wire-envelope translation', () => {
+  it('translates a tool_error envelope into an MCP tool-error result (not empty)', () => {
+    // This is the exact shape the extension's relay-client.ts:127-129 sends
+    // when dispatchTool throws (e.g. getTab(undefined) → "tab_id is required").
+    // Before this translator, handleMcpMessage did `result: resp.result ?? resp`,
+    // which leaked the raw envelope as the MCP `result`. MCP clients then
+    // saw no `content` array and rendered the call as empty.
+    const extensionResp = {
+      type: 'tool_error',
+      id: 'b_req_1',
+      error: {
+        message: 'tab_id is required. Call list_tabs first to get a tab id.',
+        code: 'TAB_NOT_FOUND',
+      },
+    };
+    const translated = translateExtensionResponse(extensionResp);
+    expect(translated.isError).toBe(true);
+    expect(translated.content).toEqual([{
+      type: 'text',
+      text: 'tab_id is required. Call list_tabs first to get a tab id.',
+    }]);
+  });
+
+  it('passes a tool_response success envelope through with content intact', () => {
+    const extensionResp = {
+      type: 'tool_response',
+      id: 'b_req_2',
+      result: { content: [{ type: 'text', text: 'hello world' }] },
+    };
+    const translated = translateExtensionResponse(extensionResp);
+    expect(translated.isError).toBeUndefined();
+    expect(translated.content).toEqual([{ type: 'text', text: 'hello world' }]);
+  });
+
+  it('falls back gracefully on null/undefined input (text is always a non-empty string)', () => {
+    // JSON.stringify(undefined) returns the value undefined, not the string
+    // "undefined". Without the String() guard we'd end up with text:
+    // undefined in the MCP block — reproducing the original "empty" bug.
+    for (const input of [null, undefined]) {
+      const t = translateExtensionResponse(input);
+      expect(t.content.length).toBeGreaterThan(0);
+      expect(typeof t.content[0].text).toBe('string');
+      expect((t.content[0].text as string).length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('mergeFanOutListTabs — tool_error envelope handling', () => {
+  it('surfaces a raw extension tool_error envelope without crashing or losing the message', () => {
+    // The fan-out version of the same bug as translateExtensionResponse —
+    // list_tabs calls into extensions in parallel, and if any of them throws
+    // we want the error text to flow through to the user.
+    const results: Array<FanOutResult | FanOutError> = [
+      {
+        browserId: 'chrome:A',
+        ok: true,
+        response: { result: { content: [{ type: 'text', text: '[]' }] } },
+      },
+      {
+        browserId: 'chrome:B',
+        ok: true,
+        response: {
+          type: 'tool_error',
+          id: 'b_req_99',
+          error: { message: 'list_tabs failed: chrome.tabs unavailable', code: 'CONTENT_UNAVAILABLE' },
+        },
+      },
+    ];
+    const merged = mergeFanOutListTabs(results);
+    const payload = JSON.parse(merged.content[0].text);
+    expect(payload.tabs).toEqual([]);
+    expect(payload.errors).toEqual([
+      { browserId: 'chrome:B', error: 'list_tabs failed: chrome.tabs unavailable' },
+    ]);
   });
 });

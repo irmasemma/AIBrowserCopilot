@@ -7717,9 +7717,8 @@ var getPageContent = {
   description: "Read the text or HTML content of the web page the user is currently viewing in their browser. Use this when the user asks about what is on their screen, current tab, or current page.",
   tier: "free",
   inputSchema: {
-    url: external_exports.string().optional().describe("Target URL (defaults to active tab)"),
     format: external_exports.enum(["text", "html"]).default("text").describe("Output format"),
-    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
+    tab_id: external_exports.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.')
   }
 };
 
@@ -7729,8 +7728,7 @@ var getPageMetadata = {
   description: "Get metadata (title, URL, description, Open Graph tags, favicon) from the page the user is viewing. Use this when you need a quick summary of what a page is about without reading the full content.",
   tier: "pro",
   inputSchema: {
-    url: external_exports.string().optional().describe("Target URL (defaults to active tab)"),
-    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
+    tab_id: external_exports.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.')
   }
 };
 
@@ -7742,7 +7740,7 @@ var takeScreenshot = {
   inputSchema: {
     format: external_exports.enum(["png", "jpeg"]).default("png").describe("Image format"),
     quality: external_exports.number().min(0).max(100).default(80).describe("JPEG quality (0-100)"),
-    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
+    tab_id: external_exports.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>", e.g. "chrome:abc-123:622786441"). Call `list_tabs` first if you do not have one. The tab will be activated automatically.')
   }
 };
 
@@ -7763,7 +7761,7 @@ var navigate = {
   tier: "pro",
   inputSchema: {
     url: external_exports.string().describe("Target URL to navigate to"),
-    tab_id: external_exports.number().optional().describe("Specific tab ID (defaults to active tab)")
+    tab_id: external_exports.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.')
   }
 };
 
@@ -7786,7 +7784,7 @@ var fillForm = {
       type: external_exports.enum(["text", "select", "checkbox", "radio", "file", "date"]).optional().describe("Override type detection. Usually unnecessary \u2014 type is auto-detected from the DOM.")
     })).describe("Array of form fields to fill. Each field: provide `ref` (preferred) or one of label/role+name/placeholder/selector, plus `value` (or `values`/`checked`)."),
     iframe: external_exports.string().optional().describe("CSS selector for iframe to target. Used only with non-ref locators (refs work across iframes automatically)."),
-    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
+    tab_id: external_exports.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.')
   }
 };
 
@@ -7800,7 +7798,7 @@ var clickElement = {
     selector: external_exports.string().optional().describe("CSS selector for the element"),
     text: external_exports.string().optional().describe("Visible text of the button or link to click. Prefers clickable elements (buttons, links) over plain text."),
     index: external_exports.number().optional().default(0).describe("Which match to click when multiple elements match (0 = first). Use when there are duplicate buttons."),
-    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
+    tab_id: external_exports.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.')
   }
 };
 
@@ -7813,7 +7811,7 @@ var pressKey = {
     key: external_exports.string().describe('Key name (Playwright syntax): "Enter", "Escape", "Tab", "Backspace", "ArrowDown", "PageDown", "Control+a", etc.'),
     ref: external_exports.string().optional().describe('PREFERRED: ref ID of the element to focus before pressing (from snapshot, e.g., "e3").'),
     selector: external_exports.string().optional().describe("CSS selector of the element to focus before pressing."),
-    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab).")
+    tab_id: external_exports.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.')
   }
 };
 
@@ -7825,7 +7823,7 @@ var extractTable = {
   inputSchema: {
     selector: external_exports.string().optional().describe("CSS selector for a specific table"),
     index: external_exports.number().default(0).describe("Table index if multiple tables exist (default: first)"),
-    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
+    tab_id: external_exports.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.')
   }
 };
 
@@ -7836,7 +7834,7 @@ var readForm = {
   tier: "pro",
   inputSchema: {
     selector: external_exports.string().optional().describe("Optional CSS selector to target a specific form"),
-    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
+    tab_id: external_exports.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.')
   }
 };
 
@@ -7851,7 +7849,7 @@ var extractData = {
     format: external_exports.enum(["table", "json"]).default("table").describe("Output format (default: table)"),
     max_rows: external_exports.number().default(100).describe("Maximum number of rows to extract (default: 100)"),
     include_links: external_exports.boolean().default(false).describe("Include href URLs in extracted data"),
-    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab). The tab will be activated automatically.")
+    tab_id: external_exports.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.')
   }
 };
 
@@ -7866,7 +7864,7 @@ var scrollPage = {
     selector: external_exports.string().optional().describe("CSS selector \u2014 scroll element into center of viewport."),
     text: external_exports.string().optional().describe("Find text on page (case-insensitive) and scroll to it."),
     wait_for_content: external_exports.boolean().optional().default(true).describe("Wait for lazy-loaded content to settle after scroll. Default: true."),
-    tab_id: external_exports.number().optional().describe("Specific tab ID (defaults to active tab)")
+    tab_id: external_exports.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.')
   }
 };
 
@@ -7877,7 +7875,7 @@ var goBack = {
   tier: "pro",
   inputSchema: {
     wait_until: external_exports.enum(["load", "domcontentloaded"]).optional().default("domcontentloaded").describe('When to consider navigation complete. Default: "domcontentloaded".'),
-    tab_id: external_exports.number().optional().describe("Specific tab ID (defaults to active tab)")
+    tab_id: external_exports.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.')
   }
 };
 
@@ -7888,7 +7886,7 @@ var goForward = {
   tier: "pro",
   inputSchema: {
     wait_until: external_exports.enum(["load", "domcontentloaded"]).optional().default("domcontentloaded").describe('When to consider navigation complete. Default: "domcontentloaded".'),
-    tab_id: external_exports.number().optional().describe("Specific tab ID (defaults to active tab)")
+    tab_id: external_exports.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.')
   }
 };
 
@@ -7898,7 +7896,7 @@ var snapshot = {
   description: "Capture an accessibility snapshot of the current page. Returns a YAML tree of all interactive elements (buttons, links, inputs, forms) with their roles, labels, and states (checked, disabled, required, invalid). Use this to understand the page structure before interacting, or to see what changed after an action.",
   tier: "free",
   inputSchema: {
-    tab_id: external_exports.number().optional().describe("Specific tab ID to target (defaults to active tab)")
+    tab_id: external_exports.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.')
   }
 };
 
@@ -7922,7 +7920,7 @@ var toolRegistry = [
 ];
 
 // src/version.ts
-var VERSION = "0.5.4";
+var VERSION = "0.5.5";
 var BUILD_ID = process.env.BUILD_ID ?? "dev";
 
 // src/lock-file-manager.ts
@@ -8075,7 +8073,11 @@ function unindexBrowser(browserId) {
     set.delete(browserId);
     if (set.size === 0) brandIndex.delete(brand);
   }
+  lastBrowserDisconnectedAt = Date.now();
 }
+var lastBrowserDisconnectedAt = 0;
+var SW_RECONNECT_GRACE_MS = 4e3;
+var SW_RECONNECT_POLL_INTERVAL_MS = 200;
 var mcpClients = /* @__PURE__ */ new Map();
 var pendingRequests = /* @__PURE__ */ new Map();
 var startTime = Date.now();
@@ -8187,13 +8189,24 @@ function resolveSocket(target) {
   }
   return null;
 }
-function sendToolRequest(clientId, originalId, tool, params, browserId) {
-  return new Promise((resolve, reject) => {
-    const ws = resolveSocket(browserId);
-    if (!ws) {
-      reject(new Error("No browser extension connected"));
-      return;
+async function sendToolRequest(clientId, originalId, tool, params, browserId) {
+  let ws = resolveSocket(browserId);
+  if (!ws && lastBrowserDisconnectedAt > 0) {
+    const elapsed = Date.now() - lastBrowserDisconnectedAt;
+    if (elapsed < SW_RECONNECT_GRACE_MS) {
+      const remaining = SW_RECONNECT_GRACE_MS - elapsed;
+      const deadline = Date.now() + remaining;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, SW_RECONNECT_POLL_INTERVAL_MS));
+        ws = resolveSocket(browserId);
+        if (ws) break;
+      }
     }
+  }
+  if (!ws) {
+    throw new Error("No browser extension connected");
+  }
+  return new Promise((resolve, reject) => {
     const browserBoundId = `b_${(0, import_node_crypto.randomUUID)()}`;
     const timer = setTimeout(() => {
       pendingRequests.delete(browserBoundId);
@@ -8249,6 +8262,13 @@ function mergeFanOutListTabs(results) {
       continue;
     }
     const resp = r.response;
+    if (resp?.type === "tool_error") {
+      errors.push({
+        browserId: r.browserId,
+        error: resp.error?.message ?? "extension tool error"
+      });
+      continue;
+    }
     if (resp?.error) {
       errors.push({ browserId: r.browserId, error: resp.error.message ?? "rpc_error" });
       continue;
@@ -8283,6 +8303,25 @@ function mergeFanOutListTabs(results) {
   if (errors.length > 0) payload.errors = errors;
   return {
     content: [{ type: "text", text: JSON.stringify(payload, null, 2) }]
+  };
+}
+function translateExtensionResponse(response) {
+  const resp = response;
+  if (resp?.type === "tool_error") {
+    const message = resp.error?.message ?? "extension tool error";
+    return { content: [{ type: "text", text: message }], isError: true };
+  }
+  if (resp?.error) {
+    const message = resp.error.message ?? "extension rpc error";
+    return { content: [{ type: "text", text: message }], isError: true };
+  }
+  if (resp?.result?.content) {
+    return resp.result;
+  }
+  const serialised = JSON.stringify(response);
+  const text = typeof serialised === "string" ? serialised : String(response);
+  return {
+    content: [{ type: "text", text }]
   };
 }
 function handleMcpMessage(clientId, raw, reply) {
@@ -8345,8 +8384,7 @@ function handleMcpMessage(clientId, raw, reply) {
         return;
       }
       sendToolRequest(clientId, originalId, toolName, toolArgs, browserId).then((response) => {
-        const resp = response;
-        reply({ jsonrpc: "2.0", id: msg.id, result: resp.result ?? resp });
+        reply({ jsonrpc: "2.0", id: msg.id, result: translateExtensionResponse(response) });
       }).catch((err) => {
         reply({
           jsonrpc: "2.0",

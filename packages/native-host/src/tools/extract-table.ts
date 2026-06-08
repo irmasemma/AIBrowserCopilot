@@ -8,6 +8,6 @@ export const extractTable: ToolPlugin = {
   inputSchema: {
     selector: z.string().optional().describe('CSS selector for a specific table'),
     index: z.number().default(0).describe('Table index if multiple tables exist (default: first)'),
-    tab_id: z.number().optional().describe('Specific tab ID to target (defaults to active tab). The tab will be activated automatically.'),
+    tab_id: z.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.'),
   },
 };

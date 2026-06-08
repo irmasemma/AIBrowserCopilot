@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { getAssetName, getDownloadUrl, GITHUB_RELEASES_BASE } from './constants.js';
+import { getAssetName, getDownloadUrl, GITHUB_REPO, GITHUB_RELEASES_BASE } from './constants.js';
+
+describe('GITHUB_REPO', () => {
+  it('points at the public release-assets repo (not the private source repo)', () => {
+    // Critical: must NOT be the private `irmasemma/AIBrowserCopilot` source
+    // repo — anonymous installer downloads from a private repo's release
+    // assets return HTTP 404. The dedicated public `agenthub-releases`
+    // repo holds compiled binaries only.
+    expect(GITHUB_REPO).toBe('irmasemma/agenthub-releases');
+  });
+});
 
 describe('getAssetName', () => {
   it('returns Windows x64 exe', () => {
