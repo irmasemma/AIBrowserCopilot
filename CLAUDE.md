@@ -96,7 +96,25 @@ cat "$LOCALAPPDATA/agenthub/com.agenthub.native_host.json"
 - Multiple native host processes can run on different ports — always check the lock file for the current one
 - The `.cmd` wrapper is needed on Windows because Chrome native messaging requires an executable, not a `.cjs` file
 - `DEFAULT_EXTENSION_ID` in `packages/installer/src/shared/constants.ts` is empty — must be provided via flag during install
-- Google Chrome stable (138+) silently ignores `--load-extension` and `--disable-extensions-except` — only Chromium / Chrome Canary / Beta / Dev / Edge accept them. See `docs/test-findings.md` §4.
+- Google Chrome stable (138+) AND Chrome Dev (151+) silently ignore `--load-extension` and `--disable-extensions-except`. Only Playwright's bundled Chromium and Microsoft Edge still accept them reliably. See `docs/test-findings.md` §4 and `docs/session-2026-06-08-mcp-fix-and-public-releases.md` §9.
+- Extension ID for unpacked `dist/chrome-mv3` is path-derived (SHA256 of UTF-8 absolute path → first 16 bytes → 'a'..'p' encoding). It varies by machine. Tests that need the ID should derive it from the path, not hardcode.
+
+## Release pipeline (two GitHub repos)
+
+Customer-facing installer downloads go through a SEPARATE public repo:
+
+- **Source repo (this one):** `irmasemma/AIBrowserCopilot` — private, holds all source, tests, internal docs.
+- **Release-assets repo:** `irmasemma/agenthub-releases` — public, holds ONLY compiled binaries attached to release tags. No source.
+
+`packages/installer/src/shared/constants.ts` sets `GITHUB_REPO = 'irmasemma/agenthub-releases'`. The installer downloads from `https://github.com/irmasemma/agenthub-releases/releases/latest/download/<asset>` — this URL pattern only works anonymously on public repos.
+
+CI workflow (`.github/workflows/release.yml`) dual-publishes on every `v*` tag:
+1. Release in the private source repo (default `GITHUB_TOKEN`, for internal tracking)
+2. Release in the public agenthub-releases repo (requires `PAT_RELEASES_PUBLIC` repo secret — a fine-grained PAT with Contents:Write on `irmasemma/agenthub-releases`)
+
+If `PAT_RELEASES_PUBLIC` ever expires, customer downloads break silently (the private release still succeeds; the public one fails). Check with `gh secret list --repo irmasemma/AIBrowserCopilot`.
+
+After every CI release, the new `agenthub-setup` installer must be published to npm separately (`cd packages/installer && npm publish`) — otherwise `npx agenthub-setup@latest` still serves the old version.
 
 ## End-to-end install + connect test
 
