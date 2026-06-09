@@ -60,6 +60,19 @@ export function createRelay(callbacks: RelayCallbacks): Relay {
         case 'tool_scan':
           callbacks.onToolScan(data.tools ?? []);
           break;
+        case 'reload':
+          // Bridge-initiated reload (from the diagnostics UI). Triggers a
+          // full extension reload — kills the SW, restarts it, reopens
+          // the WS. Short delay so the user can see the toast and so this
+          // handler returns cleanly first.
+          try {
+            setTimeout(() => {
+              try {
+                chrome.runtime.reload();
+              } catch { /* dev contexts without chrome.runtime */ }
+            }, 250);
+          } catch { /* ignore */ }
+          break;
         default:
           break;
       }

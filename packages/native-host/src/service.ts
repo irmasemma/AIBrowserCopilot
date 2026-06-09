@@ -11,6 +11,7 @@
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
+import { createServer as createHttpServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
@@ -24,8 +25,21 @@ import {
 } from './lock-file-manager.js';
 import { makeLogger, logRecord, type Logger, type LogRecord } from './shared/logger.js';
 import { redact, redactError } from './shared/redaction.js';
+import { handleDiagRequest, RecentActivity, type StateSource } from './diag-server.js';
 
 const REQUEST_TIMEOUT_MS = 30_000;
+
+/** Ring buffer of recent activity for the diag UI's timeline. Populated
+ *  by handleMcpMessage's tools/call path and sendToolRequest. */
+const recentActivity = new RecentActivity();
+
+/** Map of clientId → { transport, connectedAt }. Updated by handleMcpClient
+ *  (WS transport) and on stdio attach in startServer. Used by /api/state. */
+const mcpClientRegistry = new Map<string, { transport: string; connectedAt: string }>();
+
+/** Map of browserId → connection start time. Updated by handleExtension.
+ *  Used by /api/state. */
+const browserRegistry = new Map<string, { connectedAt: string }>();
 
 // ── Browser extension connections ─────────────────────────────────────────
 // Keyed by the full composite browserId (e.g. "chrome:abc-123"). Multiple
@@ -280,6 +294,7 @@ function handleExtension(ws: WebSocket, browserId: string): void {
     bridgeLog().info('bridge.probe.connected', { browserId });
   } else {
     bridgeLog().info('bridge.browser.connected', { browserId });
+    browserRegistry.set(browserId, { connectedAt: new Date(connectedAt).toISOString() });
   }
   indexBrowser(browserId, ws);
   ws.send(JSON.stringify(getServerInfo()));
@@ -353,6 +368,7 @@ function handleExtension(ws: WebSocket, browserId: string): void {
     clearInterval(serverPingTimer);
     if (browserSockets.get(browserId) === ws) {
       unindexBrowser(browserId);
+      if (!isProbe) browserRegistry.delete(browserId);
       const event = isProbe ? 'bridge.probe.disconnected' : 'bridge.browser.disconnected';
       // Per-browser pending count: filter the global pending map by which
       // request was routed to this specific browser. Tier 3 #10 fix —
@@ -389,6 +405,7 @@ function isValidLogEntry(entry: unknown): entry is LogRecord {
 function handleMcpClient(ws: WebSocket): void {
   const clientId = randomUUID();
   mcpClients.set(clientId, ws);
+  mcpClientRegistry.set(clientId, { transport: 'ws', connectedAt: new Date().toISOString() });
   bridgeLog().info('bridge.mcp.client_connected', { clientId, transport: 'ws' });
 
   ws.on('message', (data) => {
@@ -403,6 +420,7 @@ function handleMcpClient(ws: WebSocket): void {
 
   ws.on('close', () => {
     mcpClients.delete(clientId);
+    mcpClientRegistry.delete(clientId);
     bridgeLog().info('bridge.mcp.client_disconnected', { clientId });
     for (const [id, p] of pendingRequests) {
       if (p.clientId === clientId) {
@@ -501,6 +519,13 @@ async function sendToolRequest(
       toolName: tool,
       args: redact(params),
     });
+    recentActivity.startRequest({
+      mcpId: originalId,
+      clientId,
+      browserBoundId,
+      browserId,
+      tool,
+    });
 
     const timer = setTimeout(() => {
       pendingRequests.delete(browserBoundId);
@@ -512,6 +537,7 @@ async function sendToolRequest(
         toolName: tool,
         elapsedMs: Date.now() - sentAt,
       });
+      recentActivity.finishRequest(browserBoundId, 'timeout', 'timed out');
       reject(new Error('Tool request timed out'));
     }, REQUEST_TIMEOUT_MS);
 
@@ -521,6 +547,7 @@ async function sendToolRequest(
       browserId,
       resolve: (response: unknown) => {
         const r = response as { type?: string; result?: { isError?: boolean } };
+        const isError = r?.result?.isError === true || r?.type === 'tool_error';
         bridgeLog().info('bridge.tool_response.received', {
           mcpId: originalId,
           clientId,
@@ -529,11 +556,15 @@ async function sendToolRequest(
           toolName: tool,
           durationMs: Date.now() - sentAt,
           type: r?.type ?? 'unknown',
-          isError: r?.result?.isError === true || r?.type === 'tool_error',
+          isError,
         });
+        recentActivity.finishRequest(browserBoundId, isError ? 'error' : 'success');
         resolve(response);
       },
-      reject,
+      reject: (err: Error) => {
+        recentActivity.finishRequest(browserBoundId, 'error', err.message);
+        reject(err);
+      },
       timer,
     });
     ws.send(JSON.stringify({ type: 'tool_request', id: browserBoundId, tool, params }));
@@ -1082,9 +1113,65 @@ export function startServer(port: number): void {
     else bridgeLog().warn(eventName, extras);
   }
 
+  // ── HTTP + WS share a single port ────────────────────────────────────
+  // The bridge listens on 127.0.0.1:7483 for BOTH:
+  //   - HTTP requests (diagnostics UI: GET /, /api/*, POST /api/restart, ...)
+  //   - WebSocket upgrades (MCP clients + browser extensions)
+  // We create the http.Server explicitly so we can attach a request
+  // handler, and pass it to WebSocketServer via `server` — ws then handles
+  // upgrade events on its own.
+  const httpServer = createHttpServer((req, res) => {
+    handleDiagRequest(req, res, {
+      onRestartRequest: () => {
+        // Cleanest restart: cleanup handlers + exit. autostart respawns.
+        // The lock-file cleanup handler runs on process.exit so the next
+        // bridge gets a clean slate.
+        bridgeLog().info('bridge.lifecycle.restart_requested', { initiator: 'diag-ui' });
+        // eslint-disable-next-line n/no-process-exit
+        process.exit(0);
+      },
+      onReloadExtensionRequest: () => {
+        let count = 0;
+        for (const [, ws] of browserSockets) {
+          if (ws.readyState === WebSocket.OPEN) {
+            try {
+              ws.send(JSON.stringify({ type: 'reload', source: 'diag-ui' }));
+              count++;
+            } catch { /* ignore individual send failure */ }
+          }
+        }
+        bridgeLog().info('bridge.diag.reload_extension_broadcast', { count });
+        return { broadcastTo: count };
+      },
+      getState: (): StateSource => ({
+        bridge: {
+          version: VERSION,
+          buildId: BUILD_ID,
+          pid: process.pid,
+          port,
+          uptimeSec: Math.floor((Date.now() - startTime) / 1000),
+          startedBy: process.env.AI_BROWSER_COPILOT_STARTED_BY ?? 'service',
+          allowedExtensionIdsCount: allowedExtensionIds.size,
+          allowedExtensionIdsSample: Array.from(allowedExtensionIds).map((id) => id.slice(0, 8) + '…'),
+        },
+        browsers: Array.from(browserRegistry.entries()).map(([browserId, info]) => ({
+          browserId, connectedAt: info.connectedAt,
+        })),
+        mcpClients: Array.from(mcpClientRegistry.entries()).map(([clientId, info]) => ({
+          clientId, transport: info.transport, connectedAt: info.connectedAt,
+        })),
+        recentActivity,
+      }),
+      logPaths: () => ({
+        bridge: getBridgeLogPath(),
+        extension: getExtensionLogPath(),
+        helper: join(getInstallDir(), 'logs', 'helper.log'),
+      }),
+    });
+  });
+
   const wss = new WebSocketServer({
-    host: '127.0.0.1',
-    port,
+    server: httpServer,
     // Cap incoming frame size at 4 MiB. Real tool requests max out around
     // 200 KB (page snapshots); 4 MiB headroom is generous. Beyond this,
     // ws closes the connection — protects bridge memory from a runaway
@@ -1100,10 +1187,13 @@ export function startServer(port: number): void {
           origin,
           reason: 'origin_not_in_allowlist',
         });
+        recentActivity.noteRejection(origin, 'origin_not_in_allowlist');
         done(false, 401, 'forbidden origin');
       }
     },
   });
+
+  httpServer.listen(port, '127.0.0.1');
 
   // Write lock file with current PID/port so the installer can find and
   // terminate this process before reinstalling. Cleaned up on exit.
@@ -1171,6 +1261,7 @@ export function startServer(port: number): void {
 
   // Also note the stdio MCP client is implicitly connected.
   bridgeLog().info('bridge.mcp.client_connected', { clientId: 'stdio', transport: 'stdio' });
+  mcpClientRegistry.set('stdio', { transport: 'stdio', connectedAt: new Date().toISOString() });
 }
 
 /** Stop the WS server and clean up the lock file. Used by tests. */

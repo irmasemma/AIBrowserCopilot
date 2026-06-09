@@ -4173,7 +4173,7 @@ async function startNativeHost(opts = {}) {
 }
 
 // src/version.ts
-var HELPER_VERSION = "0.5.7";
+var HELPER_VERSION = "0.5.8";
 
 // src/logger.ts
 var import_node_fs5 = require("node:fs");
