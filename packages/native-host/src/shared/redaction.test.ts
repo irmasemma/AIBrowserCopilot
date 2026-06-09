@@ -28,13 +28,34 @@ describe('redact — shape-based string redaction', () => {
   });
 
   it('redacts JWT-shaped strings completely', () => {
-    const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature_part';
+    const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature_part_long_enough';
     expect(redact(jwt)).toBe('[REDACTED-JWT]');
   });
 
   it('does NOT mistake namespaced tab IDs for JWTs', () => {
     // "chrome:abc-123:55" has only 2 colons, won't match JWT_RE (needs dots).
     expect(redact('chrome:abc-123:622786441')).toBe('chrome:abc-123:622786441');
+  });
+
+  it('does NOT mistake semver strings for JWTs (Tier 1 bug fix)', () => {
+    // The pre-fix regex /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
+    // matched ANY a.b.c shape — turning '0.5.6' into [REDACTED-JWT].
+    expect(redact('0.5.6')).toBe('0.5.6');
+    expect(redact('1.2.3')).toBe('1.2.3');
+    expect(redact('10.20.30')).toBe('10.20.30');
+  });
+
+  it('does NOT mistake dotted identifiers for JWTs (Tier 1 bug fix)', () => {
+    // Similarly common shapes that previously hit JWT_RE.
+    expect(redact('foo.bar.baz')).toBe('foo.bar.baz');
+    expect(redact('a.b.c')).toBe('a.b.c');
+    expect(redact('main.production.us-east-1')).toBe('main.production.us-east-1');
+  });
+
+  it('still catches genuinely long JWTs (no regression)', () => {
+    // RFC 7519 JWTs always exceed the minimum-segment-length guards.
+    const realJWT = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
+    expect(redact(realJWT)).toBe('[REDACTED-JWT]');
   });
 });
 
@@ -84,6 +105,27 @@ describe('redact — key-based field redaction', () => {
     expect(out.selector).toMatch(/^\[len=\d+\]$/);
     // `something` is not a known sensitive key and is short; passes through.
     expect(out.something).toBe('short value');
+  });
+
+  it('preserves verb-style action fields as-is (Tier 1 bug fix)', () => {
+    // Pre-fix, `action` was in URL_KEYS, so 'get_service_status' was URL-
+    // redacted (→ `[len=18]` since it's not a parseable URL). That hid the
+    // very thing an LLM debugging a helper invocation would grep for.
+    const input = {
+      action: 'get_service_status',
+      anotherAction: 'start_native_host',
+    };
+    const out = redact(input) as Record<string, string>;
+    expect(out.action).toBe('get_service_status');
+    expect(out.anotherAction).toBe('start_native_host');
+  });
+
+  it('still redacts genuine form action URLs when caller uses an explicit URL key', () => {
+    // Callers logging an actual HTML <form action="..."> URL should use a
+    // URL_KEYS-listed name like `formActionUrl` instead of bare `action`.
+    const input = { formActionUrl: 'https://api.example.com/submit?session=abc' };
+    const out = redact(input) as Record<string, string>;
+    expect(out.formActionUrl).toBe('https://api.example.com/[redacted]');
   });
 
   it('summarizes record arrays with length + sample keys', () => {

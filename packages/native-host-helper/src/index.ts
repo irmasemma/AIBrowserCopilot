@@ -139,7 +139,7 @@ async function main(): Promise<void> {
           durationMs: Date.now() - startedAt,
           ok: result.ok,
           alreadyRunning: result.alreadyRunning,
-          pid: result.pid,
+          spawnedPid: result.pid,
           errorMessage: result.error,
         });
         break;
@@ -157,7 +157,7 @@ async function main(): Promise<void> {
           action,
           durationMs: Date.now() - startedAt,
           ok: result.ok,
-          pid: result.pid,
+          spawnedPid: result.pid,
           errorMessage: result.error,
         });
         break;

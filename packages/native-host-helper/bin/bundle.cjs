@@ -4173,7 +4173,7 @@ async function startNativeHost(opts = {}) {
 }
 
 // src/version.ts
-var HELPER_VERSION = "0.5.6";
+var HELPER_VERSION = "0.5.7";
 
 // src/logger.ts
 var import_node_fs5 = require("node:fs");
@@ -4188,7 +4188,12 @@ var URL_KEYS = /* @__PURE__ */ new Set([
   "link",
   "location",
   "src",
-  "action",
+  // NOTE: `action` was deliberately removed (it was originally added with
+  // HTML `<form action="...">` in mind). In practice the field name
+  // `action` appears far more often as a verb in our codebase
+  // (e.g. helper RPC actions like 'get_service_status', 'start_native_host')
+  // than as a URL. Callers that genuinely log a form action should pass
+  // it under one of the URL_KEYS names instead (e.g. `formActionUrl`).
   "referrer",
   "redirecturi"
 ]);
@@ -4263,7 +4268,7 @@ var RECURSE_KEYS = /* @__PURE__ */ new Set([
 ]);
 var URL_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s/$.?#].\S*$/;
 var URL_SUBSTRING_RE = /https?:\/\/[^\s'"\)<>]+/g;
-var JWT_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+var JWT_RE = /^[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{16,}$/;
 var MAX_STRING_LEN = 200;
 function redact(value, depth = 0) {
   if (depth > 16) return "[deep-truncated]";
@@ -4446,6 +4451,7 @@ function logRecord(input) {
   try {
     const { event, lvl, ...rest } = input;
     const redacted = redact(rest);
+    delete redacted.pid;
     const entry = {
       t: (/* @__PURE__ */ new Date()).toISOString(),
       src: "helper",
@@ -4592,7 +4598,7 @@ async function main() {
           durationMs: Date.now() - startedAt,
           ok: result.ok,
           alreadyRunning: result.alreadyRunning,
-          pid: result.pid,
+          spawnedPid: result.pid,
           errorMessage: result.error
         });
         break;
@@ -4605,7 +4611,7 @@ async function main() {
           action,
           durationMs: Date.now() - startedAt,
           ok: result.ok,
-          pid: result.pid,
+          spawnedPid: result.pid,
           errorMessage: result.error
         });
         break;

@@ -7920,7 +7920,7 @@ var toolRegistry = [
 ];
 
 // src/version.ts
-var VERSION = "0.5.6";
+var VERSION = "0.5.7";
 var BUILD_ID = process.env.BUILD_ID ?? "dev";
 
 // src/lock-file-manager.ts
@@ -8097,16 +8097,21 @@ function logRecord(cfg, rec) {
   } catch {
   }
 }
+function stripReservedKeys(fields) {
+  if (!fields) return {};
+  const { pid: _pid, src: _src, lvl: _lvl, event: _event, t: _t, ...rest } = fields;
+  return rest;
+}
 function makeLogger(cfg, src, pid) {
   return {
     info(event, fields) {
-      logRecord(cfg, { src, lvl: "info", pid, event, ...fields });
+      logRecord(cfg, { src, lvl: "info", pid, event, ...stripReservedKeys(fields) });
     },
     warn(event, fields) {
-      logRecord(cfg, { src, lvl: "warn", pid, event, ...fields });
+      logRecord(cfg, { src, lvl: "warn", pid, event, ...stripReservedKeys(fields) });
     },
     error(event, fields) {
-      logRecord(cfg, { src, lvl: "error", pid, event, ...fields });
+      logRecord(cfg, { src, lvl: "error", pid, event, ...stripReservedKeys(fields) });
     }
   };
 }
@@ -8119,7 +8124,12 @@ var URL_KEYS = /* @__PURE__ */ new Set([
   "link",
   "location",
   "src",
-  "action",
+  // NOTE: `action` was deliberately removed (it was originally added with
+  // HTML `<form action="...">` in mind). In practice the field name
+  // `action` appears far more often as a verb in our codebase
+  // (e.g. helper RPC actions like 'get_service_status', 'start_native_host')
+  // than as a URL. Callers that genuinely log a form action should pass
+  // it under one of the URL_KEYS names instead (e.g. `formActionUrl`).
   "referrer",
   "redirecturi"
 ]);
@@ -8194,7 +8204,7 @@ var RECURSE_KEYS = /* @__PURE__ */ new Set([
 ]);
 var URL_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s/$.?#].\S*$/;
 var URL_SUBSTRING_RE = /https?:\/\/[^\s'"\)<>]+/g;
-var JWT_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+var JWT_RE = /^[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{16,}$/;
 var MAX_STRING_LEN = 200;
 function redact(value, depth = 0) {
   if (depth > 16) return "[deep-truncated]";
@@ -8442,9 +8452,15 @@ function parseQuery(url) {
   return qi === -1 ? new URLSearchParams() : new URLSearchParams(url.slice(qi + 1));
 }
 var SERVER_PING_INTERVAL_MS = 2e4;
+var HELPER_PROBE_BROWSER_ID = "helper-probe";
 function handleExtension(ws, browserId) {
   const connectedAt = Date.now();
-  bridgeLog().info("bridge.browser.connected", { browserId });
+  const isProbe = browserId === HELPER_PROBE_BROWSER_ID;
+  if (isProbe) {
+    bridgeLog().info("bridge.probe.connected", { browserId });
+  } else {
+    bridgeLog().info("bridge.browser.connected", { browserId });
+  }
   indexBrowser(browserId, ws);
   ws.send(JSON.stringify(getServerInfo()));
   const serverPingTimer = setInterval(() => {
@@ -8501,10 +8517,16 @@ function handleExtension(ws, browserId) {
     clearInterval(serverPingTimer);
     if (browserSockets.get(browserId) === ws) {
       unindexBrowser(browserId);
-      bridgeLog().info("bridge.browser.disconnected", {
+      const event = isProbe ? "bridge.probe.disconnected" : "bridge.browser.disconnected";
+      let pendingForThisBrowser = 0;
+      for (const req of pendingRequests.values()) {
+        if (req.browserId === browserId) pendingForThisBrowser++;
+      }
+      bridgeLog().info(event, {
         browserId,
         durationMs: Date.now() - connectedAt,
-        pendingRequestCount: pendingRequests.size
+        pendingRequestCount: pendingForThisBrowser,
+        totalPendingAcrossAllBrowsers: pendingRequests.size
       });
     }
   });
@@ -8608,6 +8630,7 @@ async function sendToolRequest(clientId, originalId, tool, params, browserId) {
     pendingRequests.set(browserBoundId, {
       clientId,
       originalId,
+      browserId,
       resolve: (response) => {
         const r = response;
         bridgeLog().info("bridge.tool_response.received", {
@@ -8629,7 +8652,7 @@ async function sendToolRequest(clientId, originalId, tool, params, browserId) {
   });
 }
 var FAN_OUT_TIMEOUT_MS = 2e3;
-function fanOutToolRequest(clientId, tool, params, brandFilter) {
+function fanOutToolRequest(clientId, tool, params, brandFilter, fanoutId) {
   const targets = [];
   if (brandFilter && brandFilter !== "default") {
     for (const [id, ws] of browserSockets.entries()) {
@@ -8649,18 +8672,54 @@ function fanOutToolRequest(clientId, tool, params, brandFilter) {
     targets.map(
       ({ browserId, ws }) => new Promise((resolve) => {
         const browserBoundId = `b_${(0, import_node_crypto.randomUUID)()}`;
+        const sentAt = Date.now();
         const timer = setTimeout(() => {
           pendingRequests.delete(browserBoundId);
+          if (fanoutId) {
+            bridgeLog().warn("bridge.fanout.target_timed_out", {
+              fanoutId,
+              browserId,
+              browserBoundId,
+              elapsedMs: Date.now() - sentAt
+            });
+          }
           resolve({ browserId, ok: false, error: "timeout" });
         }, FAN_OUT_TIMEOUT_MS);
         pendingRequests.set(browserBoundId, {
           clientId,
           originalId: null,
-          resolve: (response) => resolve({ browserId, ok: true, response }),
-          reject: (err) => resolve({ browserId, ok: false, error: err.message }),
+          browserId,
+          resolve: (response) => {
+            if (fanoutId) {
+              bridgeLog().info("bridge.fanout.target_replied", {
+                fanoutId,
+                browserId,
+                browserBoundId,
+                durationMs: Date.now() - sentAt,
+                ok: true
+              });
+            }
+            resolve({ browserId, ok: true, response });
+          },
+          reject: (err) => {
+            if (fanoutId) {
+              bridgeLog().info("bridge.fanout.target_replied", {
+                fanoutId,
+                browserId,
+                browserBoundId,
+                durationMs: Date.now() - sentAt,
+                ok: false,
+                errorMessage: err.message
+              });
+            }
+            resolve({ browserId, ok: false, error: err.message });
+          },
           timer
         });
         ws.send(JSON.stringify({ type: "tool_request", id: browserBoundId, tool, params }));
+        if (fanoutId) {
+          bridgeLog().info("bridge.fanout.target_sent", { fanoutId, browserId, browserBoundId });
+        }
       })
     )
   );
@@ -8740,6 +8799,14 @@ function handleMcpMessage(clientId, raw, reply) {
   try {
     const msg = JSON.parse(raw);
     if (msg.method === "initialize") {
+      const startedAt = Date.now();
+      bridgeLog().info("bridge.mcp.initialize.received", {
+        mcpId: msg.id ?? null,
+        clientId,
+        clientName: msg.params?.clientInfo?.name,
+        clientVersion: msg.params?.clientInfo?.version,
+        protocolVersion: msg.params?.protocolVersion
+      });
       reply({
         jsonrpc: "2.0",
         id: msg.id,
@@ -8749,10 +8816,24 @@ function handleMcpMessage(clientId, raw, reply) {
           serverInfo: { name: "agenthub", version: VERSION }
         }
       });
+      bridgeLog().info("bridge.mcp.initialize.replied", {
+        mcpId: msg.id ?? null,
+        clientId,
+        durationMs: Date.now() - startedAt,
+        serverVersion: VERSION
+      });
       return;
     }
-    if (msg.method === "notifications/initialized") return;
+    if (msg.method === "notifications/initialized") {
+      bridgeLog().info("bridge.mcp.notifications_initialized", { clientId });
+      return;
+    }
     if (msg.method === "tools/list") {
+      const startedAt = Date.now();
+      bridgeLog().info("bridge.mcp.tools_list.received", {
+        mcpId: msg.id ?? null,
+        clientId
+      });
       const browserProp = { type: "string", description: "Target browser: chrome, edge, brave, arc, vivaldi (defaults to last-connected)" };
       const tools = toolRegistry.map((t) => ({
         name: t.name,
@@ -8766,6 +8847,12 @@ function handleMcpMessage(clientId, raw, reply) {
         }
       }));
       reply({ jsonrpc: "2.0", id: msg.id, result: { tools } });
+      bridgeLog().info("bridge.mcp.tools_list.replied", {
+        mcpId: msg.id ?? null,
+        clientId,
+        durationMs: Date.now() - startedAt,
+        toolCount: tools.length
+      });
       return;
     }
     if (msg.method === "tools/call") {
@@ -8800,7 +8887,7 @@ function handleMcpMessage(clientId, raw, reply) {
         const brandFilter = browserId === "default" ? null : browserId;
         const fanoutId = `fo_${(0, import_node_crypto.randomUUID)()}`;
         bridgeLog().info("bridge.fanout.started", { fanoutId, mcpId: originalId, toolName, brandFilter });
-        fanOutToolRequest(clientId, toolName, toolArgs, brandFilter).then((results) => {
+        fanOutToolRequest(clientId, toolName, toolArgs, brandFilter, fanoutId).then((results) => {
           const succeeded = results.filter((r) => r.ok).length;
           const errored = results.filter((r) => !r.ok).length;
           bridgeLog().info("bridge.fanout.aggregated", {
@@ -8926,8 +9013,33 @@ function startServer(port) {
     buildId: BUILD_ID,
     startedBy: process.env.AI_BROWSER_COPILOT_STARTED_BY ?? "service",
     allowedExtensionIdsCount: allowedExtensionIds.size,
-    logFilePath: getBridgeLogPath()
+    // Log only the first 8 chars of each allowlisted ID. Enough for an LLM
+    // debugging an origin rejection ("which IDs ARE allowed?") without
+    // leaking the full ID to anyone reading the log. Real Chrome extension
+    // IDs are 32 chars; first 8 chars uniquely identify the install on a
+    // typical user's machine.
+    allowedExtensionIdsSample: Array.from(allowedExtensionIds).map((id) => id.slice(0, 8) + "\u2026"),
+    // logFilePath stripped to the relative tail so user paths don't leak.
+    logFilePath: getBridgeLogPath().replace(/^.*[\\/]agenthub[\\/]/i, "%LOCALAPPDATA%/agenthub/")
   });
+  const ORIGIN_LOG_DEDUPE_WINDOW_MS = 6e4;
+  const originLogState = /* @__PURE__ */ new Map();
+  function emitOriginEvent(eventName, lvl, payload) {
+    const key = `${eventName}:${payload.origin}`;
+    const now = Date.now();
+    const state = originLogState.get(key);
+    if (state && now - state.lastLoggedAt < ORIGIN_LOG_DEDUPE_WINDOW_MS) {
+      state.suppressed++;
+      return;
+    }
+    const extras = { ...payload };
+    if (state && state.suppressed > 0) {
+      extras.suppressedSinceLastLog = state.suppressed;
+    }
+    originLogState.set(key, { lastLoggedAt: now, suppressed: 0 });
+    if (lvl === "info") bridgeLog().info(eventName, extras);
+    else bridgeLog().warn(eventName, extras);
+  }
   const wss = new import_websocket_server.default({
     host: "127.0.0.1",
     port,
@@ -8937,12 +9049,13 @@ function startServer(port) {
     // log_batch or malicious page-scraping tool result.
     maxPayload: 4 * 1024 * 1024,
     verifyClient: (info, done) => {
+      const origin = info.origin ?? "(none)";
       if (isAllowedOrigin(info.origin, allowedExtensionIds)) {
-        bridgeLog().info("bridge.ws.upgrade_accepted", { origin: info.origin ?? "(none)" });
+        emitOriginEvent("bridge.ws.upgrade_accepted", "info", { origin });
         done(true);
       } else {
-        bridgeLog().warn("bridge.ws.upgrade_rejected", {
-          origin: info.origin ?? "(none)",
+        emitOriginEvent("bridge.ws.upgrade_rejected", "warn", {
+          origin,
           reason: "origin_not_in_allowlist"
         });
         done(false, 401, "forbidden origin");

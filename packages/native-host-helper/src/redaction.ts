@@ -37,7 +37,12 @@ const URL_KEYS = new Set([
   'link',
   'location',
   'src',
-  'action',
+  // NOTE: `action` was deliberately removed (it was originally added with
+  // HTML `<form action="...">` in mind). In practice the field name
+  // `action` appears far more often as a verb in our codebase
+  // (e.g. helper RPC actions like 'get_service_status', 'start_native_host')
+  // than as a URL. Callers that genuinely log a form action should pass
+  // it under one of the URL_KEYS names instead (e.g. `formActionUrl`).
   'referrer',
   'redirecturi',
 ]);
@@ -156,11 +161,25 @@ const URL_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s/$.?#].\S*$/;
 const URL_SUBSTRING_RE = /https?:\/\/[^\s'"\)<>]+/g;
 
 /**
- * JWT pattern (3 base64url segments separated by `.`). Matches both
- * signed JWTs and unsigned (header.payload only is uncommon; require
- * 3 parts to avoid false positives on `a.b.c` ids).
+ * JWT pattern (3 base64url segments separated by `.`).
+ *
+ * False-positive guard: a naive `a.b.c` pattern matches any 3 dot-separated
+ * identifiers, including semver strings like `0.5.6` and module paths like
+ * `foo.bar.baz`. Real JWTs are produced from at least:
+ *   - header  (~30 base64url chars: {"alg":"HS256","typ":"JWT"})
+ *   - payload (~30+ base64url chars depending on claims)
+ *   - signature (HMAC SHA-256 is 43 base64url chars, RS256 is 342+)
+ * so total length is always >= 100 chars and the signature segment alone
+ * is always >= 16 chars. We require:
+ *   - first segment 8+ chars (header is always > this)
+ *   - middle segment 8+ chars (payload always has at least one claim)
+ *   - last segment 16+ chars (any signature, even unsigned `none` uses '' which
+ *     wouldn't match the +-anchored class anyway, so 16 is a safe floor)
+ * This excludes `0.5.6` (1-1-1) and `foo.bar.baz` (3-3-3) while still matching
+ * any genuine JWT. False negatives are theoretically possible with a hand-
+ * crafted toy JWT but in practice every real JWT clears these floors easily.
  */
-const JWT_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+const JWT_RE = /^[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{16,}$/;
 
 /**
  * Anything over this length is redacted regardless of key. Page text

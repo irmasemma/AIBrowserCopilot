@@ -189,6 +189,28 @@ describe('makeLogger — convenience wrapper', () => {
     expect(parsed.pid).toBeNull();
     expect(parsed.src).toBe('ext');
   });
+
+  it('strips caller-supplied pid/src/lvl/event/t from fields so logger metadata wins (Tier 1 bug fix)', () => {
+    // Pre-fix: spreading `{pid: spawned.pid}` from the caller would shadow
+    // the logger's `pid: writer process.pid`, sometimes losing the writer
+    // pid entirely (when spawned.pid was undefined and JSON.stringify dropped it).
+    const log = makeLogger(cfg, 'bridge', 12345);
+    log.info('child.started', {
+      pid: 99999,        // attempted shadow — must be ignored
+      src: 'malicious',  // attempted shadow — must be ignored
+      lvl: 'error',      // attempted shadow — must be ignored
+      event: 'overridden',
+      t: '1970-01-01',
+      childPid: 99999,   // legitimate alternative naming — preserved
+    });
+    const parsed = JSON.parse(readLines(cfg.filePath)[0]);
+    expect(parsed.pid).toBe(12345);         // writer pid preserved
+    expect(parsed.src).toBe('bridge');       // metadata source preserved
+    expect(parsed.lvl).toBe('info');         // metadata lvl preserved
+    expect(parsed.event).toBe('child.started');
+    expect(parsed.t).not.toBe('1970-01-01'); // timestamp set by serialize, not caller
+    expect(parsed.childPid).toBe(99999);     // distinct field name passes through
+  });
 });
 
 describe('logRecord — privacy toggle (logs-config.json)', () => {

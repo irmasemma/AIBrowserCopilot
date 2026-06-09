@@ -221,6 +221,9 @@ const mcpClients = new Map<string, WebSocket>();
 interface PendingRequest {
   clientId: string;
   originalId: string | number | null;
+  /** Which extension this was routed to. Used to filter the pending map
+   *  when a browser disconnects so we can report per-browser pending count. */
+  browserId: string;
   resolve: (response: unknown) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -261,9 +264,23 @@ function parseQuery(url: string | undefined): URLSearchParams {
 // "Related symptom: connection drops during agent runs".
 const SERVER_PING_INTERVAL_MS = 20_000;
 
+// Health probes from the native-host-helper use a synthetic browserId
+// `helper-probe`. Treat them differently from real extension connections
+// so they don't pollute the (much smaller) real-browser event stream.
+// See packages/native-host-helper/src/service-status.ts.
+const HELPER_PROBE_BROWSER_ID = 'helper-probe';
+
 function handleExtension(ws: WebSocket, browserId: string): void {
   const connectedAt = Date.now();
-  bridgeLog().info('bridge.browser.connected', { browserId });
+  const isProbe = browserId === HELPER_PROBE_BROWSER_ID;
+  if (isProbe) {
+    // Log probes at debug-level event names so they're trivially greppable
+    // separately from real browser activity. Real extension connections
+    // remain on the bridge.browser.* namespace.
+    bridgeLog().info('bridge.probe.connected', { browserId });
+  } else {
+    bridgeLog().info('bridge.browser.connected', { browserId });
+  }
   indexBrowser(browserId, ws);
   ws.send(JSON.stringify(getServerInfo()));
 
@@ -336,10 +353,19 @@ function handleExtension(ws: WebSocket, browserId: string): void {
     clearInterval(serverPingTimer);
     if (browserSockets.get(browserId) === ws) {
       unindexBrowser(browserId);
-      bridgeLog().info('bridge.browser.disconnected', {
+      const event = isProbe ? 'bridge.probe.disconnected' : 'bridge.browser.disconnected';
+      // Per-browser pending count: filter the global pending map by which
+      // request was routed to this specific browser. Tier 3 #10 fix —
+      // previously we logged the global count which was misleading.
+      let pendingForThisBrowser = 0;
+      for (const req of pendingRequests.values()) {
+        if (req.browserId === browserId) pendingForThisBrowser++;
+      }
+      bridgeLog().info(event, {
         browserId,
         durationMs: Date.now() - connectedAt,
-        pendingRequestCount: pendingRequests.size,
+        pendingRequestCount: pendingForThisBrowser,
+        totalPendingAcrossAllBrowsers: pendingRequests.size,
       });
     }
   });
@@ -492,6 +518,7 @@ async function sendToolRequest(
     pendingRequests.set(browserBoundId, {
       clientId,
       originalId,
+      browserId,
       resolve: (response: unknown) => {
         const r = response as { type?: string; result?: { isError?: boolean } };
         bridgeLog().info('bridge.tool_response.received', {
@@ -539,6 +566,7 @@ function fanOutToolRequest(
   tool: string,
   params: Record<string, unknown>,
   brandFilter: string | null,
+  fanoutId?: string,
 ): Promise<Array<FanOutResult | FanOutError>> {
   const targets: Array<{ browserId: string; ws: WebSocket }> = [];
 
@@ -564,19 +592,44 @@ function fanOutToolRequest(
     targets.map(({ browserId, ws }) =>
       new Promise<FanOutResult | FanOutError>((resolve) => {
         const browserBoundId = `b_${randomUUID()}`;
+        const sentAt = Date.now();
         const timer = setTimeout(() => {
           pendingRequests.delete(browserBoundId);
+          if (fanoutId) {
+            bridgeLog().warn('bridge.fanout.target_timed_out', {
+              fanoutId, browserId, browserBoundId, elapsedMs: Date.now() - sentAt,
+            });
+          }
           resolve({ browserId, ok: false, error: 'timeout' });
         }, FAN_OUT_TIMEOUT_MS);
 
         pendingRequests.set(browserBoundId, {
           clientId,
           originalId: null,
-          resolve: (response) => resolve({ browserId, ok: true, response }),
-          reject: (err) => resolve({ browserId, ok: false, error: err.message }),
+          browserId,
+          resolve: (response) => {
+            if (fanoutId) {
+              bridgeLog().info('bridge.fanout.target_replied', {
+                fanoutId, browserId, browserBoundId, durationMs: Date.now() - sentAt, ok: true,
+              });
+            }
+            resolve({ browserId, ok: true, response });
+          },
+          reject: (err) => {
+            if (fanoutId) {
+              bridgeLog().info('bridge.fanout.target_replied', {
+                fanoutId, browserId, browserBoundId, durationMs: Date.now() - sentAt, ok: false,
+                errorMessage: err.message,
+              });
+            }
+            resolve({ browserId, ok: false, error: err.message });
+          },
           timer,
         });
         ws.send(JSON.stringify({ type: 'tool_request', id: browserBoundId, tool, params }));
+        if (fanoutId) {
+          bridgeLog().info('bridge.fanout.target_sent', { fanoutId, browserId, browserBoundId });
+        }
       }),
     ),
   );
@@ -724,6 +777,14 @@ function handleMcpMessage(clientId: string, raw: string, reply: (msg: unknown) =
     const msg = JSON.parse(raw);
 
     if (msg.method === 'initialize') {
+      const startedAt = Date.now();
+      bridgeLog().info('bridge.mcp.initialize.received', {
+        mcpId: msg.id ?? null,
+        clientId,
+        clientName: msg.params?.clientInfo?.name,
+        clientVersion: msg.params?.clientInfo?.version,
+        protocolVersion: msg.params?.protocolVersion,
+      });
       reply({
         jsonrpc: '2.0', id: msg.id,
         result: {
@@ -732,12 +793,26 @@ function handleMcpMessage(clientId: string, raw: string, reply: (msg: unknown) =
           serverInfo: { name: 'agenthub', version: VERSION },
         },
       });
+      bridgeLog().info('bridge.mcp.initialize.replied', {
+        mcpId: msg.id ?? null,
+        clientId,
+        durationMs: Date.now() - startedAt,
+        serverVersion: VERSION,
+      });
       return;
     }
 
-    if (msg.method === 'notifications/initialized') return;
+    if (msg.method === 'notifications/initialized') {
+      bridgeLog().info('bridge.mcp.notifications_initialized', { clientId });
+      return;
+    }
 
     if (msg.method === 'tools/list') {
+      const startedAt = Date.now();
+      bridgeLog().info('bridge.mcp.tools_list.received', {
+        mcpId: msg.id ?? null,
+        clientId,
+      });
       const browserProp = { type: 'string', description: 'Target browser: chrome, edge, brave, arc, vivaldi (defaults to last-connected)' };
       const tools = toolRegistry.map((t) => ({
         name: t.name,
@@ -751,6 +826,12 @@ function handleMcpMessage(clientId: string, raw: string, reply: (msg: unknown) =
         },
       }));
       reply({ jsonrpc: '2.0', id: msg.id, result: { tools } });
+      bridgeLog().info('bridge.mcp.tools_list.replied', {
+        mcpId: msg.id ?? null,
+        clientId,
+        durationMs: Date.now() - startedAt,
+        toolCount: tools.length,
+      });
       return;
     }
 
@@ -799,7 +880,7 @@ function handleMcpMessage(clientId: string, raw: string, reply: (msg: unknown) =
         const brandFilter = browserId === 'default' ? null : browserId;
         const fanoutId = `fo_${randomUUID()}`;
         bridgeLog().info('bridge.fanout.started', { fanoutId, mcpId: originalId, toolName, brandFilter });
-        fanOutToolRequest(clientId, toolName, toolArgs, brandFilter)
+        fanOutToolRequest(clientId, toolName, toolArgs, brandFilter, fanoutId)
           .then((results) => {
             const succeeded = results.filter((r) => r.ok).length;
             const errored = results.filter((r) => !r.ok).length;
@@ -962,13 +1043,45 @@ export function startServer(port: number): void {
     buildId: BUILD_ID,
     startedBy: process.env.AI_BROWSER_COPILOT_STARTED_BY ?? 'service',
     allowedExtensionIdsCount: allowedExtensionIds.size,
-    logFilePath: getBridgeLogPath(),
+    // Log only the first 8 chars of each allowlisted ID. Enough for an LLM
+    // debugging an origin rejection ("which IDs ARE allowed?") without
+    // leaking the full ID to anyone reading the log. Real Chrome extension
+    // IDs are 32 chars; first 8 chars uniquely identify the install on a
+    // typical user's machine.
+    allowedExtensionIdsSample: Array.from(allowedExtensionIds).map((id) => id.slice(0, 8) + '…'),
+    // logFilePath stripped to the relative tail so user paths don't leak.
+    logFilePath: getBridgeLogPath().replace(/^.*[\\/]agenthub[\\/]/i, '%LOCALAPPDATA%/agenthub/'),
   });
   // Origin check via verifyClient runs DURING the HTTP upgrade, before the
   // WS handshake completes. This means a disallowed origin sees an HTTP 401,
   // never gets an `open` event, and cannot send any data. The alternative
   // (ws.close() inside the connection handler) leaves a sliver of time
   // during which the WS is open from the client's perspective.
+  // Sliding-window dedupe state for repeated origin events. Maps
+  // `<event>:<origin>` → epoch ms of last log. Re-emits at most once
+  // per minute per (event, origin) pair, with a `repeatedCount` summary.
+  // Prevents the bridge.log from drowning in 149 identical rejection lines
+  // every time an extension retries every 5 seconds (Tier 2 #6).
+  const ORIGIN_LOG_DEDUPE_WINDOW_MS = 60_000;
+  const originLogState = new Map<string, { lastLoggedAt: number; suppressed: number }>();
+  function emitOriginEvent(eventName: 'bridge.ws.upgrade_accepted' | 'bridge.ws.upgrade_rejected', lvl: 'info' | 'warn', payload: Record<string, unknown>): void {
+    const key = `${eventName}:${payload.origin}`;
+    const now = Date.now();
+    const state = originLogState.get(key);
+    if (state && (now - state.lastLoggedAt) < ORIGIN_LOG_DEDUPE_WINDOW_MS) {
+      state.suppressed++;
+      return;
+    }
+    // Emit and reset the window
+    const extras: Record<string, unknown> = { ...payload };
+    if (state && state.suppressed > 0) {
+      extras.suppressedSinceLastLog = state.suppressed;
+    }
+    originLogState.set(key, { lastLoggedAt: now, suppressed: 0 });
+    if (lvl === 'info') bridgeLog().info(eventName, extras);
+    else bridgeLog().warn(eventName, extras);
+  }
+
   const wss = new WebSocketServer({
     host: '127.0.0.1',
     port,
@@ -978,12 +1091,13 @@ export function startServer(port: number): void {
     // log_batch or malicious page-scraping tool result.
     maxPayload: 4 * 1024 * 1024,
     verifyClient: (info, done) => {
+      const origin = info.origin ?? '(none)';
       if (isAllowedOrigin(info.origin, allowedExtensionIds)) {
-        bridgeLog().info('bridge.ws.upgrade_accepted', { origin: info.origin ?? '(none)' });
+        emitOriginEvent('bridge.ws.upgrade_accepted', 'info', { origin });
         done(true);
       } else {
-        bridgeLog().warn('bridge.ws.upgrade_rejected', {
-          origin: info.origin ?? '(none)',
+        emitOriginEvent('bridge.ws.upgrade_rejected', 'warn', {
+          origin,
           reason: 'origin_not_in_allowlist',
         });
         done(false, 401, 'forbidden origin');

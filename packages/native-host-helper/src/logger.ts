@@ -120,6 +120,13 @@ export function logRecord(input: { event: string; lvl?: LogLevel; [k: string]: u
   try {
     const { event, lvl, ...rest } = input;
     const redacted = redact(rest) as Record<string, unknown>;
+    // The logger's own `pid` (writer process id) must NOT be overridden by
+    // a payload field also called `pid` — that caused entries to lose their
+    // writer-pid altogether when callers logged e.g. `pid: spawned.pid` for
+    // a child process. Delete from payload before spreading, callers that
+    // mean "the spawned child's pid" should use a distinct field name
+    // (e.g. `spawnedPid`).
+    delete (redacted as Record<string, unknown>).pid;
     const entry = {
       t: new Date().toISOString(),
       src: 'helper',

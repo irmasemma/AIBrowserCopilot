@@ -279,17 +279,29 @@ export function logRecord(cfg: LoggerConfig, rec: LogRecord): void {
 /**
  * Convenience wrappers — these all funnel through `logRecord`.
  * Callers pass a partial record; we fill in src + lvl + pid.
+ *
+ * Defensive: if a caller spreads `pid` in their fields (e.g. `{ pid: child.pid }`),
+ * the spread would shadow the logger's own pid and we'd lose the writer PID.
+ * Strip any caller-supplied `pid`/`src`/`lvl`/`event`/`t` from the fields object
+ * before spreading. Callers logging a child's pid should use a distinct name
+ * (`childPid`, `spawnedPid`, etc.).
  */
+function stripReservedKeys(fields?: Record<string, unknown>): Record<string, unknown> {
+  if (!fields) return {};
+  const { pid: _pid, src: _src, lvl: _lvl, event: _event, t: _t, ...rest } = fields;
+  return rest;
+}
+
 export function makeLogger(cfg: LoggerConfig, src: LogSource, pid: number | null) {
   return {
     info(event: string, fields?: Record<string, unknown>): void {
-      logRecord(cfg, { src, lvl: 'info', pid, event, ...fields });
+      logRecord(cfg, { src, lvl: 'info', pid, event, ...stripReservedKeys(fields) });
     },
     warn(event: string, fields?: Record<string, unknown>): void {
-      logRecord(cfg, { src, lvl: 'warn', pid, event, ...fields });
+      logRecord(cfg, { src, lvl: 'warn', pid, event, ...stripReservedKeys(fields) });
     },
     error(event: string, fields?: Record<string, unknown>): void {
-      logRecord(cfg, { src, lvl: 'error', pid, event, ...fields });
+      logRecord(cfg, { src, lvl: 'error', pid, event, ...stripReservedKeys(fields) });
     },
   };
 }
