@@ -255,3 +255,11 @@ extension is unreliable and verify liveness itself.
 | Extension keepalive logic | `packages/extension/src/background/heartbeat-monitor.ts` |
 | Side-panel keepalive port | `packages/extension/src/entrypoints/background.ts:139-146` |
 | Helper for service status / diagnostics | `packages/native-host-helper/src/service-status.ts` |
+| **Structured logs** (`%LOCALAPPDATA%\agenthub\logs\`) | `packages/native-host/src/shared/logger.ts` + `redaction.ts` |
+| Bridge log emission | `packages/native-host/src/service.ts` (`bridgeLog()` calls) |
+| Extension log emission + flush | `packages/extension/src/shared/logger.ts` |
+| Helper log emission | `packages/native-host-helper/src/logger.ts` |
+
+## Debugging from logs (v0.5.6+)
+
+If the bridge or extension misbehaves, **read the logs first**. They reconstruct the full chain with correlation IDs without needing DevTools or a screen recording. See `docs/structured-logging.md` for the file layout, NDJSON shape, redaction rules, and step-by-step recipes for the 5 most common failure modes (MCP timeout, disconnected-but-alive, service won't start, wrong profile got the call, SW alive but unresponsive).

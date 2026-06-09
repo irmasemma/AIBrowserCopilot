@@ -89,6 +89,39 @@ cat "$LOCALAPPDATA/agenthub/com.agenthub.native_host.json"
 - Extension IDs are stored in `%LOCALAPPDATA%/agenthub/extension-ids.json` — must be a JSON array of real Chrome extension IDs, NOT placeholder values like `"myext123"`
 - Extension ID (dev, Profile 1): `ehchmchlmggdigicfjfmlgcbhdcdcmll`
 
+## Debugging via structured logs (v0.5.6+)
+
+**All three components write NDJSON logs to `%LOCALAPPDATA%\agenthub\logs\`:**
+- `bridge.log` — MCP handling, WS lifecycle, tool routing, lifecycle/crash events
+- `extension.log` — SW lifecycle, WS, helper calls, tool dispatch (forwarded from extension via WS, written by bridge)
+- `helper.log` — every native-messaging invocation (action + result)
+- Each rotates at 1 MB, keeps 5 generations (`.log` + `.log.1..4`)
+
+**For any "thing isn't working" question — read the logs BEFORE asking the user:**
+```powershell
+Get-Content "$env:LOCALAPPDATA\agenthub\logs\bridge.log" -Tail 100
+Get-Content "$env:LOCALAPPDATA\agenthub\logs\extension.log" -Tail 100
+Get-Content "$env:LOCALAPPDATA\agenthub\logs\helper.log" -Tail 50
+```
+
+**Correlation IDs to grep:** `mcpId`, `clientId`, `browserBoundId`, `browserId`, `requestId`, `toolName`. One MCP tool call produces this chain across the three files:
+```
+bridge.log:    bridge.mcp.tools_call.received  (mcpId, clientId, toolName)
+bridge.log:    bridge.tool_request.sent        (mcpId, browserBoundId, browserId)
+extension.log: ext.tool_request.received       (requestId, tool)        # requestId == browserBoundId
+extension.log: ext.tool.dispatch.start/complete
+bridge.log:    bridge.tool_response.received   (mcpId, browserBoundId, durationMs)
+bridge.log:    bridge.mcp.tools_call.replied   (mcpId, clientId, isError)
+```
+
+If a step is missing, that's where the failure is. Full reference + 5 common debug recipes: `docs/structured-logging.md`.
+
+**Redaction is always on:** URLs collapse to scheme+host, page text becomes `[len=N]`, secrets become `[REDACTED-SECRET]`. Safe to share log snippets — they contain event shapes + IDs, not page content or credentials.
+
+**Privacy off-switch:** drop `{"enabled": false}` at `%LOCALAPPDATA%\agenthub\logs-config.json` and restart the bridge. Honored by bridge, helper, AND extension (eagerly wipes the ring buffer).
+
+**Adding new log events:** import `{ bridgeLog }` in service.ts, `{ logRecord, logError }` in extension modules, or `{ logRecord }` in helper. Use kebab-case `bridge.<area>.<event>` / `ext.<area>.<event>` / `helper.<area>.<event>`. NEVER log raw user/page content — pass through `redact()` from the shared redaction module if you're unsure.
+
 ## Common Pitfalls
 
 - Native messaging host registration requires Chrome restart to take effect
