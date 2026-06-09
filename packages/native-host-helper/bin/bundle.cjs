@@ -2230,7 +2230,7 @@ var require_websocket = __commonJS({
     var tls = require("tls");
     var { randomBytes, createHash } = require("crypto");
     var { Duplex, Readable } = require("stream");
-    var { URL } = require("url");
+    var { URL: URL2 } = require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
     var Receiver2 = require_receiver();
     var Sender2 = require_sender();
@@ -2723,11 +2723,11 @@ var require_websocket = __commonJS({
         );
       }
       let parsedUrl;
-      if (address instanceof URL) {
+      if (address instanceof URL2) {
         parsedUrl = address;
       } else {
         try {
-          parsedUrl = new URL(address);
+          parsedUrl = new URL2(address);
         } catch {
           throw new SyntaxError(`Invalid URL: ${address}`);
         }
@@ -2864,7 +2864,7 @@ var require_websocket = __commonJS({
           req.abort();
           let addr;
           try {
-            addr = new URL(location, address);
+            addr = new URL2(location, address);
           } catch (e) {
             const err = new SyntaxError(`Invalid URL: ${location}`);
             emitErrorAndClose(websocket, err);
@@ -4173,7 +4173,305 @@ async function startNativeHost(opts = {}) {
 }
 
 // src/version.ts
-var HELPER_VERSION = "0.5.2";
+var HELPER_VERSION = "0.5.6";
+
+// src/logger.ts
+var import_node_fs5 = require("node:fs");
+var import_node_path4 = require("node:path");
+var import_node_os4 = require("node:os");
+
+// src/redaction.ts
+var URL_KEYS = /* @__PURE__ */ new Set([
+  "url",
+  "href",
+  "targeturl",
+  "link",
+  "location",
+  "src",
+  "action",
+  "referrer",
+  "redirecturi"
+]);
+var TEXT_KEYS = /* @__PURE__ */ new Set([
+  "value",
+  "values",
+  "text",
+  "body",
+  "content",
+  "innertext",
+  "innerhtml",
+  "outerhtml",
+  "title",
+  "pagetitle",
+  "query",
+  "searchquery",
+  "q",
+  "label",
+  "name",
+  "placeholder",
+  "description",
+  "alt",
+  "visibletext",
+  "snapshot",
+  "ariasnapshot",
+  "pagecontent",
+  "selector",
+  "css",
+  "xpath",
+  "message"
+]);
+var RECORD_ARRAY_KEYS = /* @__PURE__ */ new Set([
+  "rows",
+  "cells",
+  "data",
+  "entries",
+  "items",
+  "results",
+  "tabs",
+  "records"
+]);
+var SECRET_KEYS = /* @__PURE__ */ new Set([
+  "cookie",
+  "cookies",
+  "authorization",
+  "auth",
+  "token",
+  "apikey",
+  "api_key",
+  "password",
+  "pwd",
+  "secret",
+  "privatekey",
+  "private_key",
+  "sessionid",
+  "session_id",
+  "csrf"
+]);
+var RECURSE_KEYS = /* @__PURE__ */ new Set([
+  "metadata",
+  "meta",
+  "og",
+  "opengraph",
+  "options",
+  "config",
+  "params",
+  "arguments",
+  "request",
+  "response",
+  "result",
+  "context"
+]);
+var URL_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s/$.?#].\S*$/;
+var URL_SUBSTRING_RE = /https?:\/\/[^\s'"\)<>]+/g;
+var JWT_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+var MAX_STRING_LEN = 200;
+function redact(value, depth = 0) {
+  if (depth > 16) return "[deep-truncated]";
+  if (value === null || value === void 0) return value;
+  if (typeof value === "string") return redactString(value);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "bigint") return value.toString();
+  if (Array.isArray(value)) {
+    return value.map((v) => redact(v, depth + 1));
+  }
+  if (typeof value === "object") {
+    return redactObject(value, depth);
+  }
+  return `[${typeof value}]`;
+}
+function redactString(s) {
+  if (s.length === 0) return s;
+  if (JWT_RE.test(s)) return "[REDACTED-JWT]";
+  if (URL_RE.test(s)) return redactUrl(s);
+  if (s.length > MAX_STRING_LEN) return `[len=${s.length}]`;
+  if (URL_SUBSTRING_RE.test(s)) {
+    URL_SUBSTRING_RE.lastIndex = 0;
+    return s.replace(URL_SUBSTRING_RE, (match) => redactUrl(match));
+  }
+  return s;
+}
+function redactObject(obj, depth) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const key = k.toLowerCase();
+    if (SECRET_KEYS.has(key)) {
+      out[k] = "[REDACTED-SECRET]";
+      continue;
+    }
+    if (URL_KEYS.has(key)) {
+      if (typeof v === "string") {
+        out[k] = redactUrl(v);
+      } else {
+        out[k] = redact(v, depth + 1);
+      }
+      continue;
+    }
+    if (TEXT_KEYS.has(key)) {
+      out[k] = lengthSummary(v);
+      continue;
+    }
+    if (RECORD_ARRAY_KEYS.has(key)) {
+      out[k] = recordArraySummary(v);
+      continue;
+    }
+    if (RECURSE_KEYS.has(key)) {
+      out[k] = redact(v, depth + 1);
+      continue;
+    }
+    out[k] = redact(v, depth + 1);
+  }
+  return out;
+}
+function redactUrl(s) {
+  try {
+    const u = new URL(s);
+    return `${u.protocol}//${u.host}/[redacted]`;
+  } catch {
+    return `[len=${s.length}]`;
+  }
+}
+function lengthSummary(v) {
+  if (v === null || v === void 0) return `[empty]`;
+  if (typeof v === "string") return `[len=${v.length}]`;
+  if (Array.isArray(v)) return `[arrayLen=${v.length}]`;
+  if (typeof v === "object") {
+    const keys = Object.keys(v);
+    return `[objKeys=${keys.length}]`;
+  }
+  return `[${typeof v}]`;
+}
+function recordArraySummary(v) {
+  if (!Array.isArray(v)) {
+    return redact(v);
+  }
+  if (v.length === 0) return "[arrayLen=0]";
+  const first = v[0];
+  if (first && typeof first === "object" && !Array.isArray(first)) {
+    const keys = Object.keys(first).slice(0, 5);
+    return `[arrayLen=${v.length}, sampleKeys=[${keys.join(", ")}]]`;
+  }
+  return `[arrayLen=${v.length}]`;
+}
+function redactError(err) {
+  if (err instanceof Error) {
+    const code = err.code;
+    return {
+      errorName: err.name || "Error",
+      errorMessage: redactString(err.message ?? ""),
+      ...typeof code === "string" ? { errorCode: code } : {},
+      ...err.stack ? { stack: redactStack(err.stack) } : {}
+    };
+  }
+  if (typeof err === "string") {
+    return { errorName: "StringError", errorMessage: redactString(err) };
+  }
+  if (err && typeof err === "object") {
+    const obj = err;
+    return {
+      errorName: typeof obj.name === "string" ? obj.name : "ObjectError",
+      errorMessage: redactString(typeof obj.message === "string" ? obj.message : ""),
+      ...typeof obj.code === "string" ? { errorCode: obj.code } : {},
+      ...typeof obj.stack === "string" ? { stack: redactStack(obj.stack) } : {}
+    };
+  }
+  return { errorName: "UnknownError", errorMessage: `[${typeof err}]` };
+}
+function redactStack(stack) {
+  const lines = stack.split("\n").slice(0, 20);
+  const redacted = lines.map((line) => {
+    URL_SUBSTRING_RE.lastIndex = 0;
+    return line.replace(URL_SUBSTRING_RE, (match) => redactUrl(match));
+  });
+  return redacted.join("\n");
+}
+
+// src/logger.ts
+var MAX_FILE_BYTES = 1024 * 1024;
+var KEEP_GENERATIONS = 5;
+function getInstallDir3() {
+  if (process.env.LOCALAPPDATA) return (0, import_node_path4.join)(process.env.LOCALAPPDATA, "agenthub");
+  return (0, import_node_path4.join)((0, import_node_os4.homedir)(), ".agenthub");
+}
+function getHelperLogPath() {
+  return (0, import_node_path4.join)(getInstallDir3(), "logs", "helper.log");
+}
+var _enabled = null;
+function isLoggingEnabled() {
+  if (_enabled !== null) return _enabled;
+  try {
+    const configPath = (0, import_node_path4.join)(getInstallDir3(), "logs-config.json");
+    if (!(0, import_node_fs5.existsSync)(configPath)) {
+      _enabled = true;
+      return true;
+    }
+    const parsed = JSON.parse((0, import_node_fs5.readFileSync)(configPath, "utf-8"));
+    _enabled = parsed.enabled !== false;
+    return _enabled;
+  } catch {
+    _enabled = true;
+    return true;
+  }
+}
+function rotateIfNeeded(filePath) {
+  try {
+    if (!(0, import_node_fs5.existsSync)(filePath)) return;
+    const sz = (0, import_node_fs5.statSync)(filePath).size;
+    if (sz < MAX_FILE_BYTES) return;
+    const oldest = `${filePath}.${KEEP_GENERATIONS - 1}`;
+    try {
+      if ((0, import_node_fs5.existsSync)(oldest)) (0, import_node_fs5.unlinkSync)(oldest);
+    } catch {
+    }
+    for (let i = KEEP_GENERATIONS - 2; i >= 1; i--) {
+      const src = `${filePath}.${i}`;
+      const dst = `${filePath}.${i + 1}`;
+      if (!(0, import_node_fs5.existsSync)(src)) continue;
+      try {
+        if ((0, import_node_fs5.existsSync)(dst)) (0, import_node_fs5.unlinkSync)(dst);
+        (0, import_node_fs5.renameSync)(src, dst);
+      } catch {
+      }
+    }
+    try {
+      const dst = `${filePath}.1`;
+      if ((0, import_node_fs5.existsSync)(dst)) (0, import_node_fs5.unlinkSync)(dst);
+      (0, import_node_fs5.renameSync)(filePath, dst);
+    } catch {
+    }
+  } catch {
+  }
+}
+function logRecord(input) {
+  if (!isLoggingEnabled()) return;
+  try {
+    const { event, lvl, ...rest } = input;
+    const redacted = redact(rest);
+    const entry = {
+      t: (/* @__PURE__ */ new Date()).toISOString(),
+      src: "helper",
+      lvl: lvl ?? "info",
+      pid: process.pid,
+      event,
+      ...redacted
+    };
+    const line = JSON.stringify(entry) + "\n";
+    const filePath = getHelperLogPath();
+    const dir = (0, import_node_path4.join)(getInstallDir3(), "logs");
+    if (!(0, import_node_fs5.existsSync)(dir)) {
+      try {
+        (0, import_node_fs5.mkdirSync)(dir, { recursive: true });
+      } catch {
+        return;
+      }
+    }
+    rotateIfNeeded(filePath);
+    (0, import_node_fs5.appendFileSync)(filePath, line);
+  } catch {
+  }
+}
+function logErr(event, err, extra = {}) {
+  logRecord({ event, lvl: "error", ...extra, ...redactError(err) });
+}
 
 // src/index.ts
 function readMessage() {
@@ -4222,29 +4520,63 @@ function writeMessage(data) {
   process.stdout.write(buffer);
 }
 async function main() {
+  const startedAt = Date.now();
+  let action;
   try {
     const message = await readMessage();
-    const action = message.action;
+    action = message.action;
+    logRecord({
+      event: "helper.invoke.received",
+      action,
+      helperVersion: HELPER_VERSION,
+      argKeys: Object.keys(message).filter((k) => k !== "action")
+    });
     switch (action) {
       case "scan_ai_tools": {
         const tools = scanAITools();
         writeMessage({ tools });
+        logRecord({ event: "helper.invoke.replied", action, durationMs: Date.now() - startedAt, toolCount: tools.length });
         break;
       }
       case "check_mcp_registration": {
         const result = checkClaudeCodeRegistration();
         writeMessage(result);
+        logRecord({
+          event: "helper.invoke.replied",
+          action,
+          durationMs: Date.now() - startedAt,
+          registered: result.registered,
+          scope: result.scope
+        });
         break;
       }
       case "repair_mcp_registration": {
         const result = repairClaudeCodeRegistration();
         writeMessage(result);
+        logRecord({
+          event: "helper.invoke.replied",
+          action,
+          durationMs: Date.now() - startedAt,
+          success: result.success
+        });
         break;
       }
       case "get_service_status": {
         const browserId = typeof message.browserId === "string" ? message.browserId : void 0;
         const status = await getServiceStatus({ helperVersion: HELPER_VERSION, browserId });
         writeMessage(status);
+        logRecord({
+          event: "helper.invoke.replied",
+          action,
+          durationMs: Date.now() - startedAt,
+          reason: status.reason,
+          lockFileExists: status.lockFile.exists,
+          pidAlive: status.pidAlive,
+          portListening: status.portListening,
+          wsHealthy: status.wsHealthy,
+          reportedPid: status.reportedPid,
+          reportedVersion: status.reportedVersion
+        });
         break;
       }
       case "start_native_host": {
@@ -4254,22 +4586,47 @@ async function main() {
         };
         const result = await startNativeHost({ isAlreadyRunning });
         writeMessage(result);
+        logRecord({
+          event: "helper.invoke.replied",
+          action,
+          durationMs: Date.now() - startedAt,
+          ok: result.ok,
+          alreadyRunning: result.alreadyRunning,
+          pid: result.pid,
+          errorMessage: result.error
+        });
         break;
       }
       case "restart_native_host": {
         const result = await startNativeHost({ skipAlreadyRunningCheck: true });
         writeMessage(result);
+        logRecord({
+          event: "helper.invoke.replied",
+          action,
+          durationMs: Date.now() - startedAt,
+          ok: result.ok,
+          pid: result.pid,
+          errorMessage: result.error
+        });
         break;
       }
       case "helper_version": {
         writeMessage({ version: HELPER_VERSION });
+        logRecord({ event: "helper.invoke.replied", action, durationMs: Date.now() - startedAt });
         break;
       }
       default:
         writeMessage({ error: `Unknown action: ${action}` });
+        logRecord({
+          event: "helper.invoke.unknown_action",
+          lvl: "warn",
+          action,
+          durationMs: Date.now() - startedAt
+        });
     }
   } catch (err) {
     writeMessage({ error: String(err) });
+    logErr("helper.invoke.error", err, { action, durationMs: Date.now() - startedAt });
   }
   process.exit(0);
 }

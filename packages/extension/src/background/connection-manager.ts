@@ -8,6 +8,7 @@ import { createRelay } from './relay-client';
 import type { Relay } from './relay-client';
 import type { DiscoveryResult } from './service-discovery';
 import { checkBridgeVersion } from '../shared/version-check';
+import { logRecord, logError, flushPending } from '../shared/logger';
 
 const DEFAULT_URL = 'ws://127.0.0.1:7483';
 const SERVER_INFO_TIMEOUT_MS = 10_000;
@@ -52,6 +53,12 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
   let heartbeat: HeartbeatMonitor | null = null;
   const backoffTimer = createBackoffTimer();
   let serverInfoTimer: ReturnType<typeof setTimeout> | null = null;
+  // Periodic log-flush timer: ensures extension log entries reach the bridge
+  // every ~10s while connected, not just on reconnect. Without this, a
+  // long-running healthy session would never write its extension events to
+  // extension.log — defeating the "grep all logs to debug" goal.
+  let logFlushTimer: ReturnType<typeof setInterval> | null = null;
+  const LOG_FLUSH_INTERVAL_MS = 10_000;
   let currentUrl: string = DEFAULT_URL;
 
   const listeners = new Set<(ctx: ConnectionContext) => void>();
@@ -67,10 +74,37 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
     }
   }
 
+  /**
+   * Send pending log entries to the bridge. Wrapped here so onServerInfo
+   * AND the periodic timer can both call the same path with the same
+   * delivery semantics (return true only when WS is open and send
+   * synchronously queues the frame).
+   */
+  function sendLogBatch(envelope: { type: 'log_batch'; entries: unknown[] }): boolean {
+    if (!relay || !relay.isConnected()) return false;
+    relay.send(envelope);
+    return true;
+  }
+
+  function startLogFlushTimer(): void {
+    if (logFlushTimer !== null) return;
+    logFlushTimer = setInterval(() => {
+      flushPending(sendLogBatch).catch(() => { /* logger never throws but be safe */ });
+    }, LOG_FLUSH_INTERVAL_MS);
+  }
+
+  function stopLogFlushTimer(): void {
+    if (logFlushTimer !== null) {
+      clearInterval(logFlushTimer);
+      logFlushTimer = null;
+    }
+  }
+
   function stopAll(): void {
     heartbeat?.stop();
     heartbeat = null;
     backoffTimer.cancel();
+    stopLogFlushTimer();
     if (serverInfoTimer !== null) {
       clearTimeout(serverInfoTimer);
       serverInfoTimer = null;
@@ -133,11 +167,19 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
   }
 
   function openRelay(): void {
+    void logRecord({ event: 'ext.ws.connect.attempt', url: currentUrl });
     relay = createRelay({
       onOpen() {
+        void logRecord({ event: 'ext.ws.open', url: currentUrl });
         // Wait for server_info before dispatching WS_OPEN
         serverInfoTimer = setTimeout(() => {
           serverInfoTimer = null;
+          void logRecord({
+            event: 'ext.ws.server_info_timeout',
+            lvl: 'warn',
+            timeoutMs: SERVER_INFO_TIMEOUT_MS,
+            url: currentUrl,
+          });
           relay?.disconnect();
         }, SERVER_INFO_TIMEOUT_MS);
       },
@@ -155,6 +197,26 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
           lastVerifiedAt: Date.now(),
           versionStatus,
         };
+        void logRecord({
+          event: 'ext.ws.server_info',
+          bridgePid: info.pid,
+          bridgePort: info.port,
+          bridgeVersion: info.version,
+          bridgeBuildId: info.buildId,
+          versionStatus,
+          uptime: info.uptime,
+        });
+        // Flush any pending log entries (e.g. from a previous SW life that
+        // died before reconnecting). The bridge gets a single batch and
+        // writes them to extension.log alongside its own bridge.log.
+        flushPending(sendLogBatch).then((n) => {
+          if (n > 0) {
+            void logRecord({ event: 'ext.log.flushed', flushed: n });
+          }
+        });
+        // Periodic flush so current-session events reach extension.log
+        // without waiting for a reconnect.
+        startLogFlushTimer();
         dispatch({ type: 'WS_OPEN' });
         startHeartbeat();
       },
@@ -165,11 +227,18 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
         dispatch({ type: 'HEARTBEAT_OK' });
       },
 
-      onClose(_code: number, _reason: string) {
+      onClose(code: number, reason: string) {
         if (serverInfoTimer !== null) {
           clearTimeout(serverInfoTimer);
           serverInfoTimer = null;
         }
+        stopLogFlushTimer();
+        void logRecord({
+          event: 'ext.ws.close',
+          lvl: code === 1000 ? 'info' : 'warn',
+          code,
+          reason,
+        });
         heartbeat?.stop();
         heartbeat = null;
         relay = null;
@@ -185,6 +254,14 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
       },
 
       onError(_error: Event) {
+        // WebSocket onerror events deliberately carry no diagnostic detail
+        // (browser security). Logging the type tag is the most we can do.
+        void logRecord({
+          event: 'ext.ws.error',
+          lvl: 'warn',
+          state: context.state,
+          diagnosticReason: context.diagnosticReason,
+        });
         if (context.state === 'connecting') {
           // If diagnostic was 'connecting' (lock file said server exists), but WS failed → server not responding
           if (context.diagnosticReason === 'connecting') {
@@ -200,6 +277,12 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
       },
 
       onToolRequest(id: string, tool: string, params: Record<string, unknown>) {
+        void logRecord({
+          event: 'ext.tool_request.received',
+          requestId: id,
+          tool,
+          params,
+        });
         options.onToolRequest?.(id, tool, params);
       },
 
@@ -217,9 +300,19 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
         relay?.sendPing(Date.now());
       },
       onMiss() {
+        void logRecord({
+          event: 'ext.heartbeat.miss',
+          lvl: 'warn',
+          missedCount: heartbeat?.getMissedCount() ?? 0,
+        });
         dispatch({ type: 'HEARTBEAT_MISS' });
       },
       onDead() {
+        void logRecord({
+          event: 'ext.heartbeat.dead',
+          lvl: 'warn',
+          missedCount: heartbeat?.getMissedCount() ?? 0,
+        });
         dispatch({ type: 'HEARTBEAT_MISS' });
         relay?.disconnect();
       },

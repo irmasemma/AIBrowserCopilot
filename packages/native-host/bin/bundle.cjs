@@ -3666,8 +3666,8 @@ var import_websocket_server = __toESM(require_websocket_server(), 1);
 
 // src/service.ts
 var import_node_crypto = require("node:crypto");
-var import_node_fs2 = require("node:fs");
-var import_node_path2 = require("node:path");
+var import_node_fs3 = require("node:fs");
+var import_node_path3 = require("node:path");
 var import_node_os2 = require("node:os");
 
 // ../../node_modules/zod/v3/external.js
@@ -7920,7 +7920,7 @@ var toolRegistry = [
 ];
 
 // src/version.ts
-var VERSION = "0.5.5";
+var VERSION = "0.5.6";
 var BUILD_ID = process.env.BUILD_ID ?? "dev";
 
 // src/lock-file-manager.ts
@@ -7976,6 +7976,346 @@ function registerCleanupHandlers(lockPath) {
   });
 }
 
+// src/shared/logger.ts
+var import_node_fs2 = require("node:fs");
+var import_node_path2 = require("node:path");
+var DEFAULT_MAX_BYTES = 1e6;
+var DEFAULT_KEEP = 4;
+var MAX_LINE_BYTES = 16e3;
+var _loggingEnabled = null;
+function isLoggingEnabled(filePath) {
+  if (_loggingEnabled !== null) return _loggingEnabled;
+  try {
+    const configPath = (0, import_node_path2.join)((0, import_node_path2.dirname)((0, import_node_path2.dirname)(filePath)), "logs-config.json");
+    if (!(0, import_node_fs2.existsSync)(configPath)) {
+      _loggingEnabled = true;
+      return true;
+    }
+    const raw = (0, import_node_fs2.readFileSync)(configPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    _loggingEnabled = parsed.enabled !== false;
+    return _loggingEnabled;
+  } catch {
+    _loggingEnabled = true;
+    return true;
+  }
+}
+var states = /* @__PURE__ */ new Map();
+function getOrInit(cfg) {
+  const existing = states.get(cfg.filePath);
+  if (existing) return existing;
+  const state = {
+    filePath: cfg.filePath,
+    maxBytes: cfg.maxBytes ?? DEFAULT_MAX_BYTES,
+    keep: cfg.keep ?? DEFAULT_KEEP,
+    currentBytes: 0,
+    disabled: false
+  };
+  try {
+    const dir = (0, import_node_path2.dirname)(cfg.filePath);
+    if (!(0, import_node_fs2.existsSync)(dir)) (0, import_node_fs2.mkdirSync)(dir, { recursive: true });
+  } catch {
+    state.disabled = true;
+    states.set(cfg.filePath, state);
+    return state;
+  }
+  try {
+    if ((0, import_node_fs2.existsSync)(cfg.filePath)) {
+      state.currentBytes = (0, import_node_fs2.statSync)(cfg.filePath).size;
+    }
+  } catch {
+  }
+  states.set(cfg.filePath, state);
+  return state;
+}
+function rotate(state) {
+  const { filePath, keep } = state;
+  try {
+    if ((0, import_node_fs2.existsSync)(`${filePath}.${keep}`)) (0, import_node_fs2.unlinkSync)(`${filePath}.${keep}`);
+  } catch {
+  }
+  for (let i = keep - 1; i >= 1; i--) {
+    try {
+      if ((0, import_node_fs2.existsSync)(`${filePath}.${i}`)) {
+        (0, import_node_fs2.renameSync)(`${filePath}.${i}`, `${filePath}.${i + 1}`);
+      }
+    } catch {
+      return false;
+    }
+  }
+  try {
+    if ((0, import_node_fs2.existsSync)(filePath)) {
+      (0, import_node_fs2.renameSync)(filePath, `${filePath}.1`);
+    }
+  } catch {
+    return false;
+  }
+  return true;
+}
+function serialize(rec) {
+  if (!rec.t) rec.t = (/* @__PURE__ */ new Date()).toISOString();
+  let line;
+  try {
+    line = JSON.stringify(rec);
+  } catch {
+    line = JSON.stringify({
+      t: rec.t,
+      src: rec.src,
+      lvl: rec.lvl,
+      pid: rec.pid,
+      event: rec.event,
+      _serialize_failed: true
+    });
+  }
+  if (Buffer.byteLength(line, "utf-8") > MAX_LINE_BYTES) {
+    line = JSON.stringify({
+      t: rec.t,
+      src: rec.src,
+      lvl: rec.lvl,
+      pid: rec.pid,
+      event: rec.event,
+      _truncated: true,
+      _originalBytes: Buffer.byteLength(line, "utf-8")
+    });
+  }
+  return line + "\n";
+}
+function logRecord(cfg, rec) {
+  if (!isLoggingEnabled(cfg.filePath)) return;
+  const state = getOrInit(cfg);
+  if (state.disabled) return;
+  const line = serialize(rec);
+  const bytes = Buffer.byteLength(line, "utf-8");
+  if (state.currentBytes + bytes > state.maxBytes) {
+    if (rotate(state)) {
+      state.currentBytes = 0;
+    }
+  }
+  try {
+    (0, import_node_fs2.appendFileSync)(state.filePath, line, "utf-8");
+    state.currentBytes += bytes;
+  } catch {
+  }
+}
+function makeLogger(cfg, src, pid) {
+  return {
+    info(event, fields) {
+      logRecord(cfg, { src, lvl: "info", pid, event, ...fields });
+    },
+    warn(event, fields) {
+      logRecord(cfg, { src, lvl: "warn", pid, event, ...fields });
+    },
+    error(event, fields) {
+      logRecord(cfg, { src, lvl: "error", pid, event, ...fields });
+    }
+  };
+}
+
+// src/shared/redaction.ts
+var URL_KEYS = /* @__PURE__ */ new Set([
+  "url",
+  "href",
+  "targeturl",
+  "link",
+  "location",
+  "src",
+  "action",
+  "referrer",
+  "redirecturi"
+]);
+var TEXT_KEYS = /* @__PURE__ */ new Set([
+  "value",
+  "values",
+  "text",
+  "body",
+  "content",
+  "innertext",
+  "innerhtml",
+  "outerhtml",
+  "title",
+  "pagetitle",
+  "query",
+  "searchquery",
+  "q",
+  "label",
+  "name",
+  "placeholder",
+  "description",
+  "alt",
+  "visibletext",
+  "snapshot",
+  "ariasnapshot",
+  "pagecontent",
+  "selector",
+  "css",
+  "xpath",
+  "message"
+]);
+var RECORD_ARRAY_KEYS = /* @__PURE__ */ new Set([
+  "rows",
+  "cells",
+  "data",
+  "entries",
+  "items",
+  "results",
+  "tabs",
+  "records"
+]);
+var SECRET_KEYS = /* @__PURE__ */ new Set([
+  "cookie",
+  "cookies",
+  "authorization",
+  "auth",
+  "token",
+  "apikey",
+  "api_key",
+  "password",
+  "pwd",
+  "secret",
+  "privatekey",
+  "private_key",
+  "sessionid",
+  "session_id",
+  "csrf"
+]);
+var RECURSE_KEYS = /* @__PURE__ */ new Set([
+  "metadata",
+  "meta",
+  "og",
+  "opengraph",
+  "options",
+  "config",
+  "params",
+  "arguments",
+  "request",
+  "response",
+  "result",
+  "context"
+]);
+var URL_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s/$.?#].\S*$/;
+var URL_SUBSTRING_RE = /https?:\/\/[^\s'"\)<>]+/g;
+var JWT_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+var MAX_STRING_LEN = 200;
+function redact(value, depth = 0) {
+  if (depth > 16) return "[deep-truncated]";
+  if (value === null || value === void 0) return value;
+  if (typeof value === "string") return redactString(value);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "bigint") return value.toString();
+  if (Array.isArray(value)) {
+    return value.map((v) => redact(v, depth + 1));
+  }
+  if (typeof value === "object") {
+    return redactObject(value, depth);
+  }
+  return `[${typeof value}]`;
+}
+function redactString(s) {
+  if (s.length === 0) return s;
+  if (JWT_RE.test(s)) return "[REDACTED-JWT]";
+  if (URL_RE.test(s)) return redactUrl(s);
+  if (s.length > MAX_STRING_LEN) return `[len=${s.length}]`;
+  if (URL_SUBSTRING_RE.test(s)) {
+    URL_SUBSTRING_RE.lastIndex = 0;
+    return s.replace(URL_SUBSTRING_RE, (match) => redactUrl(match));
+  }
+  return s;
+}
+function redactObject(obj, depth) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const key = k.toLowerCase();
+    if (SECRET_KEYS.has(key)) {
+      out[k] = "[REDACTED-SECRET]";
+      continue;
+    }
+    if (URL_KEYS.has(key)) {
+      if (typeof v === "string") {
+        out[k] = redactUrl(v);
+      } else {
+        out[k] = redact(v, depth + 1);
+      }
+      continue;
+    }
+    if (TEXT_KEYS.has(key)) {
+      out[k] = lengthSummary(v);
+      continue;
+    }
+    if (RECORD_ARRAY_KEYS.has(key)) {
+      out[k] = recordArraySummary(v);
+      continue;
+    }
+    if (RECURSE_KEYS.has(key)) {
+      out[k] = redact(v, depth + 1);
+      continue;
+    }
+    out[k] = redact(v, depth + 1);
+  }
+  return out;
+}
+function redactUrl(s) {
+  try {
+    const u = new URL(s);
+    return `${u.protocol}//${u.host}/[redacted]`;
+  } catch {
+    return `[len=${s.length}]`;
+  }
+}
+function lengthSummary(v) {
+  if (v === null || v === void 0) return `[empty]`;
+  if (typeof v === "string") return `[len=${v.length}]`;
+  if (Array.isArray(v)) return `[arrayLen=${v.length}]`;
+  if (typeof v === "object") {
+    const keys = Object.keys(v);
+    return `[objKeys=${keys.length}]`;
+  }
+  return `[${typeof v}]`;
+}
+function recordArraySummary(v) {
+  if (!Array.isArray(v)) {
+    return redact(v);
+  }
+  if (v.length === 0) return "[arrayLen=0]";
+  const first = v[0];
+  if (first && typeof first === "object" && !Array.isArray(first)) {
+    const keys = Object.keys(first).slice(0, 5);
+    return `[arrayLen=${v.length}, sampleKeys=[${keys.join(", ")}]]`;
+  }
+  return `[arrayLen=${v.length}]`;
+}
+function redactError(err) {
+  if (err instanceof Error) {
+    const code = err.code;
+    return {
+      errorName: err.name || "Error",
+      errorMessage: redactString(err.message ?? ""),
+      ...typeof code === "string" ? { errorCode: code } : {},
+      ...err.stack ? { stack: redactStack(err.stack) } : {}
+    };
+  }
+  if (typeof err === "string") {
+    return { errorName: "StringError", errorMessage: redactString(err) };
+  }
+  if (err && typeof err === "object") {
+    const obj = err;
+    return {
+      errorName: typeof obj.name === "string" ? obj.name : "ObjectError",
+      errorMessage: redactString(typeof obj.message === "string" ? obj.message : ""),
+      ...typeof obj.code === "string" ? { errorCode: obj.code } : {},
+      ...typeof obj.stack === "string" ? { stack: redactStack(obj.stack) } : {}
+    };
+  }
+  return { errorName: "UnknownError", errorMessage: `[${typeof err}]` };
+}
+function redactStack(stack) {
+  const lines = stack.split("\n").slice(0, 20);
+  const redacted = lines.map((line) => {
+    URL_SUBSTRING_RE.lastIndex = 0;
+    return line.replace(URL_SUBSTRING_RE, (match) => redactUrl(match));
+  });
+  return redacted.join("\n");
+}
+
 // src/service.ts
 var REQUEST_TIMEOUT_MS = 3e4;
 var browserSockets = /* @__PURE__ */ new Map();
@@ -8026,9 +8366,9 @@ function loadAllowedExtensionIds(opts) {
   const installDir = opts?.installDir ?? defaultInstallDir();
   if (!installDir) return result;
   try {
-    const configPath = (0, import_node_path2.join)(installDir, "extension-ids.json");
-    if (!(0, import_node_fs2.existsSync)(configPath)) return result;
-    const parsed = JSON.parse((0, import_node_fs2.readFileSync)(configPath, "utf-8"));
+    const configPath = (0, import_node_path3.join)(installDir, "extension-ids.json");
+    if (!(0, import_node_fs3.existsSync)(configPath)) return result;
+    const parsed = JSON.parse((0, import_node_fs3.readFileSync)(configPath, "utf-8"));
     if (Array.isArray(parsed)) {
       for (const entry of parsed) {
         if (typeof entry === "string" && entry.trim()) result.add(entry.trim());
@@ -8041,11 +8381,11 @@ function loadAllowedExtensionIds(opts) {
 function defaultInstallDir() {
   switch ((0, import_node_os2.platform)()) {
     case "win32":
-      return (0, import_node_path2.join)(process.env.LOCALAPPDATA ?? (0, import_node_path2.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "agenthub");
+      return (0, import_node_path3.join)(process.env.LOCALAPPDATA ?? (0, import_node_path3.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "agenthub");
     case "darwin":
-      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "agenthub");
+      return (0, import_node_path3.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "agenthub");
     default:
-      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".local", "share", "agenthub");
+      return (0, import_node_path3.join)((0, import_node_os2.homedir)(), ".local", "share", "agenthub");
   }
 }
 function indexBrowser(browserId, ws) {
@@ -8103,8 +8443,8 @@ function parseQuery(url) {
 }
 var SERVER_PING_INTERVAL_MS = 2e4;
 function handleExtension(ws, browserId) {
-  process.stderr.write(`Browser connected: ${browserId}
-`);
+  const connectedAt = Date.now();
+  bridgeLog().info("bridge.browser.connected", { browserId });
   indexBrowser(browserId, ws);
   ws.send(JSON.stringify(getServerInfo()));
   const serverPingTimer = setInterval(() => {
@@ -8126,6 +8466,26 @@ function handleExtension(ws, browserId) {
         ws.send(JSON.stringify({ type: "tool_scan", tools: [] }));
         return;
       }
+      if (msg.type === "log_batch" && Array.isArray(msg.entries)) {
+        const MAX_BATCH = 200;
+        if (msg.entries.length > MAX_BATCH) {
+          bridgeLog().warn("bridge.log_batch.oversize_dropped", {
+            browserId,
+            received: msg.entries.length,
+            cap: MAX_BATCH
+          });
+          return;
+        }
+        for (const entry of msg.entries) {
+          if (!isValidLogEntry(entry)) continue;
+          logRecord({ filePath: getExtensionLogPath() }, {
+            ...entry,
+            _via_bridge_pid: process.pid,
+            _from_browser: browserId
+          });
+        }
+        return;
+      }
       if (msg.id) {
         const pending = pendingRequests.get(msg.id);
         if (pending) {
@@ -8141,16 +8501,26 @@ function handleExtension(ws, browserId) {
     clearInterval(serverPingTimer);
     if (browserSockets.get(browserId) === ws) {
       unindexBrowser(browserId);
-      process.stderr.write(`Browser disconnected: ${browserId}
-`);
+      bridgeLog().info("bridge.browser.disconnected", {
+        browserId,
+        durationMs: Date.now() - connectedAt,
+        pendingRequestCount: pendingRequests.size
+      });
     }
   });
+}
+function isValidLogEntry(entry) {
+  if (!entry || typeof entry !== "object") return false;
+  const e = entry;
+  if (typeof e.event !== "string" || e.event.length > 200) return false;
+  if (e.src !== "ext") return false;
+  if (e.lvl !== "info" && e.lvl !== "warn" && e.lvl !== "error") return false;
+  return true;
 }
 function handleMcpClient(ws) {
   const clientId = (0, import_node_crypto.randomUUID)();
   mcpClients.set(clientId, ws);
-  process.stderr.write(`MCP client connected: ${clientId}
-`);
+  bridgeLog().info("bridge.mcp.client_connected", { clientId, transport: "ws" });
   ws.on("message", (data) => {
     const raw = data.toString();
     for (const line of raw.split("\n")) {
@@ -8162,8 +8532,7 @@ function handleMcpClient(ws) {
   });
   ws.on("close", () => {
     mcpClients.delete(clientId);
-    process.stderr.write(`MCP client disconnected: ${clientId}
-`);
+    bridgeLog().info("bridge.mcp.client_disconnected", { clientId });
     for (const [id, p] of pendingRequests) {
       if (p.clientId === clientId) {
         clearTimeout(p.timer);
@@ -8204,15 +8573,58 @@ async function sendToolRequest(clientId, originalId, tool, params, browserId) {
     }
   }
   if (!ws) {
+    bridgeLog().warn("bridge.route.no_browser", {
+      clientId,
+      mcpId: originalId,
+      toolName: tool,
+      requestedBrowserId: browserId,
+      availableBrowsers: Array.from(browserSockets.keys())
+    });
     throw new Error("No browser extension connected");
   }
   return new Promise((resolve, reject) => {
     const browserBoundId = `b_${(0, import_node_crypto.randomUUID)()}`;
+    const sentAt = Date.now();
+    bridgeLog().info("bridge.tool_request.sent", {
+      mcpId: originalId,
+      clientId,
+      browserBoundId,
+      browserId,
+      toolName: tool,
+      args: redact(params)
+    });
     const timer = setTimeout(() => {
       pendingRequests.delete(browserBoundId);
+      bridgeLog().warn("bridge.tool_request.timed_out", {
+        mcpId: originalId,
+        clientId,
+        browserBoundId,
+        browserId,
+        toolName: tool,
+        elapsedMs: Date.now() - sentAt
+      });
       reject(new Error("Tool request timed out"));
     }, REQUEST_TIMEOUT_MS);
-    pendingRequests.set(browserBoundId, { clientId, originalId, resolve, reject, timer });
+    pendingRequests.set(browserBoundId, {
+      clientId,
+      originalId,
+      resolve: (response) => {
+        const r = response;
+        bridgeLog().info("bridge.tool_response.received", {
+          mcpId: originalId,
+          clientId,
+          browserBoundId,
+          browserId,
+          toolName: tool,
+          durationMs: Date.now() - sentAt,
+          type: r?.type ?? "unknown",
+          isError: r?.result?.isError === true || r?.type === "tool_error"
+        });
+        resolve(response);
+      },
+      reject,
+      timer
+    });
     ws.send(JSON.stringify({ type: "tool_request", id: browserBoundId, tool, params }));
   });
 }
@@ -8362,20 +8774,58 @@ function handleMcpMessage(clientId, raw, reply) {
       const tabIdRoute = extractBrowserIdFromTabId(toolArgs.tab_id);
       const browserId = tabIdRoute || toolArgs.browser || "default";
       const originalId = msg.id ?? null;
+      const receivedAt = Date.now();
+      bridgeLog().info("bridge.mcp.tools_call.received", {
+        mcpId: originalId,
+        clientId,
+        toolName,
+        targetBrowserId: browserId,
+        routeSource: tabIdRoute ? "tab_id_prefix" : toolArgs.browser ? "explicit_browser_param" : "default",
+        args: redact(toolArgs)
+      });
+      const replyWithMetrics = (responseEnvelope) => {
+        const isError = responseEnvelope?.result?.isError === true;
+        const contentItems = Array.isArray(responseEnvelope?.result?.content) ? responseEnvelope.result.content.length : 0;
+        bridgeLog().info("bridge.mcp.tools_call.replied", {
+          mcpId: originalId,
+          clientId,
+          toolName,
+          durationMs: Date.now() - receivedAt,
+          isError,
+          contentItems
+        });
+        reply(responseEnvelope);
+      };
       if (toolName === "list_tabs") {
         const brandFilter = browserId === "default" ? null : browserId;
+        const fanoutId = `fo_${(0, import_node_crypto.randomUUID)()}`;
+        bridgeLog().info("bridge.fanout.started", { fanoutId, mcpId: originalId, toolName, brandFilter });
         fanOutToolRequest(clientId, toolName, toolArgs, brandFilter).then((results) => {
+          const succeeded = results.filter((r) => r.ok).length;
+          const errored = results.filter((r) => !r.ok).length;
+          bridgeLog().info("bridge.fanout.aggregated", {
+            fanoutId,
+            mcpId: originalId,
+            totalTargets: results.length,
+            succeeded,
+            errored
+          });
           if (results.length === 0) {
-            reply({
+            replyWithMetrics({
               jsonrpc: "2.0",
               id: msg.id,
               result: { content: [{ type: "text", text: "No browser extension connected" }], isError: true }
             });
             return;
           }
-          reply({ jsonrpc: "2.0", id: msg.id, result: mergeFanOutListTabs(results) });
+          replyWithMetrics({ jsonrpc: "2.0", id: msg.id, result: mergeFanOutListTabs(results) });
         }).catch((err) => {
-          reply({
+          bridgeLog().error("bridge.fanout.failed", {
+            fanoutId,
+            mcpId: originalId,
+            ...redactError(err)
+          });
+          replyWithMetrics({
             jsonrpc: "2.0",
             id: msg.id,
             result: { content: [{ type: "text", text: `list_tabs fan-out failed: ${err.message}` }], isError: true }
@@ -8384,9 +8834,15 @@ function handleMcpMessage(clientId, raw, reply) {
         return;
       }
       sendToolRequest(clientId, originalId, toolName, toolArgs, browserId).then((response) => {
-        reply({ jsonrpc: "2.0", id: msg.id, result: translateExtensionResponse(response) });
+        replyWithMetrics({ jsonrpc: "2.0", id: msg.id, result: translateExtensionResponse(response) });
       }).catch((err) => {
-        reply({
+        bridgeLog().warn("bridge.tool_request.failed", {
+          mcpId: originalId,
+          clientId,
+          toolName,
+          ...redactError(err)
+        });
+        replyWithMetrics({
           jsonrpc: "2.0",
           id: msg.id,
           result: { content: [{ type: "text", text: `Tool execution failed: ${err.message}` }], isError: true }
@@ -8422,49 +8878,73 @@ function zodToJsonSchema(z) {
       return base;
   }
 }
-function getBridgeLogPath() {
+function getInstallDir() {
   switch ((0, import_node_os2.platform)()) {
     case "win32":
-      return (0, import_node_path2.join)(process.env.LOCALAPPDATA ?? (0, import_node_path2.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "agenthub", "bridge.log");
+      return (0, import_node_path3.join)(process.env.LOCALAPPDATA ?? (0, import_node_path3.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "agenthub");
     case "darwin":
-      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "agenthub", "bridge.log");
+      return (0, import_node_path3.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "agenthub");
     default:
-      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".local", "share", "agenthub", "bridge.log");
+      return (0, import_node_path3.join)((0, import_node_os2.homedir)(), ".local", "share", "agenthub");
   }
 }
-function appendBridgeLog(line) {
+function getBridgeLogPath() {
+  return (0, import_node_path3.join)(getInstallDir(), "logs", "bridge.log");
+}
+function getExtensionLogPath() {
+  return (0, import_node_path3.join)(getInstallDir(), "logs", "extension.log");
+}
+function getLegacyBridgeLogPath() {
+  return (0, import_node_path3.join)(getInstallDir(), "bridge.log");
+}
+function migrateLegacyBridgeLog() {
+  const legacy = getLegacyBridgeLogPath();
+  const target = (0, import_node_path3.join)(getInstallDir(), "logs", "bridge.log.legacy");
   try {
-    const path = getBridgeLogPath();
-    const dir = (0, import_node_path2.dirname)(path);
-    if (!(0, import_node_fs2.existsSync)(dir)) (0, import_node_fs2.mkdirSync)(dir, { recursive: true });
-    const stamp = (/* @__PURE__ */ new Date()).toISOString();
-    (0, import_node_fs2.appendFileSync)(path, `[${stamp}] [pid ${process.pid}] ${line}
-`, "utf-8");
+    if (!(0, import_node_fs3.existsSync)(legacy)) return;
+    if ((0, import_node_fs3.existsSync)(target)) return;
+    const dir = (0, import_node_path3.join)(getInstallDir(), "logs");
+    if (!(0, import_node_fs3.existsSync)(dir)) (0, import_node_fs3.mkdirSync)(dir, { recursive: true });
+    (0, import_node_fs3.renameSync)(legacy, target);
   } catch {
   }
 }
+var _bridgeLogger = null;
+function bridgeLog() {
+  if (!_bridgeLogger) {
+    _bridgeLogger = makeLogger({ filePath: getBridgeLogPath() }, "bridge", process.pid);
+  }
+  return _bridgeLogger;
+}
 function startServer(port) {
   serverPort = port;
+  migrateLegacyBridgeLog();
   const allowedExtensionIds = loadAllowedExtensionIds();
-  if (allowedExtensionIds.size > 0) {
-    process.stderr.write(
-      `Origin allowlist active: ${Array.from(allowedExtensionIds).join(", ")}
-`
-    );
-  } else {
-    process.stderr.write(
-      "Origin allowlist not configured \u2014 accepting any chrome-extension:// origin. Set AGENTHUB_ALLOWED_EXTENSION_IDS or write <installDir>/extension-ids.json to pin.\n"
-    );
-  }
+  bridgeLog().info("bridge.lifecycle.start", {
+    port,
+    version: VERSION,
+    buildId: BUILD_ID,
+    startedBy: process.env.AI_BROWSER_COPILOT_STARTED_BY ?? "service",
+    allowedExtensionIdsCount: allowedExtensionIds.size,
+    logFilePath: getBridgeLogPath()
+  });
   const wss = new import_websocket_server.default({
     host: "127.0.0.1",
     port,
+    // Cap incoming frame size at 4 MiB. Real tool requests max out around
+    // 200 KB (page snapshots); 4 MiB headroom is generous. Beyond this,
+    // ws closes the connection — protects bridge memory from a runaway
+    // log_batch or malicious page-scraping tool result.
+    maxPayload: 4 * 1024 * 1024,
     verifyClient: (info, done) => {
       if (isAllowedOrigin(info.origin, allowedExtensionIds)) {
+        bridgeLog().info("bridge.ws.upgrade_accepted", { origin: info.origin ?? "(none)" });
         done(true);
       } else {
-        process.stderr.write(`Rejected WS upgrade from disallowed origin: ${info.origin}
-`);
+        bridgeLog().warn("bridge.ws.upgrade_rejected", {
+          origin: info.origin ?? "(none)",
+          reason: "origin_not_in_allowlist"
+        });
         done(false, 401, "forbidden origin");
       }
     }
@@ -8481,19 +8961,17 @@ function startServer(port) {
     });
     registerCleanupHandlers();
   } catch (err) {
-    process.stderr.write(`Failed to write lock file: ${err.message}
-`);
+    bridgeLog().error("bridge.lifecycle.lock_file_write_failed", { ...redactError(err) });
   }
   process.on("uncaughtException", (err) => {
-    appendBridgeLog(`uncaughtException: ${err?.stack ?? err}`);
+    bridgeLog().error("bridge.lifecycle.uncaught", { ...redactError(err) });
     setTimeout(() => {
       throw err;
     }, 0);
   });
   process.on("unhandledRejection", (reason) => {
-    appendBridgeLog(`unhandledRejection: ${reason instanceof Error ? reason.stack : String(reason)}`);
+    bridgeLog().error("bridge.lifecycle.unhandled_rejection", { ...redactError(reason) });
   });
-  appendBridgeLog(`Server started on 127.0.0.1:${port} v${VERSION} buildId=${BUILD_ID} startedBy=${process.env.AI_BROWSER_COPILOT_STARTED_BY ?? "service"}`);
   wss.on("connection", (ws, req) => {
     const params = parseQuery(req.url);
     if (params.get("role") === "mcp") {
@@ -8519,8 +8997,7 @@ ${body}`);
   if (typeof process.stdin.resume === "function") {
     process.stdin.resume();
   }
-  process.stderr.write(`Server started on 127.0.0.1:${port} (pid=${process.pid})
-`);
+  bridgeLog().info("bridge.mcp.client_connected", { clientId: "stdio", transport: "stdio" });
 }
 function parseStdioMessages(stream, onMessage, formatHolder) {
   let buffer = Buffer.alloc(0);

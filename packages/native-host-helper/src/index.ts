@@ -3,6 +3,7 @@ import { checkClaudeCodeRegistration, repairClaudeCodeRegistration } from './mcp
 import { getServiceStatus } from './service-status.js';
 import { startNativeHost } from './process-spawner.js';
 import { HELPER_VERSION } from './version.js';
+import { logRecord, logErr } from './logger.js';
 
 // Chrome Native Messaging protocol: 4-byte LE length prefix + JSON
 
@@ -58,14 +59,23 @@ function writeMessage(data: unknown): void {
 }
 
 async function main(): Promise<void> {
+  const startedAt = Date.now();
+  let action: string | undefined;
   try {
     const message = await readMessage();
-    const action = message.action as string;
+    action = message.action as string;
+    logRecord({
+      event: 'helper.invoke.received',
+      action,
+      helperVersion: HELPER_VERSION,
+      argKeys: Object.keys(message).filter((k) => k !== 'action'),
+    });
 
     switch (action) {
       case 'scan_ai_tools': {
         const tools = scanAITools();
         writeMessage({ tools });
+        logRecord({ event: 'helper.invoke.replied', action, durationMs: Date.now() - startedAt, toolCount: tools.length });
         break;
       }
 
@@ -74,12 +84,25 @@ async function main(): Promise<void> {
         // clients gain a "Re-add" UI surface.
         const result = checkClaudeCodeRegistration();
         writeMessage(result);
+        logRecord({
+          event: 'helper.invoke.replied',
+          action,
+          durationMs: Date.now() - startedAt,
+          registered: result.registered,
+          scope: result.scope,
+        });
         break;
       }
 
       case 'repair_mcp_registration': {
         const result = repairClaudeCodeRegistration();
         writeMessage(result);
+        logRecord({
+          event: 'helper.invoke.replied',
+          action,
+          durationMs: Date.now() - startedAt,
+          success: result.success,
+        });
         break;
       }
 
@@ -87,6 +110,18 @@ async function main(): Promise<void> {
         const browserId = typeof message.browserId === 'string' ? message.browserId : undefined;
         const status = await getServiceStatus({ helperVersion: HELPER_VERSION, browserId });
         writeMessage(status);
+        logRecord({
+          event: 'helper.invoke.replied',
+          action,
+          durationMs: Date.now() - startedAt,
+          reason: status.reason,
+          lockFileExists: status.lockFile.exists,
+          pidAlive: status.pidAlive,
+          portListening: status.portListening,
+          wsHealthy: status.wsHealthy,
+          reportedPid: status.reportedPid,
+          reportedVersion: status.reportedVersion,
+        });
         break;
       }
 
@@ -98,6 +133,15 @@ async function main(): Promise<void> {
         };
         const result = await startNativeHost({ isAlreadyRunning });
         writeMessage(result);
+        logRecord({
+          event: 'helper.invoke.replied',
+          action,
+          durationMs: Date.now() - startedAt,
+          ok: result.ok,
+          alreadyRunning: result.alreadyRunning,
+          pid: result.pid,
+          errorMessage: result.error,
+        });
         break;
       }
 
@@ -108,19 +152,35 @@ async function main(): Promise<void> {
         // proxy via the port-probe path).
         const result = await startNativeHost({ skipAlreadyRunningCheck: true });
         writeMessage(result);
+        logRecord({
+          event: 'helper.invoke.replied',
+          action,
+          durationMs: Date.now() - startedAt,
+          ok: result.ok,
+          pid: result.pid,
+          errorMessage: result.error,
+        });
         break;
       }
 
       case 'helper_version': {
         writeMessage({ version: HELPER_VERSION });
+        logRecord({ event: 'helper.invoke.replied', action, durationMs: Date.now() - startedAt });
         break;
       }
 
       default:
         writeMessage({ error: `Unknown action: ${action}` });
+        logRecord({
+          event: 'helper.invoke.unknown_action',
+          lvl: 'warn',
+          action,
+          durationMs: Date.now() - startedAt,
+        });
     }
   } catch (err) {
     writeMessage({ error: String(err) });
+    logErr('helper.invoke.error', err, { action, durationMs: Date.now() - startedAt });
   }
 
   process.exit(0);

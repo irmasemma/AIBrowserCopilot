@@ -12,8 +12,8 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
+import { join } from 'node:path';
 import { homedir, platform as osPlatform } from 'node:os';
 import { toolRegistry } from './tools/index.js';
 import { VERSION, BUILD_ID } from './version.js';
@@ -22,6 +22,8 @@ import {
   deleteLockFile,
   registerCleanupHandlers,
 } from './lock-file-manager.js';
+import { makeLogger, logRecord, type Logger, type LogRecord } from './shared/logger.js';
+import { redact, redactError } from './shared/redaction.js';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -260,7 +262,8 @@ function parseQuery(url: string | undefined): URLSearchParams {
 const SERVER_PING_INTERVAL_MS = 20_000;
 
 function handleExtension(ws: WebSocket, browserId: string): void {
-  process.stderr.write(`Browser connected: ${browserId}\n`);
+  const connectedAt = Date.now();
+  bridgeLog().info('bridge.browser.connected', { browserId });
   indexBrowser(browserId, ws);
   ws.send(JSON.stringify(getServerInfo()));
 
@@ -286,6 +289,38 @@ function handleExtension(ws: WebSocket, browserId: string): void {
         ws.send(JSON.stringify({ type: 'tool_scan', tools: [] }));
         return;
       }
+      // Extension forwarding log batches from its chrome.storage ring
+      // buffer. Validate the shape, write each entry through the
+      // extension-log file. Drop malformed entries silently.
+      //
+      // DoS protection:
+      //   - Cap entries per batch at 200 (matches extension's MAX_BATCH_ENTRIES
+      //     with headroom). A malicious extension cannot stall the bridge's
+      //     event loop with one giant batch.
+      //   - Per-browser rate limit enforced upstream by WS framing
+      //     (msgsPerSec checked by ws library's maxPayload setting).
+      if (msg.type === 'log_batch' && Array.isArray(msg.entries)) {
+        const MAX_BATCH = 200;
+        if (msg.entries.length > MAX_BATCH) {
+          bridgeLog().warn('bridge.log_batch.oversize_dropped', {
+            browserId,
+            received: msg.entries.length,
+            cap: MAX_BATCH,
+          });
+          return;
+        }
+        for (const entry of msg.entries) {
+          if (!isValidLogEntry(entry)) continue;
+          // Stamp the receiving bridge's PID so we can later distinguish
+          // logs that came through different bridge generations.
+          logRecord({ filePath: getExtensionLogPath() }, {
+            ...entry,
+            _via_bridge_pid: process.pid,
+            _from_browser: browserId,
+          });
+        }
+        return;
+      }
       if (msg.id) {
         const pending = pendingRequests.get(msg.id);
         if (pending) {
@@ -301,16 +336,34 @@ function handleExtension(ws: WebSocket, browserId: string): void {
     clearInterval(serverPingTimer);
     if (browserSockets.get(browserId) === ws) {
       unindexBrowser(browserId);
-      process.stderr.write(`Browser disconnected: ${browserId}\n`);
+      bridgeLog().info('bridge.browser.disconnected', {
+        browserId,
+        durationMs: Date.now() - connectedAt,
+        pendingRequestCount: pendingRequests.size,
+      });
     }
   });
+}
+
+/**
+ * Sanity check incoming log entries from the extension. Defends against
+ * a buggy or malicious extension sending huge / malformed payloads that
+ * would balloon extension.log.
+ */
+function isValidLogEntry(entry: unknown): entry is LogRecord {
+  if (!entry || typeof entry !== 'object') return false;
+  const e = entry as Record<string, unknown>;
+  if (typeof e.event !== 'string' || e.event.length > 200) return false;
+  if (e.src !== 'ext') return false; // bridge.log is only for bridge events
+  if (e.lvl !== 'info' && e.lvl !== 'warn' && e.lvl !== 'error') return false;
+  return true;
 }
 
 // ── Handle secondary MCP client connection (over WS) ──────────────────────
 function handleMcpClient(ws: WebSocket): void {
   const clientId = randomUUID();
   mcpClients.set(clientId, ws);
-  process.stderr.write(`MCP client connected: ${clientId}\n`);
+  bridgeLog().info('bridge.mcp.client_connected', { clientId, transport: 'ws' });
 
   ws.on('message', (data) => {
     const raw = data.toString();
@@ -324,7 +377,7 @@ function handleMcpClient(ws: WebSocket): void {
 
   ws.on('close', () => {
     mcpClients.delete(clientId);
-    process.stderr.write(`MCP client disconnected: ${clientId}\n`);
+    bridgeLog().info('bridge.mcp.client_disconnected', { clientId });
     for (const [id, p] of pendingRequests) {
       if (p.clientId === clientId) {
         clearTimeout(p.timer);
@@ -397,6 +450,13 @@ async function sendToolRequest(
   }
 
   if (!ws) {
+    bridgeLog().warn('bridge.route.no_browser', {
+      clientId,
+      mcpId: originalId,
+      toolName: tool,
+      requestedBrowserId: browserId,
+      availableBrowsers: Array.from(browserSockets.keys()),
+    });
     throw new Error('No browser extension connected');
   }
 
@@ -405,13 +465,50 @@ async function sendToolRequest(
     // Server-generated id, unique across all MCP clients, used as the
     // routing key in pendingRequests and as the id sent to the extension.
     const browserBoundId = `b_${randomUUID()}`;
+    const sentAt = Date.now();
+
+    bridgeLog().info('bridge.tool_request.sent', {
+      mcpId: originalId,
+      clientId,
+      browserBoundId,
+      browserId,
+      toolName: tool,
+      args: redact(params),
+    });
 
     const timer = setTimeout(() => {
       pendingRequests.delete(browserBoundId);
+      bridgeLog().warn('bridge.tool_request.timed_out', {
+        mcpId: originalId,
+        clientId,
+        browserBoundId,
+        browserId,
+        toolName: tool,
+        elapsedMs: Date.now() - sentAt,
+      });
       reject(new Error('Tool request timed out'));
     }, REQUEST_TIMEOUT_MS);
 
-    pendingRequests.set(browserBoundId, { clientId, originalId, resolve, reject, timer });
+    pendingRequests.set(browserBoundId, {
+      clientId,
+      originalId,
+      resolve: (response: unknown) => {
+        const r = response as { type?: string; result?: { isError?: boolean } };
+        bridgeLog().info('bridge.tool_response.received', {
+          mcpId: originalId,
+          clientId,
+          browserBoundId,
+          browserId,
+          toolName: tool,
+          durationMs: Date.now() - sentAt,
+          type: r?.type ?? 'unknown',
+          isError: r?.result?.isError === true || r?.type === 'tool_error',
+        });
+        resolve(response);
+      },
+      reject,
+      timer,
+    });
     ws.send(JSON.stringify({ type: 'tool_request', id: browserBoundId, tool, params }));
   });
 }
@@ -667,6 +764,32 @@ function handleMcpMessage(clientId: string, raw: string, reply: (msg: unknown) =
       const tabIdRoute = extractBrowserIdFromTabId(toolArgs.tab_id);
       const browserId = tabIdRoute || (toolArgs.browser as string) || 'default';
       const originalId = (msg.id ?? null) as string | number | null;
+      const receivedAt = Date.now();
+
+      bridgeLog().info('bridge.mcp.tools_call.received', {
+        mcpId: originalId,
+        clientId,
+        toolName,
+        targetBrowserId: browserId,
+        routeSource: tabIdRoute ? 'tab_id_prefix' : (toolArgs.browser ? 'explicit_browser_param' : 'default'),
+        args: redact(toolArgs),
+      });
+
+      const replyWithMetrics = (responseEnvelope: { result?: { content?: unknown[]; isError?: boolean } }) => {
+        const isError = responseEnvelope?.result?.isError === true;
+        const contentItems = Array.isArray(responseEnvelope?.result?.content)
+          ? responseEnvelope.result.content.length
+          : 0;
+        bridgeLog().info('bridge.mcp.tools_call.replied', {
+          mcpId: originalId,
+          clientId,
+          toolName,
+          durationMs: Date.now() - receivedAt,
+          isError,
+          contentItems,
+        });
+        reply(responseEnvelope);
+      };
 
       // list_tabs is a fan-out tool: aggregate tabs across every connected
       // extension instance, regardless of profile, so users with multiple
@@ -674,35 +797,57 @@ function handleMcpMessage(clientId: string, raw: string, reply: (msg: unknown) =
       // narrows the broadcast to a single brand.
       if (toolName === 'list_tabs') {
         const brandFilter = browserId === 'default' ? null : browserId;
+        const fanoutId = `fo_${randomUUID()}`;
+        bridgeLog().info('bridge.fanout.started', { fanoutId, mcpId: originalId, toolName, brandFilter });
         fanOutToolRequest(clientId, toolName, toolArgs, brandFilter)
           .then((results) => {
+            const succeeded = results.filter((r) => r.ok).length;
+            const errored = results.filter((r) => !r.ok).length;
+            bridgeLog().info('bridge.fanout.aggregated', {
+              fanoutId,
+              mcpId: originalId,
+              totalTargets: results.length,
+              succeeded,
+              errored,
+            });
             if (results.length === 0) {
-              reply({
+              replyWithMetrics({
                 jsonrpc: '2.0', id: msg.id,
                 result: { content: [{ type: 'text', text: 'No browser extension connected' }], isError: true },
-              });
+              } as { result: { content: unknown[]; isError: boolean } });
               return;
             }
-            reply({ jsonrpc: '2.0', id: msg.id, result: mergeFanOutListTabs(results) });
+            replyWithMetrics({ jsonrpc: '2.0', id: msg.id, result: mergeFanOutListTabs(results) } as { result: { content: unknown[]; isError?: boolean } });
           })
           .catch((err: Error) => {
-            reply({
+            bridgeLog().error('bridge.fanout.failed', {
+              fanoutId,
+              mcpId: originalId,
+              ...redactError(err),
+            });
+            replyWithMetrics({
               jsonrpc: '2.0', id: msg.id,
               result: { content: [{ type: 'text', text: `list_tabs fan-out failed: ${err.message}` }], isError: true },
-            });
+            } as { result: { content: unknown[]; isError: boolean } });
           });
         return;
       }
 
       sendToolRequest(clientId, originalId, toolName, toolArgs, browserId)
         .then((response: unknown) => {
-          reply({ jsonrpc: '2.0', id: msg.id, result: translateExtensionResponse(response) });
+          replyWithMetrics({ jsonrpc: '2.0', id: msg.id, result: translateExtensionResponse(response) } as { result: { content: unknown[]; isError?: boolean } });
         })
         .catch((err: Error) => {
-          reply({
+          bridgeLog().warn('bridge.tool_request.failed', {
+            mcpId: originalId,
+            clientId,
+            toolName,
+            ...redactError(err),
+          });
+          replyWithMetrics({
             jsonrpc: '2.0', id: msg.id,
             result: { content: [{ type: 'text', text: `Tool execution failed: ${err.message}` }], isError: true },
-          });
+          } as { result: { content: unknown[]; isError: boolean } });
         });
       return;
     }
@@ -729,33 +874,81 @@ function zodToJsonSchema(z: unknown): Record<string, unknown> {
   }
 }
 
-// ── Crash-log location ────────────────────────────────────────────────────
-function getBridgeLogPath(): string {
+// ── Log paths ─────────────────────────────────────────────────────────────
+// The bridge writes its NDJSON log to <installDir>/logs/bridge.log. The
+// extension forwards its own log lines over WS; the bridge writes those
+// to <installDir>/logs/extension.log via the same logger module.
+//
+// Migration: prior versions wrote to <installDir>/bridge.log (single
+// file, no rotation, freeform lines). On startup, if that file exists,
+// we rename it to logs/bridge.log.legacy so historical crash records
+// stay available without being mixed into the new NDJSON file.
+
+function getInstallDir(): string {
   switch (osPlatform()) {
     case 'win32':
-      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'agenthub', 'bridge.log');
+      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'agenthub');
     case 'darwin':
-      return join(homedir(), 'Library', 'Application Support', 'agenthub', 'bridge.log');
+      return join(homedir(), 'Library', 'Application Support', 'agenthub');
     default:
-      return join(homedir(), '.local', 'share', 'agenthub', 'bridge.log');
+      return join(homedir(), '.local', 'share', 'agenthub');
   }
 }
 
-function appendBridgeLog(line: string): void {
+function getBridgeLogPath(): string {
+  return join(getInstallDir(), 'logs', 'bridge.log');
+}
+
+function getExtensionLogPath(): string {
+  return join(getInstallDir(), 'logs', 'extension.log');
+}
+
+function getLegacyBridgeLogPath(): string {
+  return join(getInstallDir(), 'bridge.log');
+}
+
+/**
+ * One-time startup migration: move the pre-0.5.6 single-file
+ * bridge.log into the new logs/ subdirectory. Never deletes the
+ * source — rename preserves data atomically if the destination dir
+ * is writable. Failures are silent (logger must not block startup).
+ */
+function migrateLegacyBridgeLog(): void {
+  const legacy = getLegacyBridgeLogPath();
+  const target = join(getInstallDir(), 'logs', 'bridge.log.legacy');
   try {
-    const path = getBridgeLogPath();
-    const dir = dirname(path);
+    if (!existsSync(legacy)) return;
+    if (existsSync(target)) return; // already migrated
+    const dir = join(getInstallDir(), 'logs');
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    const stamp = new Date().toISOString();
-    appendFileSync(path, `[${stamp}] [pid ${process.pid}] ${line}\n`, 'utf-8');
+    renameSync(legacy, target);
   } catch {
-    // Don't let a logging failure stop the bridge.
+    // Permissions / cross-device move — give up. Old file stays in place.
   }
 }
+
+// Lazily-initialized bridge logger. Created on first call to bridgeLog()
+// so tests can override the install dir via env (LOCALAPPDATA).
+let _bridgeLogger: Logger | null = null;
+function bridgeLog(): Logger {
+  if (!_bridgeLogger) {
+    _bridgeLogger = makeLogger({ filePath: getBridgeLogPath() }, 'bridge', process.pid);
+  }
+  return _bridgeLogger;
+}
+
+// Note: extension log entries are written directly via logRecord() in
+// handleExtension's log_batch handler — they arrive pre-formatted from the
+// extension (carrying their own src='ext'/pid). A cached logger would
+// override those defaults, so we don't keep one here.
 
 // ── Start server ──────────────────────────────────────────────────────────
 export function startServer(port: number): void {
   serverPort = port;
+  // Migrate the old single-file bridge.log into the new logs/ directory.
+  // Cheap one-time check; no-op on subsequent startups.
+  migrateLegacyBridgeLog();
+
   // Resolve the configured extension-id allowlist once at startup. The set
   // can stay empty — in that case verifyClient falls back to accepting any
   // chrome-extension:// origin (back-compat with installs predating the
@@ -763,16 +956,14 @@ export function startServer(port: number): void {
   // are accepted: a co-installed malicious extension can no longer drive
   // the bridge via chrome.debugger blast radius.
   const allowedExtensionIds = loadAllowedExtensionIds();
-  if (allowedExtensionIds.size > 0) {
-    process.stderr.write(
-      `Origin allowlist active: ${Array.from(allowedExtensionIds).join(', ')}\n`,
-    );
-  } else {
-    process.stderr.write(
-      'Origin allowlist not configured — accepting any chrome-extension:// origin. ' +
-      'Set AGENTHUB_ALLOWED_EXTENSION_IDS or write <installDir>/extension-ids.json to pin.\n',
-    );
-  }
+  bridgeLog().info('bridge.lifecycle.start', {
+    port,
+    version: VERSION,
+    buildId: BUILD_ID,
+    startedBy: process.env.AI_BROWSER_COPILOT_STARTED_BY ?? 'service',
+    allowedExtensionIdsCount: allowedExtensionIds.size,
+    logFilePath: getBridgeLogPath(),
+  });
   // Origin check via verifyClient runs DURING the HTTP upgrade, before the
   // WS handshake completes. This means a disallowed origin sees an HTTP 401,
   // never gets an `open` event, and cannot send any data. The alternative
@@ -781,11 +972,20 @@ export function startServer(port: number): void {
   const wss = new WebSocketServer({
     host: '127.0.0.1',
     port,
+    // Cap incoming frame size at 4 MiB. Real tool requests max out around
+    // 200 KB (page snapshots); 4 MiB headroom is generous. Beyond this,
+    // ws closes the connection — protects bridge memory from a runaway
+    // log_batch or malicious page-scraping tool result.
+    maxPayload: 4 * 1024 * 1024,
     verifyClient: (info, done) => {
       if (isAllowedOrigin(info.origin, allowedExtensionIds)) {
+        bridgeLog().info('bridge.ws.upgrade_accepted', { origin: info.origin ?? '(none)' });
         done(true);
       } else {
-        process.stderr.write(`Rejected WS upgrade from disallowed origin: ${info.origin}\n`);
+        bridgeLog().warn('bridge.ws.upgrade_rejected', {
+          origin: info.origin ?? '(none)',
+          reason: 'origin_not_in_allowlist',
+        });
         done(false, 401, 'forbidden origin');
       }
     },
@@ -805,7 +1005,7 @@ export function startServer(port: number): void {
     });
     registerCleanupHandlers();
   } catch (err) {
-    process.stderr.write(`Failed to write lock file: ${(err as Error).message}\n`);
+    bridgeLog().error('bridge.lifecycle.lock_file_write_failed', { ...redactError(err) });
   }
 
   // Crash visibility: when launched detached or via autostart there is no
@@ -814,16 +1014,14 @@ export function startServer(port: number): void {
   // The cleanup handlers registered above still run on process.exit and tear
   // down the lock file.
   process.on('uncaughtException', (err) => {
-    appendBridgeLog(`uncaughtException: ${err?.stack ?? err}`);
+    bridgeLog().error('bridge.lifecycle.uncaught', { ...redactError(err) });
     // Re-throw so the default handler still tears the process down — autostart
     // / detached-spawn callers should restart it on the next event.
     setTimeout(() => { throw err; }, 0);
   });
   process.on('unhandledRejection', (reason) => {
-    appendBridgeLog(`unhandledRejection: ${reason instanceof Error ? reason.stack : String(reason)}`);
+    bridgeLog().error('bridge.lifecycle.unhandled_rejection', { ...redactError(reason) });
   });
-
-  appendBridgeLog(`Server started on 127.0.0.1:${port} v${VERSION} buildId=${BUILD_ID} startedBy=${process.env.AI_BROWSER_COPILOT_STARTED_BY ?? 'service'}`);
 
   wss.on('connection', (ws, req) => {
     const params = parseQuery(req.url);
@@ -857,7 +1055,8 @@ export function startServer(port: number): void {
     (process.stdin as NodeJS.ReadStream).resume();
   }
 
-  process.stderr.write(`Server started on 127.0.0.1:${port} (pid=${process.pid})\n`);
+  // Also note the stdio MCP client is implicitly connected.
+  bridgeLog().info('bridge.mcp.client_connected', { clientId: 'stdio', transport: 'stdio' });
 }
 
 /** Stop the WS server and clean up the lock file. Used by tests. */

@@ -7,6 +7,7 @@ import { readFormFields } from '../content/form-reader.js';
 import { detectAndExtractData } from '../content/data-detector.js';
 import { getBrowserInstanceId } from '../shared/browser-instance-id.js';
 import { composeTabId, parseTabId } from '../shared/tab-id.js';
+import { logRecord, logError } from '../shared/logger.js';
 
 /**
  * Walk the DOM, assign a stable `data-ai-ref="eN"` to every interactive
@@ -932,6 +933,12 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
 export const dispatchTool = async (toolName: string, params: Record<string, unknown>): Promise<unknown> => {
   const handler = tools[toolName];
   if (!handler) {
+    void logRecord({
+      event: 'ext.tool.dispatch.unknown',
+      lvl: 'warn',
+      toolName,
+      params,
+    });
     throw Object.assign(new Error(`Unknown tool: ${toolName}`), { code: 'CONTENT_UNAVAILABLE' });
   }
 
@@ -950,18 +957,36 @@ export const dispatchTool = async (toolName: string, params: Record<string, unkn
   };
 
   await logActivity(entry);
+  void logRecord({
+    event: 'ext.tool.dispatch.start',
+    toolName,
+    activityId: entry.id,
+    targetUrl: targetUrl ?? undefined,
+    params,
+  });
 
   try {
     const result = await handler(params);
     entry.status = 'success';
     entry.duration = Date.now() - startTime;
     await logActivity(entry);
+    void logRecord({
+      event: 'ext.tool.dispatch.complete',
+      toolName,
+      activityId: entry.id,
+      durationMs: entry.duration,
+    });
     return result;
   } catch (error: unknown) {
     entry.status = 'error';
     entry.duration = Date.now() - startTime;
     entry.errorCode = (error as { code?: string })?.code ?? 'CONTENT_UNAVAILABLE';
     await logActivity(entry);
+    void logError('ext.tool.dispatch.error', error, {
+      toolName,
+      activityId: entry.id,
+      durationMs: entry.duration,
+    });
     throw error;
   }
 };

@@ -9,6 +9,7 @@ import {
   updateBadge,
 } from '../background/tool-scanner';
 import type { ToolScanResult, DiagnosticReason } from '../shared/types';
+import { logRecord, logError } from '../shared/logger';
 
 const ALARM_NAME = 'connection-check';
 const ALARM_PERIOD_MINUTES = 0.5; // 30s — Chrome minimum for periodic alarms
@@ -30,6 +31,14 @@ const RECOVERABLE_REASONS: DiagnosticReason[] = [
 ];
 
 export default defineBackground(() => {
+  // SW startup is the FIRST thing the extension does after wake. Persisted
+  // log entries from a prior SW life are still in chrome.storage.local —
+  // they'll be flushed when the WS opens (see connection-manager onServerInfo).
+  void logRecord({
+    event: 'ext.sw.start',
+    swStartedAt: Date.now(),
+  });
+
   let scanState = createInitialScanState();
   const discovery = createServiceDiscovery();
 
@@ -55,6 +64,7 @@ export default defineBackground(() => {
         .catch((error: unknown) => {
           const message = error instanceof Error ? error.message : 'Unknown error';
           const code = (error as { code?: string })?.code ?? 'CONTENT_UNAVAILABLE';
+          void logError('ext.tool.send_error', error, { requestId: id, tool });
           manager.getRelay()?.sendToolError(id, { message, code });
         });
     },

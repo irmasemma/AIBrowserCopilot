@@ -1,5 +1,6 @@
 import type { DiagnosticReason } from '../shared/types';
 import { getBrowserInstanceId } from '../shared/browser-instance-id';
+import { logRecord } from '../shared/logger';
 
 const NM_HELPER_NAME = 'com.agenthub.native_host_helper';
 const DEFAULT_PORT = 7483;
@@ -89,16 +90,38 @@ export interface ServiceDiscovery {
 
 export function createServiceDiscovery(): ServiceDiscovery {
   async function sendNativeMessage(action: string, extra: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+    const startedAt = Date.now();
+    void logRecord({ event: 'ext.helper.invoke.start', action });
     return new Promise((resolve, reject) => {
       if (typeof chrome !== 'undefined' && chrome.runtime?.sendNativeMessage) {
         chrome.runtime.sendNativeMessage(NM_HELPER_NAME, { action, ...extra }, (response) => {
           if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
+            const errMsg = chrome.runtime.lastError.message ?? 'unknown';
+            void logRecord({
+              event: 'ext.helper.invoke.error',
+              lvl: 'warn',
+              action,
+              durationMs: Date.now() - startedAt,
+              errorMessage: errMsg,
+            });
+            reject(new Error(errMsg));
           } else {
+            void logRecord({
+              event: 'ext.helper.invoke.complete',
+              action,
+              durationMs: Date.now() - startedAt,
+              responseKeys: response ? Object.keys(response) : [],
+            });
             resolve(response as Record<string, unknown>);
           }
         });
       } else {
+        void logRecord({
+          event: 'ext.helper.invoke.error',
+          lvl: 'warn',
+          action,
+          errorMessage: 'native_messaging_unavailable',
+        });
         reject(new Error('Native messaging not available'));
       }
     });
