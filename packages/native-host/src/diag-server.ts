@@ -120,8 +120,23 @@ export interface StateSource {
     allowedExtensionIdsCount: number;
     allowedExtensionIdsSample: string[];
   };
-  browsers: Array<{ browserId: string; connectedAt: string }>;
-  mcpClients: Array<{ clientId: string; transport: string; connectedAt: string }>;
+  browsers: Array<{
+    browserId: string;
+    connectedAt: string;
+    /** Number of recent requests routed to this browser (cross-referenced
+     *  from RecentActivity buffer). */
+    recentRequestCount: number;
+  }>;
+  mcpClients: Array<{
+    clientId: string;
+    transport: string;
+    connectedAt: string;
+    /** Captured from the MCP initialize handshake. Most clients send this
+     *  (Claude Code, Cursor, VS Code); some legacy ones don't. */
+    clientInfo?: { name: string; version: string };
+    /** Number of recent requests originated by this client. */
+    recentRequestCount: number;
+  }>;
   recentActivity: RecentActivity;
 }
 

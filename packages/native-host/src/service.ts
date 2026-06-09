@@ -33,9 +33,15 @@ const REQUEST_TIMEOUT_MS = 30_000;
  *  by handleMcpMessage's tools/call path and sendToolRequest. */
 const recentActivity = new RecentActivity();
 
-/** Map of clientId → { transport, connectedAt }. Updated by handleMcpClient
- *  (WS transport) and on stdio attach in startServer. Used by /api/state. */
-const mcpClientRegistry = new Map<string, { transport: string; connectedAt: string }>();
+/** Map of clientId → registry info. Updated by handleMcpClient (WS) and
+ *  on stdio attach in startServer. Used by /api/state.
+ *  clientInfo (name + version) is captured later from the initialize
+ *  handshake — most MCP clients (Claude Code, Cursor, VS Code) send it. */
+const mcpClientRegistry = new Map<string, {
+  transport: string;
+  connectedAt: string;
+  clientInfo?: { name: string; version: string };
+}>();
 
 /** Map of browserId → connection start time. Updated by handleExtension.
  *  Used by /api/state. */
@@ -809,13 +815,31 @@ function handleMcpMessage(clientId: string, raw: string, reply: (msg: unknown) =
 
     if (msg.method === 'initialize') {
       const startedAt = Date.now();
+      const clientName = msg.params?.clientInfo?.name;
+      const clientVersion = msg.params?.clientInfo?.version;
       bridgeLog().info('bridge.mcp.initialize.received', {
         mcpId: msg.id ?? null,
         clientId,
-        clientName: msg.params?.clientInfo?.name,
-        clientVersion: msg.params?.clientInfo?.version,
+        clientName,
+        clientVersion,
         protocolVersion: msg.params?.protocolVersion,
       });
+      // Stash clientInfo on the registry so the diag UI can show a
+      // friendly name ("Claude Code") instead of just a clientId UUID.
+      // Defensive: only store if values are strings (a misbehaving client
+      // could send anything). Limit length so a client can't bloat the
+      // registry. The redact() call is for the LOG line; the registry
+      // gets the raw values bounded by length.
+      const existing = mcpClientRegistry.get(clientId);
+      if (existing && typeof clientName === 'string' && typeof clientVersion === 'string') {
+        mcpClientRegistry.set(clientId, {
+          ...existing,
+          clientInfo: {
+            name: clientName.slice(0, 60),
+            version: clientVersion.slice(0, 30),
+          },
+        });
+      }
       reply({
         jsonrpc: '2.0', id: msg.id,
         result: {
@@ -1143,25 +1167,43 @@ export function startServer(port: number): void {
         bridgeLog().info('bridge.diag.reload_extension_broadcast', { count });
         return { broadcastTo: count };
       },
-      getState: (): StateSource => ({
-        bridge: {
-          version: VERSION,
-          buildId: BUILD_ID,
-          pid: process.pid,
-          port,
-          uptimeSec: Math.floor((Date.now() - startTime) / 1000),
-          startedBy: process.env.AI_BROWSER_COPILOT_STARTED_BY ?? 'service',
-          allowedExtensionIdsCount: allowedExtensionIds.size,
-          allowedExtensionIdsSample: Array.from(allowedExtensionIds).map((id) => id.slice(0, 8) + '…'),
-        },
-        browsers: Array.from(browserRegistry.entries()).map(([browserId, info]) => ({
-          browserId, connectedAt: info.connectedAt,
-        })),
-        mcpClients: Array.from(mcpClientRegistry.entries()).map(([clientId, info]) => ({
-          clientId, transport: info.transport, connectedAt: info.connectedAt,
-        })),
-        recentActivity,
-      }),
+      getState: (): StateSource => {
+        // Cross-reference: for each connected client / browser, count
+        // how many of the recent N requests touched them. Cheap O(N*M)
+        // where N≤50 (RecentActivity cap) and M = browsers+clients (≤10).
+        const requests = recentActivity.snapshot().requests;
+        const browserCounts = new Map<string, number>();
+        const clientCounts = new Map<string, number>();
+        for (const r of requests) {
+          if (r.browserId) browserCounts.set(r.browserId, (browserCounts.get(r.browserId) ?? 0) + 1);
+          if (r.clientId) clientCounts.set(r.clientId, (clientCounts.get(r.clientId) ?? 0) + 1);
+        }
+        return {
+          bridge: {
+            version: VERSION,
+            buildId: BUILD_ID,
+            pid: process.pid,
+            port,
+            uptimeSec: Math.floor((Date.now() - startTime) / 1000),
+            startedBy: process.env.AI_BROWSER_COPILOT_STARTED_BY ?? 'service',
+            allowedExtensionIdsCount: allowedExtensionIds.size,
+            allowedExtensionIdsSample: Array.from(allowedExtensionIds).map((id) => id.slice(0, 8) + '…'),
+          },
+          browsers: Array.from(browserRegistry.entries()).map(([browserId, info]) => ({
+            browserId,
+            connectedAt: info.connectedAt,
+            recentRequestCount: browserCounts.get(browserId) ?? 0,
+          })),
+          mcpClients: Array.from(mcpClientRegistry.entries()).map(([clientId, info]) => ({
+            clientId,
+            transport: info.transport,
+            connectedAt: info.connectedAt,
+            ...(info.clientInfo ? { clientInfo: info.clientInfo } : {}),
+            recentRequestCount: clientCounts.get(clientId) ?? 0,
+          })),
+          recentActivity,
+        };
+      },
       logPaths: () => ({
         bridge: getBridgeLogPath(),
         extension: getExtensionLogPath(),

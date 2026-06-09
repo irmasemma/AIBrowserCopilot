@@ -126,6 +126,43 @@ export const DIAG_HTML = `<!doctype html>
   details { font-size: 12px; color: #475569; margin-top: 6px; }
   details summary { cursor: pointer; color: #64748b; }
   details code { font-family: ui-monospace, "Cascadia Code", monospace; background: #f1f5f9; padding: 1px 5px; border-radius: 4px; }
+
+  /* ── Interactive item lists (MCP clients, browsers) ─── */
+  .item-list { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+  .item-empty { color: #64748b; font-size: 12px; font-style: italic; padding: 6px 0; }
+  .item {
+    background: rgba(255,255,255,0.6); border: 1px solid #e2e8f0; border-radius: 8px;
+    padding: 8px 10px; font-size: 12px; cursor: pointer; transition: all 0.12s;
+    display: flex; align-items: center; gap: 8px;
+    text-align: left; width: 100%; font-family: inherit; color: inherit;
+  }
+  .item:hover { border-color: #93c5fd; background: white; }
+  .item:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+  .item.expanded { background: white; border-color: #3b82f6; }
+  .item-emoji { font-size: 14px; flex-shrink: 0; }
+  .item-main { flex: 1; min-width: 0; overflow: hidden; }
+  .item-main b { display: block; color: #0f172a; font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item-main .item-sub { color: #64748b; font-size: 11px; }
+  .item-count { font-size: 10px; color: #475569; background: #e2e8f0; padding: 2px 7px; border-radius: 999px; font-weight: 600; flex-shrink: 0; }
+  .item.expanded .item-count { background: #dbeafe; color: #1e40af; }
+  .item-caret { color: #94a3b8; transition: transform 0.15s; flex-shrink: 0; }
+  .item.expanded .item-caret { transform: rotate(90deg); color: #3b82f6; }
+  .item-detail {
+    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+    padding: 10px 12px; font-size: 11px; color: #475569; margin-top: -2px;
+    font-family: ui-monospace, "Cascadia Code", monospace; line-height: 1.6;
+  }
+  .item-detail .row { display: flex; gap: 8px; margin-bottom: 4px; }
+  .item-detail .row:last-child { margin-bottom: 0; }
+  .item-detail .label { color: #94a3b8; min-width: 90px; flex-shrink: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; }
+  .item-detail .val { color: #0f172a; word-break: break-all; }
+  .item-detail .recent-mini {
+    margin-top: 8px; padding-top: 8px; border-top: 1px dashed #cbd5e1;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .item-detail .recent-mini .mini-title { font-weight: 600; font-size: 11px; color: #475569; margin-bottom: 4px; }
+  .item-detail .recent-mini .mini-row { font-size: 11px; color: #64748b; padding: 2px 0; }
+  .item-detail .recent-mini .mini-row .mini-emoji { margin-right: 4px; }
 </style>
 </head>
 <body>
@@ -213,7 +250,7 @@ export const DIAG_HTML = `<!doctype html>
 <script>
 "use strict";
 const POLL_MS = 1500;
-let state = { state: null, logs: { bridge: [], extension: [], helper: [] }, currentTab: 'bridge' };
+let state = { state: null, logs: { bridge: [], extension: [], helper: [] }, currentTab: 'bridge', openItems: new Set() };
 
 // ── Utilities ──────────────────────────────────────────────────────────
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -276,29 +313,31 @@ function render() {
     '<b>Port:</b> ' + s.bridge.port + ' &nbsp; <b>PID:</b> ' + s.bridge.pid + '<br><b>Up:</b> ' + fmtUptime(s.bridge.uptimeSec) +
     '<details><summary>More</summary>Build: ' + esc(s.bridge.buildId) + '<br>Started by: ' + esc(s.bridge.startedBy) + '<br>Allowlist: ' + s.bridge.allowedExtensionIdsCount + ' ID(s)</details>';
 
-  // MCP clients
+  // MCP clients — interactive list (click to expand details)
   const mcpCount = s.mcpClients.length;
   setStatus('mcp', mcpCount > 0 ? 'ok' : 'idle', mcpCount + ' connected');
   document.getElementById('mcp-meta').innerHTML = mcpCount === 0
-    ? '<i>No AI assistant connected yet.</i><details><summary>How to connect</summary>Configure Claude / Cursor / VS Code with MCP server <code>agenthub</code>.</details>'
-    : s.mcpClients.map(c => '<b>' + esc(c.transport) + ':</b> ' + esc(c.clientId.slice(0, 8)) + '…').join('<br>');
+    ? '<div class="item-empty">No AI assistant connected yet.</div>'
+      + '<details><summary>How to connect</summary>Configure Claude / Cursor / VS Code with MCP server <code>agenthub</code>.</details>'
+    : '<div class="item-list">' + s.mcpClients.map((c, i) =>
+        renderClientItem(c, i, s.recentRequests || [])
+      ).join('') + '</div>';
 
-  // Extension
+  // Extension card — count summary (the per-browser detail lives on the next card)
   const extCount = s.browsers.length;
   setStatus('ext', extCount > 0 ? 'ok' : 'bad', extCount > 0 ? 'On' : 'Not connected');
   document.getElementById('ext-meta').innerHTML = extCount === 0
-    ? '<i>No browser extension connected.</i><details><summary>How to fix</summary>1. Open Chrome / Edge<br>2. Open the AgentHub side panel<br>3. Wait ~5 seconds</details>'
-    : '<b>' + extCount + '</b> browser' + (extCount===1?'':'s') + ' connected';
+    ? '<div class="item-empty">No browser extension connected.</div>'
+      + '<details><summary>How to fix</summary>1. Open Chrome / Edge<br>2. Open the AgentHub side panel<br>3. Wait ~5 seconds</details>'
+    : '<b>' + extCount + '</b> browser' + (extCount === 1 ? '' : 's') + ' connected — see next →';
 
-  // Browsers
-  setStatus('browser', extCount > 0 ? 'ok' : 'idle', extCount === 0 ? 'No browsers' : extCount + ' browser' + (extCount===1?'':'s'));
+  // Browsers — interactive list (click to expand details)
+  setStatus('browser', extCount > 0 ? 'ok' : 'idle', extCount === 0 ? 'No browsers' : extCount + ' browser' + (extCount === 1 ? '' : 's'));
   document.getElementById('browser-meta').innerHTML = s.browsers.length === 0
-    ? '—'
-    : s.browsers.map(b => {
-        const brand = b.browserId.split(':')[0];
-        const id = b.browserId.split(':')[1] || '';
-        return '<b>' + esc(brand) + ':</b> ' + esc(id.slice(0, 8)) + '…';
-      }).join('<br>');
+    ? '<div class="item-empty">No browsers yet.</div>'
+    : '<div class="item-list">' + s.browsers.map((b, i) =>
+        renderBrowserItem(b, i, s.recentRequests || [])
+      ).join('') + '</div>';
 
   // Arrows
   setArrow(0, mcpCount > 0 ? 'ok' : null);
@@ -323,6 +362,117 @@ function render() {
 
   // Activity timeline
   renderActivity(s.recentRequests || []);
+
+  // Restore any item-detail panels the user had opened before the poll.
+  reapplyOpenItems();
+}
+
+// ── Friendly name resolution for MCP clients ──────────────────────────
+function mcpClientFriendlyName(c) {
+  if (c.clientInfo && c.clientInfo.name) {
+    return c.clientInfo.name + (c.clientInfo.version ? ' v' + c.clientInfo.version : '');
+  }
+  // stdio: the MCP-over-stdio attached client (likely the bridge's own
+  // stdio if launched from a config); show transport prominently
+  if (c.transport === 'stdio') return 'Stdio MCP client';
+  // ws: a Node MCP child (like the VS Code helper); show short id
+  return 'MCP client ' + (c.clientId || '').slice(0, 8) + '…';
+}
+function mcpClientEmoji(c) {
+  const name = ((c.clientInfo && c.clientInfo.name) || '').toLowerCase();
+  if (name.includes('claude')) return '🤖';
+  if (name.includes('cursor')) return '🟠';
+  if (name.includes('vscode') || name.includes('vs code') || name.includes('copilot')) return '🟦';
+  if (name.includes('zed')) return '⚡';
+  return c.transport === 'stdio' ? '⌨️' : '🔌';
+}
+function browserBrandEmoji(brand) {
+  if (brand === 'chrome') return '🟢';
+  if (brand === 'edge') return '🔷';
+  if (brand === 'brave') return '🦁';
+  if (brand === 'arc') return '🌈';
+  if (brand === 'vivaldi') return '🟥';
+  return '🌐';
+}
+
+function renderClientItem(c, i, requests) {
+  const friendly = mcpClientFriendlyName(c);
+  const emoji = mcpClientEmoji(c);
+  const recentForThis = requests.filter(r => r.clientId === c.clientId).slice(-3).reverse();
+  const detailHtml =
+    '<div class="row"><span class="label">Type</span><span class="val">' + esc(c.transport) + (c.clientInfo ? ' • ' + esc(c.clientInfo.name) + ' v' + esc(c.clientInfo.version) : '') + '</span></div>' +
+    '<div class="row"><span class="label">Client ID</span><span class="val">' + esc(c.clientId) + '</span></div>' +
+    '<div class="row"><span class="label">Connected</span><span class="val">' + fmtRelTime(c.connectedAt) + ' (' + esc(c.connectedAt) + ')</span></div>' +
+    '<div class="row"><span class="label">Tool calls</span><span class="val">' + c.recentRequestCount + ' in last 50</span></div>' +
+    (recentForThis.length > 0 ? '<div class="recent-mini"><div class="mini-title">Recent activity</div>' +
+      recentForThis.map(r => {
+        const e = r.status === 'success' ? '✅' : r.status === 'error' ? '❌' : r.status === 'pending' ? '⏳' : '⚠️';
+        return '<div class="mini-row"><span class="mini-emoji">' + e + '</span>' + esc(r.tool) + ' → ' + esc(r.browserId.split(':')[0]) + ' (' + (r.durationMs != null ? r.durationMs + 'ms' : 'pending') + ')</div>';
+      }).join('') + '</div>' : '');
+  return '<button class="item" data-kind="mcp" data-idx="' + i + '" onclick="toggleItem(this)" aria-expanded="false">' +
+    '<span class="item-emoji">' + emoji + '</span>' +
+    '<span class="item-main"><b>' + esc(friendly) + '</b>' +
+    '<span class="item-sub">' + esc(c.transport) + ' • ' + fmtRelTime(c.connectedAt) + '</span></span>' +
+    '<span class="item-count">' + c.recentRequestCount + ' call' + (c.recentRequestCount === 1 ? '' : 's') + '</span>' +
+    '<span class="item-caret">▸</span>' +
+    '</button>' +
+    '<div class="item-detail" data-detail-for="mcp-' + i + '" style="display:none">' + detailHtml + '</div>';
+}
+
+function renderBrowserItem(b, i, requests) {
+  const brand = b.browserId.split(':')[0] || 'browser';
+  const id = b.browserId.split(':')[1] || '';
+  const emoji = browserBrandEmoji(brand);
+  const recentForThis = requests.filter(r => r.browserId === b.browserId).slice(-3).reverse();
+  const detailHtml =
+    '<div class="row"><span class="label">Brand</span><span class="val">' + esc(brand) + '</span></div>' +
+    '<div class="row"><span class="label">Browser ID</span><span class="val">' + esc(b.browserId) + '</span></div>' +
+    '<div class="row"><span class="label">Connected</span><span class="val">' + fmtRelTime(b.connectedAt) + ' (' + esc(b.connectedAt) + ')</span></div>' +
+    '<div class="row"><span class="label">Tool calls</span><span class="val">' + b.recentRequestCount + ' in last 50</span></div>' +
+    (recentForThis.length > 0 ? '<div class="recent-mini"><div class="mini-title">Recent activity</div>' +
+      recentForThis.map(r => {
+        const e = r.status === 'success' ? '✅' : r.status === 'error' ? '❌' : r.status === 'pending' ? '⏳' : '⚠️';
+        return '<div class="mini-row"><span class="mini-emoji">' + e + '</span>' + esc(r.tool) + ' (' + (r.durationMs != null ? r.durationMs + 'ms' : 'pending') + ')</div>';
+      }).join('') + '</div>' : '');
+  return '<button class="item" data-kind="browser" data-idx="' + i + '" onclick="toggleItem(this)" aria-expanded="false">' +
+    '<span class="item-emoji">' + emoji + '</span>' +
+    '<span class="item-main"><b>' + esc(brand) + '</b>' +
+    '<span class="item-sub">' + esc(id.slice(0, 12)) + '… • ' + fmtRelTime(b.connectedAt) + '</span></span>' +
+    '<span class="item-count">' + b.recentRequestCount + ' call' + (b.recentRequestCount === 1 ? '' : 's') + '</span>' +
+    '<span class="item-caret">▸</span>' +
+    '</button>' +
+    '<div class="item-detail" data-detail-for="browser-' + i + '" style="display:none">' + detailHtml + '</div>';
+}
+
+// Toggles an expandable detail panel beneath a list item. Persists open state
+// across polls via the data-kind/data-idx pair stored in state.openItems.
+function toggleItem(button) {
+  const kind = button.dataset.kind;
+  const idx = button.dataset.idx;
+  const key = kind + '-' + idx;
+  const detail = button.parentElement.querySelector('[data-detail-for="' + key + '"]');
+  if (!detail) return;
+  const willOpen = detail.style.display === 'none';
+  detail.style.display = willOpen ? 'block' : 'none';
+  button.classList.toggle('expanded', willOpen);
+  button.setAttribute('aria-expanded', String(willOpen));
+  if (willOpen) state.openItems.add(key);
+  else state.openItems.delete(key);
+}
+// Re-apply the "open" state after each render so user's clicks survive
+// the 1.5s polling refresh.
+function reapplyOpenItems() {
+  for (const key of state.openItems) {
+    const btn = document.querySelector('.item[data-kind="' + key.split('-')[0] + '"][data-idx="' + key.split('-')[1] + '"]');
+    if (btn) {
+      const detail = btn.parentElement.querySelector('[data-detail-for="' + key + '"]');
+      if (detail) {
+        detail.style.display = 'block';
+        btn.classList.add('expanded');
+        btn.setAttribute('aria-expanded', 'true');
+      }
+    }
+  }
 }
 
 function renderActivity(reqs) {
