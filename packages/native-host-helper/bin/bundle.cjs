@@ -4092,13 +4092,12 @@ function probeWebSocket(port, expectedPid, timeoutMs = WS_PROBE_TIMEOUT_MS) {
 }
 function deriveReason(s) {
   if (!s.lockFile.exists) return "no_lock_file";
-  if (s.pidAlive === false) return "bridge_not_started";
-  if (!s.portListening) return "bridge_not_started";
-  if (!s.wsHealthy) {
-    if (s.wsHealthyError === "protocol_timeout") return "protocol_timeout";
-    return "server_not_responding";
+  if (s.wsHealthy) return "connecting";
+  if (!s.portListening) {
+    return "bridge_not_started";
   }
-  return "connecting";
+  if (s.wsHealthyError === "protocol_timeout") return "protocol_timeout";
+  return "server_not_responding";
 }
 async function getServiceStatus(opts) {
   const o = opts.overrides ?? {};
@@ -4114,8 +4113,11 @@ async function getServiceStatus(opts) {
     pidAlive = (o.isPidAlive ?? isPidAlive)(lockFile.pid);
   }
   let portListening = false;
-  if (lockFile.exists && (pidAlive === true || pidAlive === null)) {
+  if (lockFile.exists) {
     portListening = await (o.probePort ?? probePort)(port);
+  }
+  if (portListening && pidAlive === false) {
+    pidAlive = true;
   }
   let wsResult = { ok: false, error: "not_attempted" };
   if (portListening) {
@@ -4173,7 +4175,7 @@ async function startNativeHost(opts = {}) {
 }
 
 // src/version.ts
-var HELPER_VERSION = "0.5.9";
+var HELPER_VERSION = "0.5.10";
 
 // src/logger.ts
 var import_node_fs5 = require("node:fs");

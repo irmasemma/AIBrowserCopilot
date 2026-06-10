@@ -7921,7 +7921,7 @@ var toolRegistry = [
 ];
 
 // src/version.ts
-var VERSION = "0.5.9";
+var VERSION = "0.5.10";
 var BUILD_ID = process.env.BUILD_ID ?? "dev";
 
 // src/lock-file-manager.ts
@@ -8419,9 +8419,84 @@ var DIAG_HTML = `<!doctype html>
   .logs-empty { color: #94a3b8; font-style: italic; padding: 24px; text-align: center; }
 
   /* \u2500\u2500 Toast \u2500\u2500\u2500 */
-  .toast { position: fixed; bottom: 24px; right: 24px; background: #0f172a; color: white; padding: 12px 20px; border-radius: 12px; font-size: 14px; box-shadow: 0 8px 24px rgba(0,0,0,0.2); opacity: 0; transform: translateY(20px); transition: all 0.3s; }
+  .toast { position: fixed; bottom: 24px; right: 24px; background: #0f172a; color: white; padding: 12px 20px; border-radius: 12px; font-size: 14px; box-shadow: 0 8px 24px rgba(0,0,0,0.2); opacity: 0; transform: translateY(20px); transition: all 0.3s; z-index: 1001; }
   .toast.show { opacity: 1; transform: translateY(0); }
   .toast.error { background: #991b1b; }
+
+  /* \u2500\u2500 Activity row click affordance \u2500\u2500\u2500 */
+  .activity-row { cursor: pointer; transition: transform 0.1s; }
+  .activity-row:hover { transform: translateX(4px); }
+  .activity-row::after { content: '\u25B8'; color: #94a3b8; margin-left: 8px; }
+
+  /* \u2500\u2500 Drill-down modal \u2500\u2500\u2500 */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000; padding: 24px;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s;
+  }
+  .modal-overlay.open { opacity: 1; pointer-events: auto; }
+  .modal {
+    background: white; border-radius: 16px; padding: 24px;
+    max-width: 720px; width: 100%; max-height: 85vh; overflow-y: auto;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.3);
+    transform: translateY(20px); transition: transform 0.2s;
+  }
+  .modal-overlay.open .modal { transform: translateY(0); }
+  .modal-header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #e2e8f0;
+  }
+  .modal-title { font-size: 18px; font-weight: 700; margin: 0; }
+  .modal-title-sub { color: #64748b; font-size: 13px; margin: 4px 0 0; }
+  .modal-close {
+    background: transparent; border: 0; cursor: pointer; padding: 4px 10px;
+    font-size: 20px; color: #64748b; line-height: 1; border-radius: 8px;
+  }
+  .modal-close:hover { background: #f1f5f9; color: #0f172a; }
+  .modal-summary {
+    background: #f8fafc; border-radius: 10px; padding: 12px 16px; margin-bottom: 16px;
+    display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px;
+    font-size: 13px;
+  }
+  .modal-summary .lbl { color: #64748b; }
+  .modal-summary .val { color: #0f172a; font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
+
+  /* Step timeline */
+  .steps-section-title {
+    font-size: 13px; font-weight: 600; color: #475569; margin: 12px 0 8px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .step-list { display: flex; flex-direction: column; gap: 0; position: relative; }
+  .step {
+    display: grid; grid-template-columns: 32px 70px 1fr; gap: 12px;
+    padding: 10px 0; align-items: flex-start; position: relative;
+  }
+  .step:not(:last-child)::before {
+    content: ''; position: absolute; left: 15px; top: 32px; bottom: -2px;
+    width: 2px; background: #e2e8f0;
+  }
+  .step.ok:not(:last-child)::before { background: #86efac; }
+  .step.fail:not(:last-child)::before { background: #fca5a5; }
+  .step-icon {
+    width: 32px; height: 32px; border-radius: 50%; display: flex;
+    align-items: center; justify-content: center; font-size: 16px;
+    flex-shrink: 0; z-index: 1;
+  }
+  .step.ok .step-icon { background: #dcfce7; color: #166534; }
+  .step.fail .step-icon { background: #fee2e2; color: #991b1b; }
+  .step.wait .step-icon { background: #fef3c7; color: #92400e; }
+  .step.info .step-icon { background: #dbeafe; color: #1e40af; }
+  .step-time {
+    font-size: 11px; color: #94a3b8; font-family: ui-monospace, monospace;
+    padding-top: 8px; line-height: 1.2;
+  }
+  .step-body { padding-top: 4px; }
+  .step-msg { font-size: 14px; color: #0f172a; line-height: 1.5; }
+  .step-cause {
+    margin-top: 6px; font-size: 12px; color: #92400e; background: #fef3c7;
+    border-left: 3px solid #fcd34d; padding: 6px 10px; border-radius: 4px;
+  }
 
   /* \u2500\u2500 Responsive (narrow window) \u2500\u2500\u2500 */
   @media (max-width: 1024px) {
@@ -8449,6 +8524,8 @@ var DIAG_HTML = `<!doctype html>
   .item:hover { border-color: #93c5fd; background: white; }
   .item:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
   .item.expanded { background: white; border-color: #3b82f6; }
+  .item.item-stale { border-color: #fca5a5; background: #fef2f2; }
+  .item.item-stale:hover { background: #fee2e2; }
   .item-emoji { font-size: 14px; flex-shrink: 0; }
   .item-main { flex: 1; min-width: 0; overflow: hidden; }
   .item-main b { display: block; color: #0f172a; font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -8473,6 +8550,28 @@ var DIAG_HTML = `<!doctype html>
   .item-detail .recent-mini .mini-title { font-weight: 600; font-size: 11px; color: #475569; margin-bottom: 4px; }
   .item-detail .recent-mini .mini-row { font-size: 11px; color: #64748b; padding: 2px 0; }
   .item-detail .recent-mini .mini-row .mini-emoji { margin-right: 4px; }
+
+  /* Brand chips shown in the Browser Extension card. Visual summary of
+     which browsers have the extension running, clickable to scroll to
+     the Connected Browsers card for full detail. */
+  .chip-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .chip {
+    background: white; border: 1px solid #cbd5e1; border-radius: 999px;
+    padding: 3px 9px; font-size: 11px; color: #475569; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 4px;
+    text-decoration: none; transition: all 0.12s;
+    font-family: inherit;
+  }
+  .chip:hover { border-color: #3b82f6; color: #1e40af; background: #dbeafe; }
+  .chip:focus-visible { outline: 2px solid #3b82f6; outline-offset: 1px; }
+
+  /* Highlight pulse for the target card after a chip click \u2014 gives users
+     visual confirmation that the click did something. */
+  @keyframes flash-highlight {
+    0% { box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.4); }
+    100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+  }
+  .card.highlight { animation: flash-highlight 1.2s ease-out; }
 </style>
 </head>
 <body>
@@ -8513,18 +8612,18 @@ var DIAG_HTML = `<!doctype html>
     <div class="card idle" id="card-ext">
       <div class="card-emoji">\u{1F9E9}</div>
       <p class="card-title">Browser Extension</p>
-      <p class="card-subtitle">Inside Chrome / Edge</p>
+      <p class="card-subtitle">AgentHub running inside browsers</p>
       <span class="status-badge idle">Loading\u2026</span>
       <div class="card-meta" id="ext-meta">\u2014</div>
       <div class="card-actions">
-        <button class="btn" onclick="action('reload-extension')">Reload</button>
+        <button class="btn" onclick="action('reload-extension')" title="Reload AgentHub extension in every connected browser">Reload all</button>
       </div>
     </div>
-    <div class="arrow"><div class="arrow-line"><span class="arrow-label">Chrome tabs</span></div></div>
+    <div class="arrow"><div class="arrow-line"><span class="arrow-label">Per-browser</span></div></div>
     <div class="card idle" id="card-browser">
       <div class="card-emoji">\u{1F30D}</div>
-      <p class="card-title">Browser Tabs</p>
-      <p class="card-subtitle">Where the work happens</p>
+      <p class="card-title">Connected Browsers</p>
+      <p class="card-subtitle">Click each for details</p>
       <span class="status-badge idle">Loading\u2026</span>
       <div class="card-meta" id="browser-meta">\u2014</div>
     </div>
@@ -8556,6 +8655,22 @@ var DIAG_HTML = `<!doctype html>
   </div>
 
   <div class="toast" id="toast"></div>
+
+  <!-- Drill-down modal: opens when user clicks a row in Recent Activity. -->
+  <div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div>
+          <p class="modal-title" id="modalTitle">Request details</p>
+          <p class="modal-title-sub" id="modalSubtitle">\u2014</p>
+        </div>
+        <button class="modal-close" onclick="closeModal()" aria-label="Close">\u2715</button>
+      </div>
+      <div class="modal-summary" id="modalSummary"></div>
+      <div class="steps-section-title">\u{1F4CB} What happened, step by step</div>
+      <div class="step-list" id="modalSteps"></div>
+    </div>
+  </div>
 
 <script>
 "use strict";
@@ -8626,40 +8741,109 @@ function render() {
   // MCP clients \u2014 interactive list (click to expand details)
   const mcpCount = s.mcpClients.length;
   setStatus('mcp', mcpCount > 0 ? 'ok' : 'idle', mcpCount + ' connected');
-  document.getElementById('mcp-meta').innerHTML = mcpCount === 0
-    ? '<div class="item-empty">No AI assistant connected yet.</div>'
-      + '<details><summary>How to connect</summary>Configure Claude / Cursor / VS Code with MCP server <code>agenthub</code>.</details>'
-    : '<div class="item-list">' + s.mcpClients.map((c, i) =>
+  if (mcpCount === 0) {
+    document.getElementById('mcp-meta').innerHTML =
+      '<div class="item-empty">No AI assistant connected yet.</div>' +
+      '<details><summary>How to connect</summary>Configure Claude / Cursor / VS Code with MCP server <code>agenthub</code>.</details>';
+  } else {
+    document.getElementById('mcp-meta').innerHTML =
+      '<div class="item-list">' + s.mcpClients.map((c, i) =>
         renderClientItem(c, i, s.recentRequests || [])
       ).join('') + '</div>';
+    // Auto-expand if there are few clients \u2014 info more useful visible.
+    if (mcpCount <= 3) {
+      s.mcpClients.forEach((_, i) => state.openItems.add('mcp-' + i));
+    }
+  }
 
-  // Extension card \u2014 count summary (the per-browser detail lives on the next card)
+  // Extension card \u2014 replaces the misleading "see next \u2192" with actual
+  // brand chips. Each chip is a real button that scrolls to + highlights
+  // the matching browser in the Connected Browsers card, then expands it.
+  // (Status badge is set further down, derived from per-browser liveness.)
   const extCount = s.browsers.length;
-  setStatus('ext', extCount > 0 ? 'ok' : 'bad', extCount > 0 ? 'On' : 'Not connected');
-  document.getElementById('ext-meta').innerHTML = extCount === 0
-    ? '<div class="item-empty">No browser extension connected.</div>'
-      + '<details><summary>How to fix</summary>1. Open Chrome / Edge<br>2. Open the AgentHub side panel<br>3. Wait ~5 seconds</details>'
-    : '<b>' + extCount + '</b> browser' + (extCount === 1 ? '' : 's') + ' connected \u2014 see next \u2192';
+  if (extCount === 0) {
+    document.getElementById('ext-meta').innerHTML =
+      '<div class="item-empty">No browser extension connected.</div>' +
+      '<details><summary>How to fix</summary>1. Open Chrome / Edge<br>2. Open the AgentHub side panel<br>3. Wait ~5 seconds</details>';
+  } else {
+    const brandCounts = {};
+    s.browsers.forEach(b => {
+      const brand = b.browserId.split(':')[0] || 'browser';
+      brandCounts[brand] = (brandCounts[brand] || 0) + 1;
+    });
+    const chips = Object.entries(brandCounts).map(([brand, count]) =>
+      '<button class="chip" onclick="scrollToBrowser(\\'' + esc(brand) + '\\')" title="Click for details">' +
+        browserBrandEmoji(brand) + ' ' + esc(brand) + (count > 1 ? ' \xD7' + count : '') +
+      '</button>'
+    ).join('');
+    document.getElementById('ext-meta').innerHTML =
+      '<b>' + extCount + '</b> browser' + (extCount === 1 ? '' : 's') + ' connected' +
+      '<div class="chip-row">' + chips + '</div>';
+  }
 
-  // Browsers \u2014 interactive list (click to expand details)
-  setStatus('browser', extCount > 0 ? 'ok' : 'idle', extCount === 0 ? 'No browsers' : extCount + ' browser' + (extCount === 1 ? '' : 's'));
-  document.getElementById('browser-meta').innerHTML = s.browsers.length === 0
-    ? '<div class="item-empty">No browsers yet.</div>'
-    : '<div class="item-list">' + s.browsers.map((b, i) =>
+  // Browsers \u2014 interactive list (click each item to expand details).
+  // Status is derived from LIVENESS (lastSeenAt) not socket presence \u2014
+  // a "connected but stale" browser shows yellow warning instead of green.
+  const liveBrowsers = s.browsers.filter(b => b.liveness === 'live').length;
+  const staleBrowsers = s.browsers.filter(b => b.liveness === 'stale').length;
+  const browserBadgeStatus = extCount === 0 ? 'idle' : staleBrowsers > 0 ? 'warn' : 'ok';
+  const browserBadgeLabel = extCount === 0
+    ? 'No browsers'
+    : staleBrowsers > 0
+      ? (liveBrowsers + ' live, ' + staleBrowsers + ' stuck')
+      : (liveBrowsers + ' live');
+  setStatus('browser', browserBadgeStatus, browserBadgeLabel);
+  if (s.browsers.length === 0) {
+    document.getElementById('browser-meta').innerHTML = '<div class="item-empty">No browsers yet.</div>';
+  } else {
+    document.getElementById('browser-meta').innerHTML =
+      '<div class="item-list">' + s.browsers.map((b, i) =>
         renderBrowserItem(b, i, s.recentRequests || [])
       ).join('') + '</div>';
+    if (s.browsers.length <= 3) {
+      // Default-expand all browsers when there are few \u2014 clicking each one
+      // individually is annoying when the info fits on screen anyway.
+      s.browsers.forEach((_, i) => state.openItems.add('browser-' + i));
+    }
+  }
 
-  // Arrows
+  // Also reflect stale state on the Extension card.
+  const extBadgeStatus = extCount === 0 ? 'bad' : staleBrowsers > 0 ? 'warn' : 'ok';
+  const extBadgeLabel = extCount === 0
+    ? 'Not connected'
+    : staleBrowsers > 0
+      ? (liveBrowsers + ' live, ' + staleBrowsers + ' stuck')
+      : 'On';
+  setStatus('ext', extBadgeStatus, extBadgeLabel);
+
+  // Arrows \u2014 yellow when stale
   setArrow(0, mcpCount > 0 ? 'ok' : null);
-  setArrow(1, extCount > 0 ? 'ok' : 'bad');
-  setArrow(2, extCount > 0 ? 'ok' : null);
+  setArrow(1, extCount === 0 ? 'bad' : (staleBrowsers === extCount ? 'bad' : 'ok'));
+  setArrow(2, liveBrowsers > 0 ? 'ok' : null);
 
   // Banner: surface common problems
   let banner = null;
+  // Detect SW wedging from recent activity: a browser that's connected
+  // (status green) but whose recent tool calls all timed out. Most common
+  // cause is MV3 service worker suspension during a tool call.
+  const recent = s.recentRequests || [];
+  const timedOutByBrowser = {};
+  recent.slice(-15).forEach(r => {
+    if (r.status === 'timeout' && r.browserId && r.browserId !== 'all-browsers') {
+      timedOutByBrowser[r.browserId] = (timedOutByBrowser[r.browserId] || 0) + 1;
+    }
+  });
+  const wedgedBrowsers = Object.entries(timedOutByBrowser).filter(([, n]) => n >= 2);
+
   if (extCount === 0 && s.recentRejections.length > 0) {
     banner = 'Your browser extension is trying to connect but the bridge is rejecting it. The extension ID isn\\'t allowlisted. Run <code>npx agenthub-setup --extension-id &lt;your-id&gt;</code>.';
   } else if (extCount === 0) {
     banner = 'No browser extension connected. Open the AgentHub side panel in Chrome or Edge.';
+  } else if (wedgedBrowsers.length > 0) {
+    // Recent tool calls keep timing out against this browser even though
+    // its WS is connected. Strong signal of a wedged MV3 service worker.
+    const list = wedgedBrowsers.map(([id, n]) => esc(id.split(':')[0]) + ' (' + n + ' recent timeouts)').join(', ');
+    banner = '\u26A0\uFE0F <b>Service worker may be stuck</b> in: <b>' + list + '</b>. Recent tool calls timed out even though the connection looks fine. Try the per-browser <b>"Reload this browser"</b> button in the Connected Browsers card below to wake it up.';
   } else if (mcpCount === 0) {
     banner = 'No AI assistant has connected yet. The bridge and extension are ready when you are.';
   }
@@ -8734,19 +8918,36 @@ function renderBrowserItem(b, i, requests) {
   const id = b.browserId.split(':')[1] || '';
   const emoji = browserBrandEmoji(brand);
   const recentForThis = requests.filter(r => r.browserId === b.browserId).slice(-3).reverse();
+  // Liveness badge \u2014 STALE means OS-level WS is open but extension's SW
+  // hasn't sent us anything in 45+ seconds (almost certainly wedged).
+  const livenessLabel = b.liveness === 'live'
+    ? '<span style="color:#16a34a">\u25CF</span> alive (heard ' + (b.lastSeenAgeSec ?? '?') + 's ago)'
+    : b.liveness === 'stale'
+      ? '<span style="color:#dc2626">\u25CF</span> STUCK (no answer for ' + (b.lastSeenAgeSec ?? '?') + 's)'
+      : '<span style="color:#94a3b8">\u25CF</span> waiting for first message';
+  // Per-browser reload button. Sends {type:'reload'} ONLY to this browser's
+  // WS \u2014 doesn't reload Chrome when you only wanted to reload Edge.
+  // Escape browserId for JS string literal embedding.
+  const browserIdJs = b.browserId.replace(/\\\\/g, '\\\\\\\\').replace(/'/g, "\\\\'");
   const detailHtml =
     '<div class="row"><span class="label">Brand</span><span class="val">' + esc(brand) + '</span></div>' +
     '<div class="row"><span class="label">Browser ID</span><span class="val">' + esc(b.browserId) + '</span></div>' +
     '<div class="row"><span class="label">Connected</span><span class="val">' + fmtRelTime(b.connectedAt) + ' (' + esc(b.connectedAt) + ')</span></div>' +
+    '<div class="row"><span class="label">Liveness</span><span class="val">' + livenessLabel + '</span></div>' +
     '<div class="row"><span class="label">Tool calls</span><span class="val">' + b.recentRequestCount + ' in last 50</span></div>' +
     (recentForThis.length > 0 ? '<div class="recent-mini"><div class="mini-title">Recent activity</div>' +
       recentForThis.map(r => {
         const e = r.status === 'success' ? '\u2705' : r.status === 'error' ? '\u274C' : r.status === 'pending' ? '\u23F3' : '\u26A0\uFE0F';
         return '<div class="mini-row"><span class="mini-emoji">' + e + '</span>' + esc(r.tool) + ' (' + (r.durationMs != null ? r.durationMs + 'ms' : 'pending') + ')</div>';
-      }).join('') + '</div>' : '');
-  return '<button class="item" data-kind="browser" data-idx="' + i + '" onclick="toggleItem(this)" aria-expanded="false">' +
+      }).join('') + '</div>' : '') +
+    '<div style="margin-top:10px; padding-top:8px; border-top:1px dashed #cbd5e1; display:flex; gap:6px;">' +
+      '<button class="btn" onclick="reloadOneBrowser(\\'' + browserIdJs + '\\')" title="Reload AgentHub extension only in this browser">Reload this browser</button>' +
+    '</div>';
+  // Per-row class for status hint \u2014 orange border on stale rows.
+  const itemExtraClass = b.liveness === 'stale' ? ' item-stale' : '';
+  return '<button class="item' + itemExtraClass + '" data-kind="browser" data-idx="' + i + '" onclick="toggleItem(this)" aria-expanded="false">' +
     '<span class="item-emoji">' + emoji + '</span>' +
-    '<span class="item-main"><b>' + esc(brand) + '</b>' +
+    '<span class="item-main"><b>' + esc(brand) + (b.liveness === 'stale' ? ' <span style="color:#dc2626;font-weight:700">\u26A0 STUCK</span>' : '') + '</b>' +
     '<span class="item-sub">' + esc(id.slice(0, 12)) + '\u2026 \u2022 ' + fmtRelTime(b.connectedAt) + '</span></span>' +
     '<span class="item-count">' + b.recentRequestCount + ' call' + (b.recentRequestCount === 1 ? '' : 's') + '</span>' +
     '<span class="item-caret">\u25B8</span>' +
@@ -8768,6 +8969,29 @@ function toggleItem(button) {
   button.setAttribute('aria-expanded', String(willOpen));
   if (willOpen) state.openItems.add(key);
   else state.openItems.delete(key);
+}
+
+// Scrolls to + briefly highlights the Connected Browsers card, then
+// expands every browser of the given brand. Called from the brand chips
+// in the Extension card (e.g. clicking the "\u{1F7E2} chrome \xD72" chip).
+function scrollToBrowser(brand) {
+  const card = document.getElementById('card-browser');
+  if (!card) return;
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // Pulse highlight so user sees what was targeted
+  card.classList.remove('highlight');
+  void card.offsetWidth; // force reflow so re-adding the class restarts the animation
+  card.classList.add('highlight');
+  setTimeout(() => card.classList.remove('highlight'), 1300);
+  // Expand all browser items whose brand matches
+  if (state.state && state.state.browsers) {
+    state.state.browsers.forEach((b, i) => {
+      if ((b.browserId.split(':')[0] || '') === brand) {
+        state.openItems.add('browser-' + i);
+      }
+    });
+    reapplyOpenItems();
+  }
 }
 // Re-apply the "open" state after each render so user's clicks survive
 // the 1.5s polling refresh.
@@ -8793,10 +9017,12 @@ function renderActivity(reqs) {
     return;
   }
   list.innerHTML = reqs.slice().reverse().map(r => {
-    const emoji = r.status === 'success' ? '\u2705' : r.status === 'error' ? '\u274C' : r.status === 'pending' ? '\u23F3' : '\u26A0\uFE0F';
+    const emoji = r.status === 'success' ? '\u2705' : r.status === 'error' ? '\u274C' : r.status === 'pending' ? '\u23F3' : r.status === 'timeout' ? '\u23F1\uFE0F' : '\u26A0\uFE0F';
     const cls = r.status;
     const browser = r.browserId ? r.browserId.split(':')[0] : 'all';
-    return '<div class="activity-row ' + cls + '">' +
+    // Each row is clickable \u2014 opens a drill-down modal showing the full
+    // step-by-step chain (received \u2192 liveness probe \u2192 tool sent \u2192 reply).
+    return '<div class="activity-row ' + cls + '" onclick="openCallDetail(\\'' + esc(r.browserBoundId) + '\\')" title="Click for full details" role="button" tabindex="0">' +
       '<span class="activity-time">' + fmtRelTime(r.startedAt) + '</span>' +
       '<span class="activity-emoji">' + emoji + '</span>' +
       '<span class="activity-desc"><b>' + esc(r.tool) + '</b></span>' +
@@ -8805,6 +9031,70 @@ function renderActivity(reqs) {
       '</div>';
   }).join('');
 }
+
+// \u2500\u2500 Drill-down modal \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+async function openCallDetail(browserBoundId) {
+  try {
+    const r = await fetch('/api/request/' + encodeURIComponent(browserBoundId));
+    if (!r.ok) {
+      toast('Could not load request details (status ' + r.status + ')', true);
+      return;
+    }
+    const { request } = await r.json();
+    renderCallDetail(request);
+    document.getElementById('modalOverlay').classList.add('open');
+  } catch (err) {
+    toast('Failed to load: ' + err.message, true);
+  }
+}
+
+function closeModal(evt) {
+  // Close only on backdrop click \u2014 not clicks inside the modal body
+  if (evt && evt.target !== document.getElementById('modalOverlay')) return;
+  document.getElementById('modalOverlay').classList.remove('open');
+}
+
+function renderCallDetail(req) {
+  const emoji = req.status === 'success' ? '\u2705' : req.status === 'error' ? '\u274C' : req.status === 'pending' ? '\u23F3' : req.status === 'timeout' ? '\u23F1\uFE0F' : '\u26A0\uFE0F';
+  const brand = req.browserId.split(':')[0] || 'browser';
+  document.getElementById('modalTitle').innerHTML = emoji + ' <b>' + esc(req.tool) + '</b> \u2192 ' + esc(brand);
+  document.getElementById('modalSubtitle').textContent =
+    'Started ' + fmtRelTime(req.startedAt) +
+    (req.durationMs != null ? ' \xB7 took ' + req.durationMs + 'ms' : ' \xB7 still running');
+
+  // Summary panel
+  const summary = document.getElementById('modalSummary');
+  summary.innerHTML =
+    '<span class="lbl">Asked by</span><span class="val">' + esc(req.clientId) + '</span>' +
+    '<span class="lbl">Tool</span><span class="val">' + esc(req.tool) + '</span>' +
+    '<span class="lbl">Browser</span><span class="val">' + esc(req.browserId) + '</span>' +
+    '<span class="lbl">Status</span><span class="val">' + esc(req.status) + (req.errorMessage ? ' (' + esc(req.errorMessage) + ')' : '') + '</span>' +
+    '<span class="lbl">Request ID</span><span class="val">' + esc(req.browserBoundId) + '</span>';
+
+  // Step timeline
+  const stepsEl = document.getElementById('modalSteps');
+  if (!req.steps || req.steps.length === 0) {
+    stepsEl.innerHTML = '<div class="activity-empty">No step trace recorded. (Old request? Restart bridge for new requests to be traced.)</div>';
+    return;
+  }
+  stepsEl.innerHTML = req.steps.map(step => {
+    const icon = step.status === 'ok' ? '\u2713' : step.status === 'fail' ? '\u2715' : step.status === 'wait' ? '\u231B' : '\u2139';
+    const time = step.t.split('T')[1].slice(0, 12);
+    return '<div class="step ' + esc(step.status) + '">' +
+      '<div class="step-icon">' + icon + '</div>' +
+      '<div class="step-time">' + esc(time) + '</div>' +
+      '<div class="step-body">' +
+        '<div class="step-msg">' + esc(step.message) + '</div>' +
+        (step.cause ? '<div class="step-cause">\u{1F4A1} ' + esc(step.cause) + '</div>' : '') +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+// Allow Esc to close the modal too \u2014 accessibility nicety
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeModal();
+});
 
 // \u2500\u2500 Logs \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 async function loadLogs() {
@@ -8855,13 +9145,29 @@ function renderLogs() {
 async function action(name) {
   const endpoints = {
     'restart-bridge': { url: '/api/restart', confirmMsg: 'Restart the bridge? Connected clients will reconnect automatically.' },
-    'reload-extension': { url: '/api/reload-extension', confirmMsg: 'Reload the browser extension? Open chats will continue.' },
+    'reload-extension': { url: '/api/reload-extension', confirmMsg: 'Reload AgentHub extension in ALL connected browsers? Open chats in any of them will be lost.' },
   };
   const ep = endpoints[name];
   if (!ep) return;
   if (!confirm(ep.confirmMsg)) return;
   try {
     const r = await fetch(ep.url, { method: 'POST' });
+    const j = await r.json();
+    toast(j.message || (r.ok ? 'Done' : 'Failed'), !r.ok);
+    setTimeout(poll, 1500);
+  } catch (err) {
+    toast('Request failed: ' + err.message, true);
+  }
+}
+
+// Targeted reload for a single browser. Sends the {type:'reload'} signal
+// ONLY to that browser's WebSocket. Other connected browsers are unaffected
+// (no extension reload, no SW death, no side panel loss).
+async function reloadOneBrowser(browserId) {
+  if (!confirm('Reload AgentHub extension in ' + browserId.split(':')[0] + '?\\nThis browser will reload its extension (open chats there will be lost). Other browsers are NOT affected.')) return;
+  try {
+    const url = '/api/reload-extension?browserId=' + encodeURIComponent(browserId);
+    const r = await fetch(url, { method: 'POST' });
     const j = await r.json();
     toast(j.message || (r.ok ? 'Done' : 'Failed'), !r.ok);
     setTimeout(poll, 1500);
@@ -8885,24 +9191,47 @@ var RecentActivity = class {
   buf = [];
   rejections = /* @__PURE__ */ new Map();
   MAX = 50;
-  startRequest(input) {
+  startRequest(input, initialStep) {
+    const startedAt = (/* @__PURE__ */ new Date()).toISOString();
+    const steps = [];
+    if (initialStep) {
+      steps.push({ ...initialStep, t: startedAt });
+    }
     const rec = {
       ...input,
       status: "pending",
-      startedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      startedAt,
       finishedAt: null,
-      durationMs: null
+      durationMs: null,
+      steps
     };
     this.buf.push(rec);
     while (this.buf.length > this.MAX) this.buf.shift();
   }
-  finishRequest(browserBoundId, status, errorMessage) {
+  /**
+   * Append a single step to a tracked request. No-op if the request is
+   * not in the buffer (already evicted, never started, etc).
+   */
+  addStep(browserBoundId, step) {
+    const rec = this.buf.find((r) => r.browserBoundId === browserBoundId);
+    if (!rec) return;
+    rec.steps.push({ ...step, t: (/* @__PURE__ */ new Date()).toISOString() });
+  }
+  finishRequest(browserBoundId, status, errorMessage, finalStep) {
     const rec = this.buf.find((r) => r.browserBoundId === browserBoundId);
     if (!rec) return;
     rec.status = status;
     rec.finishedAt = (/* @__PURE__ */ new Date()).toISOString();
     rec.durationMs = Date.parse(rec.finishedAt) - Date.parse(rec.startedAt);
     if (errorMessage) rec.errorMessage = errorMessage;
+    if (finalStep) {
+      const stepStatus = status === "success" ? "ok" : "fail";
+      rec.steps.push({ ...finalStep, status: stepStatus, t: rec.finishedAt });
+    }
+  }
+  /** Look up a single request by its browserBoundId. Used by /api/request/<id>. */
+  getRequest(browserBoundId) {
+    return this.buf.find((r) => r.browserBoundId === browserBoundId);
   }
   noteRejection(origin, reason) {
     const key = origin + "|" + reason;
@@ -8927,7 +9256,22 @@ function isLocalhost(req) {
   const addr = req.socket.remoteAddress ?? "";
   return LOCALHOST_ADDRS.has(addr);
 }
-function respondJson(res, code, body) {
+function corsHeadersFor(origin) {
+  if (!origin) return {};
+  if (origin.startsWith("chrome-extension://") || origin.startsWith("moz-extension://")) {
+    return {
+      "access-control-allow-origin": origin,
+      "access-control-allow-methods": "GET, OPTIONS",
+      "access-control-allow-headers": "content-type",
+      // Cache preflight for 5 min so the SW doesn't roundtrip OPTIONS every poll.
+      "access-control-max-age": "300",
+      // Echo origin in Vary so caching layers don't cross-pollute.
+      "vary": "origin"
+    };
+  }
+  return {};
+}
+function respondJson(res, code, body, cors = {}) {
   const text = JSON.stringify(body);
   res.writeHead(code, {
     "content-type": "application/json; charset=utf-8",
@@ -8935,7 +9279,8 @@ function respondJson(res, code, body) {
     "cache-control": "no-store",
     // Prevent the diag UI from being framed by a malicious page in a browser
     "x-frame-options": "DENY",
-    "x-content-type-options": "nosniff"
+    "x-content-type-options": "nosniff",
+    ...cors
   });
   res.end(text);
 }
@@ -8970,6 +9315,13 @@ function handleDiagRequest(req, res, hooks) {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
   const path = url.pathname;
   const method = req.method ?? "GET";
+  const origin = typeof req.headers.origin === "string" ? req.headers.origin : void 0;
+  const corsForReads = corsHeadersFor(origin);
+  if (method === "OPTIONS" && path.startsWith("/api/")) {
+    res.writeHead(204, { ...corsForReads });
+    res.end();
+    return true;
+  }
   if (method === "GET" && (path === "/" || path === "/index.html")) {
     respondHtml(res, DIAG_HTML);
     return true;
@@ -8983,7 +9335,17 @@ function handleDiagRequest(req, res, hooks) {
       mcpClients: s.mcpClients,
       recentRequests: requests,
       recentRejections: rejections
-    });
+    }, corsForReads);
+    return true;
+  }
+  if (method === "GET" && path.startsWith("/api/request/")) {
+    const id = decodeURIComponent(path.slice("/api/request/".length));
+    const req2 = hooks.getState().recentActivity.getRequest(id);
+    if (!req2) {
+      respondJson(res, 404, { ok: false, message: "request not found (may have been evicted from the 50-entry ring buffer)" }, corsForReads);
+      return true;
+    }
+    respondJson(res, 200, { request: req2 }, corsForReads);
     return true;
   }
   if (method === "GET" && path === "/api/logs") {
@@ -8995,10 +9357,10 @@ function handleDiagRequest(req, res, hooks) {
     else if (file === "extension") p = paths.extension;
     else if (file === "helper") p = paths.helper;
     if (!p) {
-      respondJson(res, 400, { ok: false, message: "file must be one of: bridge, extension, helper" });
+      respondJson(res, 400, { ok: false, message: "file must be one of: bridge, extension, helper" }, corsForReads);
       return true;
     }
-    respondJson(res, 200, { lines: tailLines(p, n) });
+    respondJson(res, 200, { lines: tailLines(p, n) }, corsForReads);
     return true;
   }
   if (method === "POST" && path === "/api/restart") {
@@ -9007,15 +9369,21 @@ function handleDiagRequest(req, res, hooks) {
     return true;
   }
   if (method === "POST" && path === "/api/reload-extension") {
-    const result = hooks.onReloadExtensionRequest();
-    respondJson(res, 200, {
-      ok: true,
-      message: result.broadcastTo === 0 ? "No extensions connected \u2014 nothing to reload" : `Reload signal sent to ${result.broadcastTo} extension${result.broadcastTo === 1 ? "" : "s"}`
-    });
+    const targetBrowserId = url.searchParams.get("browserId") ?? void 0;
+    const result = hooks.onReloadExtensionRequest(targetBrowserId);
+    let msg;
+    if (result.broadcastTo === 0) {
+      msg = targetBrowserId ? `No extension connected for ${targetBrowserId} \u2014 nothing to reload` : "No extensions connected \u2014 nothing to reload";
+    } else if (targetBrowserId) {
+      msg = `Reload signal sent to ${targetBrowserId}`;
+    } else {
+      msg = `Reload signal sent to ${result.broadcastTo} extension${result.broadcastTo === 1 ? "" : "s"}`;
+    }
+    respondJson(res, 200, { ok: true, message: msg });
     return true;
   }
   if (path.startsWith("/api/")) {
-    respondJson(res, 404, { ok: false, message: "unknown endpoint" });
+    respondJson(res, 404, { ok: false, message: "unknown endpoint" }, corsForReads);
     return true;
   }
   return false;
@@ -9099,9 +9467,24 @@ function defaultInstallDir() {
 function indexBrowser(browserId, ws) {
   const existing = browserSockets.get(browserId);
   if (existing && existing !== ws) {
+    bridgeLog().warn("bridge.browser.replaced", {
+      browserId,
+      reason: "new_socket_for_same_browserid",
+      hint: "Old socket was orphaned (likely Chrome MV3 SW eviction). Terminating it now."
+    });
     try {
       existing.terminate();
     } catch {
+    }
+    for (const [reqId, req] of pendingRequests) {
+      if (req.browserId === browserId) {
+        clearTimeout(req.timer);
+        pendingRequests.delete(reqId);
+        try {
+          req.reject(new Error("browser_socket_replaced_mid_request"));
+        } catch {
+        }
+      }
     }
   }
   browserSockets.set(browserId, ws);
@@ -9151,6 +9534,46 @@ function parseQuery(url) {
 }
 var SERVER_PING_INTERVAL_MS = 2e4;
 var HELPER_PROBE_BROWSER_ID = "helper-probe";
+var browserLastSeen = /* @__PURE__ */ new Map();
+var pendingPongs = /* @__PURE__ */ new Map();
+function markBrowserAlive(browserId) {
+  browserLastSeen.set(browserId, Date.now());
+}
+function proveLive(browserId, ws, timeoutMs) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const handler = (_timestamp) => {
+      if (settled) return;
+      settled = true;
+      resolve(true);
+    };
+    const waiters = pendingPongs.get(browserId) ?? [];
+    waiters.push(handler);
+    pendingPongs.set(browserId, waiters);
+    setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      const arr = pendingPongs.get(browserId);
+      if (arr) {
+        const i = arr.indexOf(handler);
+        if (i >= 0) arr.splice(i, 1);
+      }
+      resolve(false);
+    }, timeoutMs);
+    try {
+      if (ws.readyState === import_websocket.default.OPEN) {
+        ws.send(JSON.stringify({ type: "server_ping", timestamp: Date.now(), reason: "liveness-probe" }));
+      } else {
+        settled = true;
+        resolve(false);
+      }
+    } catch {
+      settled = true;
+      resolve(false);
+    }
+  });
+}
+var LIVENESS_PROBE_TIMEOUT_MS = 3e3;
 function handleExtension(ws, browserId) {
   const connectedAt = Date.now();
   const isProbe = browserId === HELPER_PROBE_BROWSER_ID;
@@ -9170,11 +9593,23 @@ function handleExtension(ws, browserId) {
   ws.on("message", (data) => {
     try {
       const msg = JSON.parse(data.toString());
+      markBrowserAlive(browserId);
       if (msg.type === "ping") {
         ws.send(JSON.stringify({ type: "pong", timestamp: msg.timestamp }));
         return;
       }
       if (msg.type === "server_pong") {
+        const waiters = pendingPongs.get(browserId);
+        if (waiters && waiters.length > 0) {
+          const ts = typeof msg.timestamp === "number" ? msg.timestamp : Date.now();
+          for (const w of waiters.slice()) {
+            try {
+              w(ts);
+            } catch {
+            }
+          }
+          pendingPongs.set(browserId, []);
+        }
         return;
       }
       if (msg.type === "request_tool_scan") {
@@ -9216,6 +9651,11 @@ function handleExtension(ws, browserId) {
     clearInterval(serverPingTimer);
     if (browserSockets.get(browserId) === ws) {
       unindexBrowser(browserId);
+      browserLastSeen.delete(browserId);
+      const waiters = pendingPongs.get(browserId);
+      if (waiters && waiters.length > 0) {
+      }
+      pendingPongs.delete(browserId);
       if (!isProbe) browserRegistry.delete(browserId);
       const event = isProbe ? "bridge.probe.disconnected" : "bridge.browser.disconnected";
       let pendingForThisBrowser = 0;
@@ -9363,10 +9803,19 @@ async function sendToolRequest(clientId, originalId, tool, params, browserId) {
       },
       timer
     });
+    preWakeSW(ws);
     ws.send(JSON.stringify({ type: "tool_request", id: browserBoundId, tool, params }));
   });
 }
-var FAN_OUT_TIMEOUT_MS = 2e3;
+var FAN_OUT_TIMEOUT_MS = 1e4;
+function preWakeSW(ws) {
+  try {
+    if (ws.readyState === import_websocket.default.OPEN) {
+      ws.send(JSON.stringify({ type: "server_ping", timestamp: Date.now(), reason: "pre-tool-request" }));
+    }
+  } catch {
+  }
+}
 function fanOutToolRequest(clientId, tool, params, brandFilter, fanoutId) {
   const targets = [];
   if (brandFilter && brandFilter !== "default") {
@@ -9384,10 +9833,60 @@ function fanOutToolRequest(clientId, tool, params, brandFilter, fanoutId) {
     return Promise.resolve([]);
   }
   return Promise.all(
-    targets.map(
-      ({ browserId, ws }) => new Promise((resolve) => {
-        const browserBoundId = `b_${(0, import_node_crypto.randomUUID)()}`;
-        const sentAt = Date.now();
+    targets.map(({ browserId, ws }) => (async () => {
+      const browserBoundId = `b_${(0, import_node_crypto.randomUUID)()}`;
+      const sentAt = Date.now();
+      const brand = browserId.split(":")[0] || "browser";
+      if (fanoutId) {
+        recentActivity.startRequest({
+          mcpId: null,
+          clientId,
+          browserBoundId,
+          browserId,
+          tool
+        }, {
+          key: "tool_request_started",
+          status: "info",
+          message: `Bridge picked ${brand} to run ${tool}.`
+        });
+      }
+      if (fanoutId) {
+        recentActivity.addStep(browserBoundId, {
+          key: "liveness_probe_sent",
+          status: "wait",
+          message: `Bridge knocked on ${brand}'s door (sent a tiny ping) to check it is awake.`
+        });
+      }
+      const alive = await proveLive(browserId, ws, LIVENESS_PROBE_TIMEOUT_MS);
+      if (!alive) {
+        if (fanoutId) {
+          bridgeLog().warn("bridge.fanout.target_unresponsive", {
+            fanoutId,
+            browserId,
+            browserBoundId,
+            elapsedMs: Date.now() - sentAt,
+            reason: "no_pong_within_3s"
+          });
+          recentActivity.finishRequest(browserBoundId, "timeout", "sw_wedged_no_pong", {
+            key: "liveness_probe_failed",
+            message: `${brand} did not answer the ping in 3 seconds.`,
+            cause: `${brand}'s extension brain (service worker) is asleep or stuck. Click "Reload this browser" on the Connected Browsers card to wake it up.`
+          });
+        }
+        try {
+          ws.close(1011, "sw_wedged_no_pong");
+        } catch {
+        }
+        return { browserId, ok: false, error: "sw_wedged (no pong within 3s)" };
+      }
+      if (fanoutId) {
+        recentActivity.addStep(browserBoundId, {
+          key: "liveness_probe_ok",
+          status: "ok",
+          message: `${brand} answered the ping \u2014 it is awake.`
+        });
+      }
+      return new Promise((resolve) => {
         const timer = setTimeout(() => {
           pendingRequests.delete(browserBoundId);
           if (fanoutId) {
@@ -9396,6 +9895,11 @@ function fanOutToolRequest(clientId, tool, params, brandFilter, fanoutId) {
               browserId,
               browserBoundId,
               elapsedMs: Date.now() - sentAt
+            });
+            recentActivity.finishRequest(browserBoundId, "timeout", "tool_request_timeout", {
+              key: "tool_request_timed_out",
+              message: `${brand} answered the ping but didn't reply to ${tool} within 10 seconds.`,
+              cause: `Most likely the extension JS held a stale WebSocket reference (orphan socket): bridge sent the request on socket A, extension is now listening on socket B (a newer one from a reconnect). The orphan-detection sweep will close the dead socket within 15s and the extension will reconnect cleanly. If you keep seeing this, click "Reload this browser" below to force a fresh service worker.`
             });
           }
           resolve({ browserId, ok: false, error: "timeout" });
@@ -9413,6 +9917,10 @@ function fanOutToolRequest(clientId, tool, params, brandFilter, fanoutId) {
                 durationMs: Date.now() - sentAt,
                 ok: true
               });
+              recentActivity.finishRequest(browserBoundId, "success", void 0, {
+                key: "tool_response_received",
+                message: `${brand} finished ${tool} in ${Date.now() - sentAt} ms. Bridge is sending the result to your AI.`
+              });
             }
             resolve({ browserId, ok: true, response });
           },
@@ -9426,17 +9934,29 @@ function fanOutToolRequest(clientId, tool, params, brandFilter, fanoutId) {
                 ok: false,
                 errorMessage: err.message
               });
+              recentActivity.finishRequest(browserBoundId, "error", err.message, {
+                key: "tool_request_failed",
+                message: `${brand} reported an error while running ${tool}: ${err.message}`,
+                cause: "The tool itself failed inside the extension. Check the extension log tab for details."
+              });
             }
             resolve({ browserId, ok: false, error: err.message });
           },
           timer
         });
+        if (fanoutId) {
+          recentActivity.addStep(browserBoundId, {
+            key: "tool_request_sent",
+            status: "wait",
+            message: `Bridge asked ${brand} to run ${tool} and is waiting for the answer.`
+          });
+        }
         ws.send(JSON.stringify({ type: "tool_request", id: browserBoundId, tool, params }));
         if (fanoutId) {
           bridgeLog().info("bridge.fanout.target_sent", { fanoutId, browserId, browserBoundId });
         }
-      })
-    )
+      });
+    })())
   );
 }
 function mergeFanOutListTabs(results) {
@@ -9487,8 +10007,10 @@ function mergeFanOutListTabs(results) {
     tabs: allTabs
   };
   if (errors.length > 0) payload.errors = errors;
+  const allFailed = results.length > 0 && errors.length === results.length;
   return {
-    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }]
+    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+    ...allFailed ? { isError: true } : {}
   };
 }
 function translateExtensionResponse(response) {
@@ -9773,19 +10295,36 @@ function startServer(port) {
         bridgeLog().info("bridge.lifecycle.restart_requested", { initiator: "diag-ui" });
         process.exit(0);
       },
-      onReloadExtensionRequest: () => {
+      onReloadExtensionRequest: (browserId) => {
         let count = 0;
-        for (const [, ws] of browserSockets) {
-          if (ws.readyState === import_websocket.default.OPEN) {
+        let matchedBrowserId;
+        if (browserId) {
+          const ws = browserSockets.get(browserId);
+          if (ws && ws.readyState === import_websocket.default.OPEN) {
             try {
               ws.send(JSON.stringify({ type: "reload", source: "diag-ui" }));
-              count++;
+              count = 1;
+              matchedBrowserId = browserId;
             } catch {
             }
           }
+          bridgeLog().info("bridge.diag.reload_extension_targeted", {
+            browserId,
+            delivered: count > 0
+          });
+        } else {
+          for (const [, ws] of browserSockets) {
+            if (ws.readyState === import_websocket.default.OPEN) {
+              try {
+                ws.send(JSON.stringify({ type: "reload", source: "diag-ui" }));
+                count++;
+              } catch {
+              }
+            }
+          }
+          bridgeLog().info("bridge.diag.reload_extension_broadcast", { count });
         }
-        bridgeLog().info("bridge.diag.reload_extension_broadcast", { count });
-        return { broadcastTo: count };
+        return { broadcastTo: count, ...matchedBrowserId ? { matchedBrowserId } : {} };
       },
       getState: () => {
         const requests = recentActivity.snapshot().requests;
@@ -9806,11 +10345,22 @@ function startServer(port) {
             allowedExtensionIdsCount: allowedExtensionIds.size,
             allowedExtensionIdsSample: Array.from(allowedExtensionIds).map((id) => id.slice(0, 8) + "\u2026")
           },
-          browsers: Array.from(browserRegistry.entries()).map(([browserId, info]) => ({
-            browserId,
-            connectedAt: info.connectedAt,
-            recentRequestCount: browserCounts.get(browserId) ?? 0
-          })),
+          browsers: Array.from(browserRegistry.entries()).map(([browserId, info]) => {
+            const lastSeenMs = browserLastSeen.get(browserId);
+            const ageSec = lastSeenMs ? Math.floor((Date.now() - lastSeenMs) / 1e3) : null;
+            let liveness = "unknown";
+            if (ageSec !== null) {
+              liveness = ageSec < 45 ? "live" : "stale";
+            }
+            return {
+              browserId,
+              connectedAt: info.connectedAt,
+              recentRequestCount: browserCounts.get(browserId) ?? 0,
+              lastSeenAt: lastSeenMs ? new Date(lastSeenMs).toISOString() : null,
+              lastSeenAgeSec: ageSec,
+              liveness
+            };
+          }),
           mcpClients: Array.from(mcpClientRegistry.entries()).map(([clientId, info]) => ({
             clientId,
             transport: info.transport,
@@ -9882,6 +10432,26 @@ function startServer(port) {
       handleExtension(ws, params.get("browserId") || "default");
     }
   });
+  const BROWSER_LIVENESS_INTERVAL_MS = 15e3;
+  const livenessTimer = setInterval(async () => {
+    const browsers = Array.from(browserSockets.entries()).filter(([id]) => id !== HELPER_PROBE_BROWSER_ID);
+    for (const [browserId, ws] of browsers) {
+      if (ws.readyState !== import_websocket.default.OPEN) continue;
+      const alive = await proveLive(browserId, ws, LIVENESS_PROBE_TIMEOUT_MS);
+      if (!alive) {
+        bridgeLog().warn("bridge.browser.liveness_failed", {
+          browserId,
+          reason: "no_pong_to_periodic_probe",
+          action: "closing_socket_to_force_reconnect"
+        });
+        try {
+          ws.close(1011, "liveness_probe_failed");
+        } catch {
+        }
+      }
+    }
+  }, BROWSER_LIVENESS_INTERVAL_MS);
+  process.on("exit", () => clearInterval(livenessTimer));
   const stdioFormat = { format: "ndjson" };
   parseStdioMessages(process.stdin, (json) => {
     handleMcpMessage("stdio", json, (msg) => {

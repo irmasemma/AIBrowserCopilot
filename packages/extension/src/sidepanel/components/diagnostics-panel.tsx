@@ -147,33 +147,93 @@ const buildSteps = (
   return steps;
 };
 
+/**
+ * Build the diagnostics text shown in the side panel + copy-to-clipboard report.
+ *
+ * Source-of-truth rules (precedence high → low):
+ *
+ *   1. WS state (connectionContext.state)
+ *      - When state is 'connected'|'degraded', the WS itself proves
+ *        pidAlive/portListening/wsHealthy/binaryExists. We do NOT rely
+ *        on the helper's potentially-stale snapshot for these.
+ *
+ *   2. connectionContext.serverInfo
+ *      - Live from the bridge's server_info WS frame. Updated every reconnect.
+ *
+ *   3. helper status snapshot (ServiceStatusSnapshot)
+ *      - From chrome.runtime.sendMessage('get_service_status') → helper.
+ *      - 5–40s round-trip on Windows IPC. Only authoritative source for:
+ *          helperVersion, binaryPath, installDir.
+ *      - For pid/port/version we PREFER serverInfo since the helper
+ *        snapshot may be from a previous bridge generation.
+ *      - Marked STALE if the helper-reported pid differs from the
+ *        WS-reported pid (bridge restarted but helper hasn't repolled yet).
+ *
+ * Source annotations are appended to each line so a reader (and a future
+ * LLM helping debug) knows whether a value is live, derived, or potentially
+ * stale.
+ */
 const buildDiagnosticsText = (
   serverInfo: ServerInfo | null,
   ctx: ConnectionContext,
   status: ServiceStatusSnapshot | null,
+  statusFetchedAt: number | null,
 ): string => {
+  const wsHealthy = ctx.state === 'connected' || ctx.state === 'degraded';
+  const helperStale = statusIsStale(serverInfo, status);
+  const helperAgeSec = statusFetchedAt ? Math.floor((Date.now() - statusFetchedAt) / 1000) : null;
+  const helperSrc = (() => {
+    if (!status) return '(not fetched)';
+    if (status.error) return `(helper error: ${status.error})`;
+    if (helperStale) return `(helper, stale — was for pid ${status.lockFile?.pid})`;
+    return helperAgeSec != null ? `(helper, ${helperAgeSec}s ago)` : '(helper)';
+  })();
   const uptime = ctx.lastConnectedAt ? formatUptime((Date.now() - ctx.lastConnectedAt) / 1000) : 'N/A';
+
+  // Helper for picking the freshest value with source tag
+  const wsOrStale = <T,>(wsVal: T | undefined, staleVal: T | undefined, formatter: (v: T) => string = String): string => {
+    if (wsVal !== undefined && wsVal !== null) return `${formatter(wsVal)} (live WS)`;
+    if (staleVal !== undefined && staleVal !== null) return `${formatter(staleVal)} (lock file)`;
+    return 'N/A';
+  };
+
   const lines: string[] = [
     `State: ${ctx.state}`,
     `Diagnostic reason: ${ctx.diagnosticReason ?? 'none'}`,
-    `Server PID: ${serverInfo?.pid ?? status?.lockFile?.pid ?? 'N/A'}`,
-    `Port: ${serverInfo?.port ?? status?.lockFile?.port ?? 'N/A'}`,
-    `Version: ${serverInfo?.version ?? status?.lockFile?.version ?? 'N/A'}`,
-    `Build: ${serverInfo?.buildId ?? 'N/A'}`,
-    `Uptime: ${uptime}`,
-    `Started by: ${serverInfo?.startedBy ?? status?.lockFile?.startedBy ?? 'N/A'}`,
-    `Browsers: ${serverInfo?.connectedBrowsers?.join(', ') || 'N/A'}`,
-    `MCP clients: ${serverInfo?.connectedStubs ?? 'N/A'}`,
+    `Server PID: ${wsOrStale(serverInfo?.pid, status?.lockFile?.pid)}`,
+    `Port: ${wsOrStale(serverInfo?.port, status?.lockFile?.port)}`,
+    `Version: ${wsOrStale(serverInfo?.version, status?.lockFile?.version)}`,
+    `Build: ${serverInfo?.buildId ? `${serverInfo.buildId} (live WS)` : 'N/A'}`,
+    `Uptime: ${uptime} (since last reconnect)`,
+    `Started by: ${wsOrStale(serverInfo?.startedBy, status?.lockFile?.startedBy)}`,
+    `Browsers: ${serverInfo?.connectedBrowsers?.join(', ') ?? 'N/A'}${serverInfo?.connectedBrowsers ? ' (live WS)' : ''}`,
+    `MCP clients: ${serverInfo?.connectedStubs ?? 'N/A'}${serverInfo?.connectedStubs !== undefined ? ' (live WS)' : ''}`,
     `Reconnects this session: ${ctx.reconnectsThisSession}`,
     `Missed heartbeats: ${ctx.missedHeartbeats}`,
-    `Helper version: ${status?.helperVersion ?? 'N/A'}`,
-    `Binary path: ${status?.binaryPath ?? 'N/A'} (${status?.binaryExists ? 'present' : 'missing'})`,
-    `PID alive: ${status?.pidAlive ?? 'N/A'}`,
-    `Port listening: ${status?.portListening ?? 'N/A'}`,
-    `WS healthy: ${status?.wsHealthy ?? 'N/A'}${status?.wsHealthyError ? ` (${status.wsHealthyError})` : ''}`,
+    `Helper version: ${status?.helperVersion ?? 'N/A'} ${helperSrc}`,
+    `Binary path: ${status?.binaryPath ?? 'N/A'} (${status?.binaryExists ? 'present' : status ? 'missing' : 'unknown'}) ${helperSrc}`,
+    // Derived from WS state when healthy — these are tautologically true if
+    // the bridge can serve a WS to us at all.
+    `PID alive: ${wsHealthy ? 'true (derived from live WS)' : (status?.pidAlive != null ? `${status.pidAlive} ${helperSrc}` : 'N/A')}`,
+    `Port listening: ${wsHealthy ? 'true (derived from live WS)' : (status?.portListening != null ? `${status.portListening} ${helperSrc}` : 'N/A')}`,
+    `WS healthy: ${wsHealthy ? 'true (live WS open)' : (status?.wsHealthy != null ? `${status.wsHealthy} ${helperSrc}${status.wsHealthyError ? ` (${status.wsHealthyError})` : ''}` : 'N/A')}`,
   ];
+  if (helperStale) {
+    lines.push('');
+    lines.push('NOTE: helper snapshot is stale (bridge restarted since last poll). Click Refresh.');
+  }
   if (ctx.error) lines.push(`Error: ${ctx.error}`);
   return lines.join('\n');
+};
+
+/**
+ * Returns true when the helper-reported pid differs from the WS-reported
+ * pid. Means the helper status is from a previous bridge generation and
+ * should be flagged as stale until the next helper invoke completes.
+ */
+const statusIsStale = (serverInfo: ServerInfo | null, status: ServiceStatusSnapshot | null): boolean => {
+  if (!serverInfo || !status?.lockFile?.pid) return false;
+  return serverInfo.pid !== status.lockFile.pid;
 };
 
 const StepRow: FunctionalComponent<{ step: DiagnosticStep }> = ({ step }) => {
@@ -222,25 +282,82 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [status, setStatus] = useState<ServiceStatusSnapshot | null>(null);
+  const [statusFetchedAt, setStatusFetchedAt] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  /**
+   * Pull a status snapshot. Two paths:
+   *
+   *   1. WS is healthy + we know the bridge port → fetch /api/state directly
+   *      (fast: ~10ms, always live). The bridge already serves the same data
+   *      we'd ask the helper for; we just convert /api/state's shape into
+   *      ServiceStatusSnapshot for backwards compatibility with the UI code.
+   *
+   *   2. WS is broken or port unknown → fall back to the helper via the SW
+   *      (slow: 5-40s on Windows due to native-messaging IPC). This is the
+   *      only path that can answer "is the binary present?" when the bridge
+   *      itself can't respond.
+   *
+   * Path 1 was added in v0.5.10 to fix the recurring "Helper version: N/A"
+   * panel display caused by slow helper invocations leaving a NULL snapshot.
+   */
   const refresh = async () => {
     setRefreshing(true);
     try {
-      // Background wraps the snapshot in { status, error? }, so unwrap here.
-      // Reading res directly leaves every field undefined, which used to surface
-      // as a false "Bridge binary present ✕ Re-run the installer" failure.
+      const port = serverInfo?.port;
+      const wsHealthy = connectionContext.state === 'connected' || connectionContext.state === 'degraded';
+      if (wsHealthy && port) {
+        // Fast path — fetch directly from the bridge.
+        try {
+          const r = await fetch(`http://127.0.0.1:${port}/api/state`);
+          if (r.ok) {
+            const data = await r.json() as {
+              bridge: { version: string; buildId: string; pid: number; port: number; uptimeSec: number; startedBy: string };
+            };
+            // Convert /api/state → ServiceStatusSnapshot. Most "helper"
+            // fields are derived from the WS state (which is alive by
+            // definition). Helper-only fields (helperVersion, binaryPath)
+            // are not available via this path — keep their last known
+            // value if we have one, otherwise leave empty.
+            setStatus((prev) => ({
+              ...(prev ?? {}),
+              lockFile: {
+                exists: true,
+                pid: data.bridge.pid,
+                port: data.bridge.port,
+                version: data.bridge.version,
+                startedBy: data.bridge.startedBy,
+              },
+              pidAlive: true,
+              portListening: true,
+              wsHealthy: true,
+              binaryExists: true,
+              reportedVersion: data.bridge.version,
+              url: `ws://127.0.0.1:${data.bridge.port}/`,
+            }));
+            setStatusFetchedAt(Date.now());
+            return;
+          }
+          // Non-2xx → fall through to helper path
+        } catch {
+          // Network error → fall through to helper path
+        }
+      }
+      // Slow path — go through SW to the helper.
       const res = await chrome.runtime.sendMessage({ type: 'get_service_status' });
       if (res && typeof res === 'object' && res.status && typeof res.status === 'object') {
         setStatus(res.status as ServiceStatusSnapshot);
+        setStatusFetchedAt(Date.now());
       } else {
         const errMsg = res && typeof res === 'object' && typeof res.error === 'string'
           ? res.error
           : 'Helper returned no data';
         setStatus({ error: errMsg });
+        setStatusFetchedAt(Date.now());
       }
     } catch (err) {
       setStatus({ error: err instanceof Error ? err.message : String(err) });
+      setStatusFetchedAt(Date.now());
     } finally {
       setRefreshing(false);
     }
@@ -249,9 +366,21 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
   useEffect(() => {
     void refresh();
     // Re-fetch periodically while panel is open so it stays current.
-    const t = setInterval(() => void refresh(), 5000);
+    //
+    // Cadence depends on whether the bridge is reachable:
+    //   - Healthy (state=connected|degraded): poll every 30s. The WS itself
+    //     is the live signal; helper provides supplementary info (binary
+    //     path, helper version) that rarely changes. Polling fast wastes
+    //     CPU on the Windows native-messaging IPC tax (5-40s per call).
+    //   - Broken (any other state): poll every 5s so the panel converges
+    //     quickly once the user runs `npx agenthub-setup`.
+    const isHealthy = connectionContext.state === 'connected' || connectionContext.state === 'degraded';
+    const intervalMs = isHealthy ? 30_000 : 5_000;
+    const t = setInterval(() => void refresh(), intervalMs);
     return () => clearInterval(t);
-  }, []);
+    // Note: this effect re-runs whenever the healthy/broken transition
+    // flips, so the interval cadence adjusts in real time.
+  }, [connectionContext.state]);
 
   useEffect(() => {
     if (connectionContext.state !== 'connected' && connectionContext.state !== 'degraded') return;
@@ -260,7 +389,7 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
   }, [connectionContext.state]);
 
   const handleCopy = async (): Promise<void> => {
-    const text = buildDiagnosticsText(serverInfo, connectionContext, status);
+    const text = buildDiagnosticsText(serverInfo, connectionContext, status, statusFetchedAt);
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -303,11 +432,17 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
         </summary>
         <div class="mt-1 pl-3 space-y-0.5 font-mono text-neutral-500">
           <div>State: {connectionContext.state}{connectionContext.diagnosticReason ? ` · ${connectionContext.diagnosticReason}` : ''}</div>
-          <div>Version: {serverInfo?.version ?? status?.lockFile?.version ?? 'N/A'} · build {serverInfo?.buildId ?? 'N/A'}</div>
+          <div>Version: {serverInfo?.version ? `${serverInfo.version} (live)` : (status?.lockFile?.version ? `${status.lockFile.version} (lock file)` : 'N/A')} · build {serverInfo?.buildId ?? 'N/A'}</div>
           <div>Uptime: {connectionContext.lastConnectedAt ? formatUptime((now - connectionContext.lastConnectedAt) / 1000) : 'N/A'}</div>
           <div>Browsers: {serverInfo?.connectedBrowsers?.join(', ') || 'N/A'}</div>
           <div>MCP clients: {serverInfo?.connectedStubs ?? 'N/A'}</div>
           <div>Reconnects: {connectionContext.reconnectsThisSession} · Missed heartbeats: {connectionContext.missedHeartbeats}</div>
+          {statusFetchedAt && (
+            <div class={statusIsStale(serverInfo, status) ? 'text-amber-600' : 'text-neutral-400'}>
+              Helper snapshot: {Math.floor((now - statusFetchedAt) / 1000)}s ago
+              {statusIsStale(serverInfo, status) ? ' · stale (bridge restarted)' : ''}
+            </div>
+          )}
           {connectionContext.error && <div class="text-red-500">Error: {connectionContext.error}</div>}
         </div>
       </details>

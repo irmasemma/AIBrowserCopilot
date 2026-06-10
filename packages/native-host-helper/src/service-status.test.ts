@@ -53,12 +53,21 @@ describe('deriveReason', () => {
     expect(deriveReason({ ...base, lockFile: { exists: false } })).toBe('no_lock_file');
   });
 
-  it('reports bridge_not_started when PID dead', () => {
-    expect(deriveReason({ ...base, pidAlive: false })).toBe('bridge_not_started');
+  it('reports connecting when wsHealthy=true even if pidAlive disagreed (Windows kill 0 false-negative)', () => {
+    // Regression for v0.5.10 bug: pkg-bundled helper's process.kill(pid, 0)
+    // sometimes returns false on Windows even when the target IS alive
+    // (cross-process-tree perm quirk). The side panel kept showing
+    // "Bridge isn't running" while bridge was actually responding to MCP.
+    // wsHealthy is ground truth — if it's true, the bridge is up.
+    expect(deriveReason({ ...base, pidAlive: false, wsHealthy: true })).toBe('connecting');
   });
 
-  it('reports bridge_not_started when port silent', () => {
-    expect(deriveReason({ ...base, portListening: false })).toBe('bridge_not_started');
+  it('reports bridge_not_started when PID dead (no port, no WS)', () => {
+    expect(deriveReason({ ...base, pidAlive: false, portListening: false, wsHealthy: false })).toBe('bridge_not_started');
+  });
+
+  it('reports bridge_not_started when port silent (regardless of pidAlive)', () => {
+    expect(deriveReason({ ...base, portListening: false, wsHealthy: false })).toBe('bridge_not_started');
   });
 
   it('reports protocol_timeout when WS handshake stalls', () => {

@@ -109,9 +109,84 @@ export const DIAG_HTML = `<!doctype html>
   .logs-empty { color: #94a3b8; font-style: italic; padding: 24px; text-align: center; }
 
   /* ── Toast ─── */
-  .toast { position: fixed; bottom: 24px; right: 24px; background: #0f172a; color: white; padding: 12px 20px; border-radius: 12px; font-size: 14px; box-shadow: 0 8px 24px rgba(0,0,0,0.2); opacity: 0; transform: translateY(20px); transition: all 0.3s; }
+  .toast { position: fixed; bottom: 24px; right: 24px; background: #0f172a; color: white; padding: 12px 20px; border-radius: 12px; font-size: 14px; box-shadow: 0 8px 24px rgba(0,0,0,0.2); opacity: 0; transform: translateY(20px); transition: all 0.3s; z-index: 1001; }
   .toast.show { opacity: 1; transform: translateY(0); }
   .toast.error { background: #991b1b; }
+
+  /* ── Activity row click affordance ─── */
+  .activity-row { cursor: pointer; transition: transform 0.1s; }
+  .activity-row:hover { transform: translateX(4px); }
+  .activity-row::after { content: '▸'; color: #94a3b8; margin-left: 8px; }
+
+  /* ── Drill-down modal ─── */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000; padding: 24px;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s;
+  }
+  .modal-overlay.open { opacity: 1; pointer-events: auto; }
+  .modal {
+    background: white; border-radius: 16px; padding: 24px;
+    max-width: 720px; width: 100%; max-height: 85vh; overflow-y: auto;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.3);
+    transform: translateY(20px); transition: transform 0.2s;
+  }
+  .modal-overlay.open .modal { transform: translateY(0); }
+  .modal-header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #e2e8f0;
+  }
+  .modal-title { font-size: 18px; font-weight: 700; margin: 0; }
+  .modal-title-sub { color: #64748b; font-size: 13px; margin: 4px 0 0; }
+  .modal-close {
+    background: transparent; border: 0; cursor: pointer; padding: 4px 10px;
+    font-size: 20px; color: #64748b; line-height: 1; border-radius: 8px;
+  }
+  .modal-close:hover { background: #f1f5f9; color: #0f172a; }
+  .modal-summary {
+    background: #f8fafc; border-radius: 10px; padding: 12px 16px; margin-bottom: 16px;
+    display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px;
+    font-size: 13px;
+  }
+  .modal-summary .lbl { color: #64748b; }
+  .modal-summary .val { color: #0f172a; font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
+
+  /* Step timeline */
+  .steps-section-title {
+    font-size: 13px; font-weight: 600; color: #475569; margin: 12px 0 8px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .step-list { display: flex; flex-direction: column; gap: 0; position: relative; }
+  .step {
+    display: grid; grid-template-columns: 32px 70px 1fr; gap: 12px;
+    padding: 10px 0; align-items: flex-start; position: relative;
+  }
+  .step:not(:last-child)::before {
+    content: ''; position: absolute; left: 15px; top: 32px; bottom: -2px;
+    width: 2px; background: #e2e8f0;
+  }
+  .step.ok:not(:last-child)::before { background: #86efac; }
+  .step.fail:not(:last-child)::before { background: #fca5a5; }
+  .step-icon {
+    width: 32px; height: 32px; border-radius: 50%; display: flex;
+    align-items: center; justify-content: center; font-size: 16px;
+    flex-shrink: 0; z-index: 1;
+  }
+  .step.ok .step-icon { background: #dcfce7; color: #166534; }
+  .step.fail .step-icon { background: #fee2e2; color: #991b1b; }
+  .step.wait .step-icon { background: #fef3c7; color: #92400e; }
+  .step.info .step-icon { background: #dbeafe; color: #1e40af; }
+  .step-time {
+    font-size: 11px; color: #94a3b8; font-family: ui-monospace, monospace;
+    padding-top: 8px; line-height: 1.2;
+  }
+  .step-body { padding-top: 4px; }
+  .step-msg { font-size: 14px; color: #0f172a; line-height: 1.5; }
+  .step-cause {
+    margin-top: 6px; font-size: 12px; color: #92400e; background: #fef3c7;
+    border-left: 3px solid #fcd34d; padding: 6px 10px; border-radius: 4px;
+  }
 
   /* ── Responsive (narrow window) ─── */
   @media (max-width: 1024px) {
@@ -139,6 +214,8 @@ export const DIAG_HTML = `<!doctype html>
   .item:hover { border-color: #93c5fd; background: white; }
   .item:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
   .item.expanded { background: white; border-color: #3b82f6; }
+  .item.item-stale { border-color: #fca5a5; background: #fef2f2; }
+  .item.item-stale:hover { background: #fee2e2; }
   .item-emoji { font-size: 14px; flex-shrink: 0; }
   .item-main { flex: 1; min-width: 0; overflow: hidden; }
   .item-main b { display: block; color: #0f172a; font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -163,6 +240,28 @@ export const DIAG_HTML = `<!doctype html>
   .item-detail .recent-mini .mini-title { font-weight: 600; font-size: 11px; color: #475569; margin-bottom: 4px; }
   .item-detail .recent-mini .mini-row { font-size: 11px; color: #64748b; padding: 2px 0; }
   .item-detail .recent-mini .mini-row .mini-emoji { margin-right: 4px; }
+
+  /* Brand chips shown in the Browser Extension card. Visual summary of
+     which browsers have the extension running, clickable to scroll to
+     the Connected Browsers card for full detail. */
+  .chip-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .chip {
+    background: white; border: 1px solid #cbd5e1; border-radius: 999px;
+    padding: 3px 9px; font-size: 11px; color: #475569; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 4px;
+    text-decoration: none; transition: all 0.12s;
+    font-family: inherit;
+  }
+  .chip:hover { border-color: #3b82f6; color: #1e40af; background: #dbeafe; }
+  .chip:focus-visible { outline: 2px solid #3b82f6; outline-offset: 1px; }
+
+  /* Highlight pulse for the target card after a chip click — gives users
+     visual confirmation that the click did something. */
+  @keyframes flash-highlight {
+    0% { box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.4); }
+    100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+  }
+  .card.highlight { animation: flash-highlight 1.2s ease-out; }
 </style>
 </head>
 <body>
@@ -203,18 +302,18 @@ export const DIAG_HTML = `<!doctype html>
     <div class="card idle" id="card-ext">
       <div class="card-emoji">🧩</div>
       <p class="card-title">Browser Extension</p>
-      <p class="card-subtitle">Inside Chrome / Edge</p>
+      <p class="card-subtitle">AgentHub running inside browsers</p>
       <span class="status-badge idle">Loading…</span>
       <div class="card-meta" id="ext-meta">—</div>
       <div class="card-actions">
-        <button class="btn" onclick="action('reload-extension')">Reload</button>
+        <button class="btn" onclick="action('reload-extension')" title="Reload AgentHub extension in every connected browser">Reload all</button>
       </div>
     </div>
-    <div class="arrow"><div class="arrow-line"><span class="arrow-label">Chrome tabs</span></div></div>
+    <div class="arrow"><div class="arrow-line"><span class="arrow-label">Per-browser</span></div></div>
     <div class="card idle" id="card-browser">
       <div class="card-emoji">🌍</div>
-      <p class="card-title">Browser Tabs</p>
-      <p class="card-subtitle">Where the work happens</p>
+      <p class="card-title">Connected Browsers</p>
+      <p class="card-subtitle">Click each for details</p>
       <span class="status-badge idle">Loading…</span>
       <div class="card-meta" id="browser-meta">—</div>
     </div>
@@ -246,6 +345,22 @@ export const DIAG_HTML = `<!doctype html>
   </div>
 
   <div class="toast" id="toast"></div>
+
+  <!-- Drill-down modal: opens when user clicks a row in Recent Activity. -->
+  <div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div>
+          <p class="modal-title" id="modalTitle">Request details</p>
+          <p class="modal-title-sub" id="modalSubtitle">—</p>
+        </div>
+        <button class="modal-close" onclick="closeModal()" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-summary" id="modalSummary"></div>
+      <div class="steps-section-title">📋 What happened, step by step</div>
+      <div class="step-list" id="modalSteps"></div>
+    </div>
+  </div>
 
 <script>
 "use strict";
@@ -316,40 +431,109 @@ function render() {
   // MCP clients — interactive list (click to expand details)
   const mcpCount = s.mcpClients.length;
   setStatus('mcp', mcpCount > 0 ? 'ok' : 'idle', mcpCount + ' connected');
-  document.getElementById('mcp-meta').innerHTML = mcpCount === 0
-    ? '<div class="item-empty">No AI assistant connected yet.</div>'
-      + '<details><summary>How to connect</summary>Configure Claude / Cursor / VS Code with MCP server <code>agenthub</code>.</details>'
-    : '<div class="item-list">' + s.mcpClients.map((c, i) =>
+  if (mcpCount === 0) {
+    document.getElementById('mcp-meta').innerHTML =
+      '<div class="item-empty">No AI assistant connected yet.</div>' +
+      '<details><summary>How to connect</summary>Configure Claude / Cursor / VS Code with MCP server <code>agenthub</code>.</details>';
+  } else {
+    document.getElementById('mcp-meta').innerHTML =
+      '<div class="item-list">' + s.mcpClients.map((c, i) =>
         renderClientItem(c, i, s.recentRequests || [])
       ).join('') + '</div>';
+    // Auto-expand if there are few clients — info more useful visible.
+    if (mcpCount <= 3) {
+      s.mcpClients.forEach((_, i) => state.openItems.add('mcp-' + i));
+    }
+  }
 
-  // Extension card — count summary (the per-browser detail lives on the next card)
+  // Extension card — replaces the misleading "see next →" with actual
+  // brand chips. Each chip is a real button that scrolls to + highlights
+  // the matching browser in the Connected Browsers card, then expands it.
+  // (Status badge is set further down, derived from per-browser liveness.)
   const extCount = s.browsers.length;
-  setStatus('ext', extCount > 0 ? 'ok' : 'bad', extCount > 0 ? 'On' : 'Not connected');
-  document.getElementById('ext-meta').innerHTML = extCount === 0
-    ? '<div class="item-empty">No browser extension connected.</div>'
-      + '<details><summary>How to fix</summary>1. Open Chrome / Edge<br>2. Open the AgentHub side panel<br>3. Wait ~5 seconds</details>'
-    : '<b>' + extCount + '</b> browser' + (extCount === 1 ? '' : 's') + ' connected — see next →';
+  if (extCount === 0) {
+    document.getElementById('ext-meta').innerHTML =
+      '<div class="item-empty">No browser extension connected.</div>' +
+      '<details><summary>How to fix</summary>1. Open Chrome / Edge<br>2. Open the AgentHub side panel<br>3. Wait ~5 seconds</details>';
+  } else {
+    const brandCounts = {};
+    s.browsers.forEach(b => {
+      const brand = b.browserId.split(':')[0] || 'browser';
+      brandCounts[brand] = (brandCounts[brand] || 0) + 1;
+    });
+    const chips = Object.entries(brandCounts).map(([brand, count]) =>
+      '<button class="chip" onclick="scrollToBrowser(\\'' + esc(brand) + '\\')" title="Click for details">' +
+        browserBrandEmoji(brand) + ' ' + esc(brand) + (count > 1 ? ' ×' + count : '') +
+      '</button>'
+    ).join('');
+    document.getElementById('ext-meta').innerHTML =
+      '<b>' + extCount + '</b> browser' + (extCount === 1 ? '' : 's') + ' connected' +
+      '<div class="chip-row">' + chips + '</div>';
+  }
 
-  // Browsers — interactive list (click to expand details)
-  setStatus('browser', extCount > 0 ? 'ok' : 'idle', extCount === 0 ? 'No browsers' : extCount + ' browser' + (extCount === 1 ? '' : 's'));
-  document.getElementById('browser-meta').innerHTML = s.browsers.length === 0
-    ? '<div class="item-empty">No browsers yet.</div>'
-    : '<div class="item-list">' + s.browsers.map((b, i) =>
+  // Browsers — interactive list (click each item to expand details).
+  // Status is derived from LIVENESS (lastSeenAt) not socket presence —
+  // a "connected but stale" browser shows yellow warning instead of green.
+  const liveBrowsers = s.browsers.filter(b => b.liveness === 'live').length;
+  const staleBrowsers = s.browsers.filter(b => b.liveness === 'stale').length;
+  const browserBadgeStatus = extCount === 0 ? 'idle' : staleBrowsers > 0 ? 'warn' : 'ok';
+  const browserBadgeLabel = extCount === 0
+    ? 'No browsers'
+    : staleBrowsers > 0
+      ? (liveBrowsers + ' live, ' + staleBrowsers + ' stuck')
+      : (liveBrowsers + ' live');
+  setStatus('browser', browserBadgeStatus, browserBadgeLabel);
+  if (s.browsers.length === 0) {
+    document.getElementById('browser-meta').innerHTML = '<div class="item-empty">No browsers yet.</div>';
+  } else {
+    document.getElementById('browser-meta').innerHTML =
+      '<div class="item-list">' + s.browsers.map((b, i) =>
         renderBrowserItem(b, i, s.recentRequests || [])
       ).join('') + '</div>';
+    if (s.browsers.length <= 3) {
+      // Default-expand all browsers when there are few — clicking each one
+      // individually is annoying when the info fits on screen anyway.
+      s.browsers.forEach((_, i) => state.openItems.add('browser-' + i));
+    }
+  }
 
-  // Arrows
+  // Also reflect stale state on the Extension card.
+  const extBadgeStatus = extCount === 0 ? 'bad' : staleBrowsers > 0 ? 'warn' : 'ok';
+  const extBadgeLabel = extCount === 0
+    ? 'Not connected'
+    : staleBrowsers > 0
+      ? (liveBrowsers + ' live, ' + staleBrowsers + ' stuck')
+      : 'On';
+  setStatus('ext', extBadgeStatus, extBadgeLabel);
+
+  // Arrows — yellow when stale
   setArrow(0, mcpCount > 0 ? 'ok' : null);
-  setArrow(1, extCount > 0 ? 'ok' : 'bad');
-  setArrow(2, extCount > 0 ? 'ok' : null);
+  setArrow(1, extCount === 0 ? 'bad' : (staleBrowsers === extCount ? 'bad' : 'ok'));
+  setArrow(2, liveBrowsers > 0 ? 'ok' : null);
 
   // Banner: surface common problems
   let banner = null;
+  // Detect SW wedging from recent activity: a browser that's connected
+  // (status green) but whose recent tool calls all timed out. Most common
+  // cause is MV3 service worker suspension during a tool call.
+  const recent = s.recentRequests || [];
+  const timedOutByBrowser = {};
+  recent.slice(-15).forEach(r => {
+    if (r.status === 'timeout' && r.browserId && r.browserId !== 'all-browsers') {
+      timedOutByBrowser[r.browserId] = (timedOutByBrowser[r.browserId] || 0) + 1;
+    }
+  });
+  const wedgedBrowsers = Object.entries(timedOutByBrowser).filter(([, n]) => n >= 2);
+
   if (extCount === 0 && s.recentRejections.length > 0) {
     banner = 'Your browser extension is trying to connect but the bridge is rejecting it. The extension ID isn\\'t allowlisted. Run <code>npx agenthub-setup --extension-id &lt;your-id&gt;</code>.';
   } else if (extCount === 0) {
     banner = 'No browser extension connected. Open the AgentHub side panel in Chrome or Edge.';
+  } else if (wedgedBrowsers.length > 0) {
+    // Recent tool calls keep timing out against this browser even though
+    // its WS is connected. Strong signal of a wedged MV3 service worker.
+    const list = wedgedBrowsers.map(([id, n]) => esc(id.split(':')[0]) + ' (' + n + ' recent timeouts)').join(', ');
+    banner = '⚠️ <b>Service worker may be stuck</b> in: <b>' + list + '</b>. Recent tool calls timed out even though the connection looks fine. Try the per-browser <b>"Reload this browser"</b> button in the Connected Browsers card below to wake it up.';
   } else if (mcpCount === 0) {
     banner = 'No AI assistant has connected yet. The bridge and extension are ready when you are.';
   }
@@ -424,19 +608,36 @@ function renderBrowserItem(b, i, requests) {
   const id = b.browserId.split(':')[1] || '';
   const emoji = browserBrandEmoji(brand);
   const recentForThis = requests.filter(r => r.browserId === b.browserId).slice(-3).reverse();
+  // Liveness badge — STALE means OS-level WS is open but extension's SW
+  // hasn't sent us anything in 45+ seconds (almost certainly wedged).
+  const livenessLabel = b.liveness === 'live'
+    ? '<span style="color:#16a34a">●</span> alive (heard ' + (b.lastSeenAgeSec ?? '?') + 's ago)'
+    : b.liveness === 'stale'
+      ? '<span style="color:#dc2626">●</span> STUCK (no answer for ' + (b.lastSeenAgeSec ?? '?') + 's)'
+      : '<span style="color:#94a3b8">●</span> waiting for first message';
+  // Per-browser reload button. Sends {type:'reload'} ONLY to this browser's
+  // WS — doesn't reload Chrome when you only wanted to reload Edge.
+  // Escape browserId for JS string literal embedding.
+  const browserIdJs = b.browserId.replace(/\\\\/g, '\\\\\\\\').replace(/'/g, "\\\\'");
   const detailHtml =
     '<div class="row"><span class="label">Brand</span><span class="val">' + esc(brand) + '</span></div>' +
     '<div class="row"><span class="label">Browser ID</span><span class="val">' + esc(b.browserId) + '</span></div>' +
     '<div class="row"><span class="label">Connected</span><span class="val">' + fmtRelTime(b.connectedAt) + ' (' + esc(b.connectedAt) + ')</span></div>' +
+    '<div class="row"><span class="label">Liveness</span><span class="val">' + livenessLabel + '</span></div>' +
     '<div class="row"><span class="label">Tool calls</span><span class="val">' + b.recentRequestCount + ' in last 50</span></div>' +
     (recentForThis.length > 0 ? '<div class="recent-mini"><div class="mini-title">Recent activity</div>' +
       recentForThis.map(r => {
         const e = r.status === 'success' ? '✅' : r.status === 'error' ? '❌' : r.status === 'pending' ? '⏳' : '⚠️';
         return '<div class="mini-row"><span class="mini-emoji">' + e + '</span>' + esc(r.tool) + ' (' + (r.durationMs != null ? r.durationMs + 'ms' : 'pending') + ')</div>';
-      }).join('') + '</div>' : '');
-  return '<button class="item" data-kind="browser" data-idx="' + i + '" onclick="toggleItem(this)" aria-expanded="false">' +
+      }).join('') + '</div>' : '') +
+    '<div style="margin-top:10px; padding-top:8px; border-top:1px dashed #cbd5e1; display:flex; gap:6px;">' +
+      '<button class="btn" onclick="reloadOneBrowser(\\'' + browserIdJs + '\\')" title="Reload AgentHub extension only in this browser">Reload this browser</button>' +
+    '</div>';
+  // Per-row class for status hint — orange border on stale rows.
+  const itemExtraClass = b.liveness === 'stale' ? ' item-stale' : '';
+  return '<button class="item' + itemExtraClass + '" data-kind="browser" data-idx="' + i + '" onclick="toggleItem(this)" aria-expanded="false">' +
     '<span class="item-emoji">' + emoji + '</span>' +
-    '<span class="item-main"><b>' + esc(brand) + '</b>' +
+    '<span class="item-main"><b>' + esc(brand) + (b.liveness === 'stale' ? ' <span style="color:#dc2626;font-weight:700">⚠ STUCK</span>' : '') + '</b>' +
     '<span class="item-sub">' + esc(id.slice(0, 12)) + '… • ' + fmtRelTime(b.connectedAt) + '</span></span>' +
     '<span class="item-count">' + b.recentRequestCount + ' call' + (b.recentRequestCount === 1 ? '' : 's') + '</span>' +
     '<span class="item-caret">▸</span>' +
@@ -458,6 +659,29 @@ function toggleItem(button) {
   button.setAttribute('aria-expanded', String(willOpen));
   if (willOpen) state.openItems.add(key);
   else state.openItems.delete(key);
+}
+
+// Scrolls to + briefly highlights the Connected Browsers card, then
+// expands every browser of the given brand. Called from the brand chips
+// in the Extension card (e.g. clicking the "🟢 chrome ×2" chip).
+function scrollToBrowser(brand) {
+  const card = document.getElementById('card-browser');
+  if (!card) return;
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // Pulse highlight so user sees what was targeted
+  card.classList.remove('highlight');
+  void card.offsetWidth; // force reflow so re-adding the class restarts the animation
+  card.classList.add('highlight');
+  setTimeout(() => card.classList.remove('highlight'), 1300);
+  // Expand all browser items whose brand matches
+  if (state.state && state.state.browsers) {
+    state.state.browsers.forEach((b, i) => {
+      if ((b.browserId.split(':')[0] || '') === brand) {
+        state.openItems.add('browser-' + i);
+      }
+    });
+    reapplyOpenItems();
+  }
 }
 // Re-apply the "open" state after each render so user's clicks survive
 // the 1.5s polling refresh.
@@ -483,10 +707,12 @@ function renderActivity(reqs) {
     return;
   }
   list.innerHTML = reqs.slice().reverse().map(r => {
-    const emoji = r.status === 'success' ? '✅' : r.status === 'error' ? '❌' : r.status === 'pending' ? '⏳' : '⚠️';
+    const emoji = r.status === 'success' ? '✅' : r.status === 'error' ? '❌' : r.status === 'pending' ? '⏳' : r.status === 'timeout' ? '⏱️' : '⚠️';
     const cls = r.status;
     const browser = r.browserId ? r.browserId.split(':')[0] : 'all';
-    return '<div class="activity-row ' + cls + '">' +
+    // Each row is clickable — opens a drill-down modal showing the full
+    // step-by-step chain (received → liveness probe → tool sent → reply).
+    return '<div class="activity-row ' + cls + '" onclick="openCallDetail(\\'' + esc(r.browserBoundId) + '\\')" title="Click for full details" role="button" tabindex="0">' +
       '<span class="activity-time">' + fmtRelTime(r.startedAt) + '</span>' +
       '<span class="activity-emoji">' + emoji + '</span>' +
       '<span class="activity-desc"><b>' + esc(r.tool) + '</b></span>' +
@@ -495,6 +721,70 @@ function renderActivity(reqs) {
       '</div>';
   }).join('');
 }
+
+// ── Drill-down modal ─────────────────────────────────────────────────────
+async function openCallDetail(browserBoundId) {
+  try {
+    const r = await fetch('/api/request/' + encodeURIComponent(browserBoundId));
+    if (!r.ok) {
+      toast('Could not load request details (status ' + r.status + ')', true);
+      return;
+    }
+    const { request } = await r.json();
+    renderCallDetail(request);
+    document.getElementById('modalOverlay').classList.add('open');
+  } catch (err) {
+    toast('Failed to load: ' + err.message, true);
+  }
+}
+
+function closeModal(evt) {
+  // Close only on backdrop click — not clicks inside the modal body
+  if (evt && evt.target !== document.getElementById('modalOverlay')) return;
+  document.getElementById('modalOverlay').classList.remove('open');
+}
+
+function renderCallDetail(req) {
+  const emoji = req.status === 'success' ? '✅' : req.status === 'error' ? '❌' : req.status === 'pending' ? '⏳' : req.status === 'timeout' ? '⏱️' : '⚠️';
+  const brand = req.browserId.split(':')[0] || 'browser';
+  document.getElementById('modalTitle').innerHTML = emoji + ' <b>' + esc(req.tool) + '</b> → ' + esc(brand);
+  document.getElementById('modalSubtitle').textContent =
+    'Started ' + fmtRelTime(req.startedAt) +
+    (req.durationMs != null ? ' · took ' + req.durationMs + 'ms' : ' · still running');
+
+  // Summary panel
+  const summary = document.getElementById('modalSummary');
+  summary.innerHTML =
+    '<span class="lbl">Asked by</span><span class="val">' + esc(req.clientId) + '</span>' +
+    '<span class="lbl">Tool</span><span class="val">' + esc(req.tool) + '</span>' +
+    '<span class="lbl">Browser</span><span class="val">' + esc(req.browserId) + '</span>' +
+    '<span class="lbl">Status</span><span class="val">' + esc(req.status) + (req.errorMessage ? ' (' + esc(req.errorMessage) + ')' : '') + '</span>' +
+    '<span class="lbl">Request ID</span><span class="val">' + esc(req.browserBoundId) + '</span>';
+
+  // Step timeline
+  const stepsEl = document.getElementById('modalSteps');
+  if (!req.steps || req.steps.length === 0) {
+    stepsEl.innerHTML = '<div class="activity-empty">No step trace recorded. (Old request? Restart bridge for new requests to be traced.)</div>';
+    return;
+  }
+  stepsEl.innerHTML = req.steps.map(step => {
+    const icon = step.status === 'ok' ? '✓' : step.status === 'fail' ? '✕' : step.status === 'wait' ? '⌛' : 'ℹ';
+    const time = step.t.split('T')[1].slice(0, 12);
+    return '<div class="step ' + esc(step.status) + '">' +
+      '<div class="step-icon">' + icon + '</div>' +
+      '<div class="step-time">' + esc(time) + '</div>' +
+      '<div class="step-body">' +
+        '<div class="step-msg">' + esc(step.message) + '</div>' +
+        (step.cause ? '<div class="step-cause">💡 ' + esc(step.cause) + '</div>' : '') +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+// Allow Esc to close the modal too — accessibility nicety
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeModal();
+});
 
 // ── Logs ───────────────────────────────────────────────────────────────
 async function loadLogs() {
@@ -545,13 +835,29 @@ function renderLogs() {
 async function action(name) {
   const endpoints = {
     'restart-bridge': { url: '/api/restart', confirmMsg: 'Restart the bridge? Connected clients will reconnect automatically.' },
-    'reload-extension': { url: '/api/reload-extension', confirmMsg: 'Reload the browser extension? Open chats will continue.' },
+    'reload-extension': { url: '/api/reload-extension', confirmMsg: 'Reload AgentHub extension in ALL connected browsers? Open chats in any of them will be lost.' },
   };
   const ep = endpoints[name];
   if (!ep) return;
   if (!confirm(ep.confirmMsg)) return;
   try {
     const r = await fetch(ep.url, { method: 'POST' });
+    const j = await r.json();
+    toast(j.message || (r.ok ? 'Done' : 'Failed'), !r.ok);
+    setTimeout(poll, 1500);
+  } catch (err) {
+    toast('Request failed: ' + err.message, true);
+  }
+}
+
+// Targeted reload for a single browser. Sends the {type:'reload'} signal
+// ONLY to that browser's WebSocket. Other connected browsers are unaffected
+// (no extension reload, no SW death, no side panel loss).
+async function reloadOneBrowser(browserId) {
+  if (!confirm('Reload AgentHub extension in ' + browserId.split(':')[0] + '?\\nThis browser will reload its extension (open chats there will be lost). Other browsers are NOT affected.')) return;
+  try {
+    const url = '/api/reload-extension?browserId=' + encodeURIComponent(browserId);
+    const r = await fetch(url, { method: 'POST' });
     const j = await r.json();
     toast(j.message || (r.ok ? 'Done' : 'Failed'), !r.ok);
     setTimeout(poll, 1500);

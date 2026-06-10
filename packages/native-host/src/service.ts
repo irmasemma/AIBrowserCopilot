@@ -192,9 +192,31 @@ function indexBrowser(browserId: string, ws: WebSocket): void {
   // SW eviction left the previous WS in OPEN state from our side, but the
   // extension reconnected with a new socket). Tear it down so its
   // serverPing timer fires its 'close' handler and stops leaking memory.
+  //
+  // CRITICAL: emit a `bridge.browser.replaced` event RIGHT HERE — the
+  // old socket's `close` handler will fail its `browserSockets.get(id) === ws`
+  // check (because we just overwrote the entry) and therefore won't log a
+  // disconnect. Without this explicit replace event, the bridge log shows
+  // many `bridge.browser.connected` for the same browserId with no
+  // corresponding disconnects, and the dashboard cannot tell that the
+  // browser session actually churned.
   const existing = browserSockets.get(browserId);
   if (existing && existing !== ws) {
+    bridgeLog().warn('bridge.browser.replaced', {
+      browserId,
+      reason: 'new_socket_for_same_browserid',
+      hint: 'Old socket was orphaned (likely Chrome MV3 SW eviction). Terminating it now.',
+    });
     try { existing.terminate(); } catch { /* noop */ }
+    // Also clear any pending requests routed to the old socket — they
+    // would never have completed (the new SW life knows nothing about them).
+    for (const [reqId, req] of pendingRequests) {
+      if (req.browserId === browserId) {
+        clearTimeout(req.timer);
+        pendingRequests.delete(reqId);
+        try { req.reject(new Error('browser_socket_replaced_mid_request')); } catch { /* ignore */ }
+      }
+    }
   }
 
   browserSockets.set(browserId, ws);
@@ -290,6 +312,69 @@ const SERVER_PING_INTERVAL_MS = 20_000;
 // See packages/native-host-helper/src/service-status.ts.
 const HELPER_PROBE_BROWSER_ID = 'helper-probe';
 
+/**
+ * Per-browser liveness state. `lastSeenAt` is updated on EVERY inbound
+ * frame from that browser (ping, pong, tool_response, log_batch). If the
+ * extension's SW is wedged after Chrome MV3 suspension, the OS-level WS
+ * stays in CLOSE_WAIT and looks alive to the bridge, but no inbound
+ * frames arrive. `lastSeenAt` going stale is the canonical signal.
+ *
+ * `pendingPongs` lets callers register a one-shot resolver for the next
+ * `server_pong` from a specific browser. Used by `proveLive()` to do a
+ * fast liveness probe before sending a tool_request.
+ */
+const browserLastSeen = new Map<string, number>();
+const pendingPongs = new Map<string, Array<(timestamp: number) => void>>();
+
+function markBrowserAlive(browserId: string): void {
+  browserLastSeen.set(browserId, Date.now());
+}
+
+/**
+ * Send `server_ping` and wait for `server_pong`. Resolves true if pong
+ * arrives within `timeoutMs`, false otherwise. Used to detect wedged
+ * service workers BEFORE sending the actual tool_request — gives the
+ * MCP client a clear, fast error instead of a 10s timeout on a dead WS.
+ */
+function proveLive(browserId: string, ws: WebSocket, timeoutMs: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const handler = (_timestamp: number) => {
+      if (settled) return;
+      settled = true;
+      resolve(true);
+    };
+    const waiters = pendingPongs.get(browserId) ?? [];
+    waiters.push(handler);
+    pendingPongs.set(browserId, waiters);
+    setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      // Remove our handler from the waiter list
+      const arr = pendingPongs.get(browserId);
+      if (arr) {
+        const i = arr.indexOf(handler);
+        if (i >= 0) arr.splice(i, 1);
+      }
+      resolve(false);
+    }, timeoutMs);
+    try {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'server_ping', timestamp: Date.now(), reason: 'liveness-probe' }));
+      } else {
+        // WS not even in OPEN state — definitely dead
+        settled = true;
+        resolve(false);
+      }
+    } catch {
+      settled = true;
+      resolve(false);
+    }
+  });
+}
+
+const LIVENESS_PROBE_TIMEOUT_MS = 3_000;
+
 function handleExtension(ws: WebSocket, browserId: string): void {
   const connectedAt = Date.now();
   const isProbe = browserId === HELPER_PROBE_BROWSER_ID;
@@ -314,13 +399,25 @@ function handleExtension(ws: WebSocket, browserId: string): void {
   ws.on('message', (data) => {
     try {
       const msg = JSON.parse(data.toString());
+      // Any inbound frame from this browser proves liveness.
+      markBrowserAlive(browserId);
       if (msg.type === 'ping') {
         ws.send(JSON.stringify({ type: 'pong', timestamp: msg.timestamp }));
         return;
       }
       if (msg.type === 'server_pong') {
-        // Extension replied to our keepalive ping. No bookkeeping needed —
-        // arrival of any message is what keeps the SW awake on its end.
+        // Wake up any pending liveness probe waiters (proveLive callers).
+        const waiters = pendingPongs.get(browserId);
+        if (waiters && waiters.length > 0) {
+          const ts = typeof msg.timestamp === 'number' ? msg.timestamp : Date.now();
+          // Run all waiters, then clear the list. Multiple in-flight
+          // probes for the same browser are rare but possible (concurrent
+          // tool calls); resolving them all keeps everything snappy.
+          for (const w of waiters.slice()) {
+            try { w(ts); } catch { /* ignore */ }
+          }
+          pendingPongs.set(browserId, []);
+        }
         return;
       }
       if (msg.type === 'request_tool_scan') {
@@ -374,6 +471,15 @@ function handleExtension(ws: WebSocket, browserId: string): void {
     clearInterval(serverPingTimer);
     if (browserSockets.get(browserId) === ws) {
       unindexBrowser(browserId);
+      browserLastSeen.delete(browserId);
+      // Resolve any in-flight liveness probes as false — the WS is gone.
+      const waiters = pendingPongs.get(browserId);
+      if (waiters && waiters.length > 0) {
+        // Adapter: proveLive's resolver expects a number, but we want to
+        // signal "dead." We resolve with 0 so the timeout race still fires
+        // false. Actually safer: just leave them to timeout naturally.
+      }
+      pendingPongs.delete(browserId);
       if (!isProbe) browserRegistry.delete(browserId);
       const event = isProbe ? 'bridge.probe.disconnected' : 'bridge.browser.disconnected';
       // Per-browser pending count: filter the global pending map by which
@@ -573,13 +679,43 @@ async function sendToolRequest(
       },
       timer,
     });
+    // Pre-wake the SW (see preWakeSW docstring). Cheap insurance against
+    // requests landing on a suspended SW and timing out.
+    preWakeSW(ws);
     ws.send(JSON.stringify({ type: 'tool_request', id: browserBoundId, tool, params }));
   });
 }
 
-// Per-browser timeout for fan-out tools. Shorter than REQUEST_TIMEOUT_MS so
-// one slow browser doesn't stall the aggregate response.
-const FAN_OUT_TIMEOUT_MS = 2_000;
+// Per-browser timeout for fan-out tools. Was 2s — too aggressive for an
+// MV3 service worker that may need 1-3s to wake up after suspension. At 2s,
+// any wedged-or-sleeping SW guaranteed a "timeout" outcome even when the
+// browser was otherwise healthy. 10s leaves headroom for:
+//   - SW wake (typically 1-3s, up to ~5s when Chrome is under load)
+//   - tool execution (tabs query: 100-500ms; snapshot/screenshot: 1-3s)
+//   - WS frame ack roundtrip on a sluggish system
+// Still well under REQUEST_TIMEOUT_MS (30s) so one slow browser can't
+// stall the aggregate response too long.
+const FAN_OUT_TIMEOUT_MS = 10_000;
+
+/**
+ * Send a tiny "wake" frame to a browser's WS BEFORE the real tool_request.
+ * Many MV3 SW evictions leave the OS-level WS open while the SW itself is
+ * suspended. Sending any frame to the SW's onmessage handler triggers the
+ * SW to wake. By sending a server_ping first, we give the SW a head start
+ * — by the time our tool_request arrives moments later, the SW is awake
+ * and ready to handle it.
+ *
+ * This is fire-and-forget: we don't wait for a server_pong reply. The
+ * subsequent tool_request will be queued behind the ping in the WS buffer
+ * and processed once the SW wakes.
+ */
+function preWakeSW(ws: WebSocket): void {
+  try {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'server_ping', timestamp: Date.now(), reason: 'pre-tool-request' }));
+    }
+  } catch { /* best-effort */ }
+}
 
 export interface FanOutResult {
   browserId: string;
@@ -626,15 +762,81 @@ function fanOutToolRequest(
   }
 
   return Promise.all(
-    targets.map(({ browserId, ws }) =>
-      new Promise<FanOutResult | FanOutError>((resolve) => {
-        const browserBoundId = `b_${randomUUID()}`;
-        const sentAt = Date.now();
+    targets.map(({ browserId, ws }) => (async (): Promise<FanOutResult | FanOutError> => {
+      const browserBoundId = `b_${randomUUID()}`;
+      const sentAt = Date.now();
+      const brand = browserId.split(':')[0] || 'browser';
+
+      // Per-target RecentActivity entry. Means a fanout to 3 browsers
+      // produces 3 timeline rows in the dashboard, each showing the
+      // per-browser outcome (success / timeout / error). User can see
+      // exactly which browser is wedged when one target hangs.
+      if (fanoutId) {
+        recentActivity.startRequest({
+          mcpId: null,
+          clientId,
+          browserBoundId,
+          browserId,
+          tool,
+        }, {
+          key: 'tool_request_started',
+          status: 'info',
+          message: `Bridge picked ${brand} to run ${tool}.`,
+        });
+      }
+
+      // Liveness probe: ping the browser and wait up to 3s for pong.
+      // If no pong arrives, the SW is wedged and the tool_request would
+      // just time out at 10s. Failing fast gives the user a clear error
+      // immediately AND avoids holding up the MCP client.
+      if (fanoutId) {
+        recentActivity.addStep(browserBoundId, {
+          key: 'liveness_probe_sent',
+          status: 'wait',
+          message: `Bridge knocked on ${brand}'s door (sent a tiny ping) to check it is awake.`,
+        });
+      }
+      const alive = await proveLive(browserId, ws, LIVENESS_PROBE_TIMEOUT_MS);
+      if (!alive) {
+        // SW is wedged. Don't even try the tool_request — it would just
+        // time out at 10s. Mark this WS as dead so future requests skip
+        // it until the extension reconnects.
+        if (fanoutId) {
+          bridgeLog().warn('bridge.fanout.target_unresponsive', {
+            fanoutId, browserId, browserBoundId,
+            elapsedMs: Date.now() - sentAt,
+            reason: 'no_pong_within_3s',
+          });
+          recentActivity.finishRequest(browserBoundId, 'timeout', 'sw_wedged_no_pong', {
+            key: 'liveness_probe_failed',
+            message: `${brand} did not answer the ping in 3 seconds.`,
+            cause: `${brand}'s extension brain (service worker) is asleep or stuck. Click "Reload this browser" on the Connected Browsers card to wake it up.`,
+          });
+        }
+        // Close the dead socket so the extension can reconnect cleanly.
+        try { ws.close(1011, 'sw_wedged_no_pong'); } catch { /* ignore */ }
+        return { browserId, ok: false, error: 'sw_wedged (no pong within 3s)' };
+      }
+      if (fanoutId) {
+        recentActivity.addStep(browserBoundId, {
+          key: 'liveness_probe_ok',
+          status: 'ok',
+          message: `${brand} answered the ping — it is awake.`,
+        });
+      }
+
+      // SW is awake. Now send the real tool_request and wait.
+      return new Promise<FanOutResult | FanOutError>((resolve) => {
         const timer = setTimeout(() => {
           pendingRequests.delete(browserBoundId);
           if (fanoutId) {
             bridgeLog().warn('bridge.fanout.target_timed_out', {
               fanoutId, browserId, browserBoundId, elapsedMs: Date.now() - sentAt,
+            });
+            recentActivity.finishRequest(browserBoundId, 'timeout', 'tool_request_timeout', {
+              key: 'tool_request_timed_out',
+              message: `${brand} answered the ping but didn't reply to ${tool} within 10 seconds.`,
+              cause: `Most likely the extension JS held a stale WebSocket reference (orphan socket): bridge sent the request on socket A, extension is now listening on socket B (a newer one from a reconnect). The orphan-detection sweep will close the dead socket within 15s and the extension will reconnect cleanly. If you keep seeing this, click "Reload this browser" below to force a fresh service worker.`,
             });
           }
           resolve({ browserId, ok: false, error: 'timeout' });
@@ -649,6 +851,10 @@ function fanOutToolRequest(
               bridgeLog().info('bridge.fanout.target_replied', {
                 fanoutId, browserId, browserBoundId, durationMs: Date.now() - sentAt, ok: true,
               });
+              recentActivity.finishRequest(browserBoundId, 'success', undefined, {
+                key: 'tool_response_received',
+                message: `${brand} finished ${tool} in ${Date.now() - sentAt} ms. Bridge is sending the result to your AI.`,
+              });
             }
             resolve({ browserId, ok: true, response });
           },
@@ -658,17 +864,29 @@ function fanOutToolRequest(
                 fanoutId, browserId, browserBoundId, durationMs: Date.now() - sentAt, ok: false,
                 errorMessage: err.message,
               });
+              recentActivity.finishRequest(browserBoundId, 'error', err.message, {
+                key: 'tool_request_failed',
+                message: `${brand} reported an error while running ${tool}: ${err.message}`,
+                cause: 'The tool itself failed inside the extension. Check the extension log tab for details.',
+              });
             }
             resolve({ browserId, ok: false, error: err.message });
           },
           timer,
         });
+        if (fanoutId) {
+          recentActivity.addStep(browserBoundId, {
+            key: 'tool_request_sent',
+            status: 'wait',
+            message: `Bridge asked ${brand} to run ${tool} and is waiting for the answer.`,
+          });
+        }
         ws.send(JSON.stringify({ type: 'tool_request', id: browserBoundId, tool, params }));
         if (fanoutId) {
           bridgeLog().info('bridge.fanout.target_sent', { fanoutId, browserId, browserBoundId });
         }
-      }),
-    ),
+      });
+    })()),
   );
 }
 
@@ -748,8 +966,21 @@ export function mergeFanOutListTabs(results: Array<FanOutResult | FanOutError>):
   };
   if (errors.length > 0) payload.errors = errors;
 
+  // Mark the result as an error when EVERY target failed (no tabs were
+  // returned by anyone). The previous behavior left `isError` unset, so
+  // MCP clients (VS Code, Cursor, Claude) saw a "successful" response
+  // whose content text was actually an error JSON — they then parsed it
+  // and showed misleading timeout messages to users.
+  //
+  // Partial-success (some browsers responded, some timed out) is NOT
+  // flagged as error: the payload still has real tabs, and the `errors`
+  // array surfaces which browsers didn't respond. The MCP client can
+  // decide how to surface that.
+  const allFailed = results.length > 0 && errors.length === results.length;
+
   return {
     content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
+    ...(allFailed ? { isError: true as const } : {}),
   };
 }
 
@@ -931,6 +1162,11 @@ function handleMcpMessage(clientId: string, raw: string, reply: (msg: unknown) =
       // extension instance, regardless of profile, so users with multiple
       // Chrome profiles see one unified view. Optional `browser` param
       // narrows the broadcast to a single brand.
+      //
+      // Tracking: each target browser gets its own RecentActivity entry
+      // (created inside fanOutToolRequest), so the dashboard timeline
+      // shows per-browser outcome. We do NOT add an aggregate row — it'd
+      // double-count when reading the dashboard.
       if (toolName === 'list_tabs') {
         const brandFilter = browserId === 'default' ? null : browserId;
         const fanoutId = `fo_${randomUUID()}`;
@@ -1154,18 +1390,37 @@ export function startServer(port: number): void {
         // eslint-disable-next-line n/no-process-exit
         process.exit(0);
       },
-      onReloadExtensionRequest: () => {
+      onReloadExtensionRequest: (browserId?: string) => {
         let count = 0;
-        for (const [, ws] of browserSockets) {
-          if (ws.readyState === WebSocket.OPEN) {
+        let matchedBrowserId: string | undefined;
+        if (browserId) {
+          // Targeted reload — send only to the matching socket. Avoids
+          // reloading every browser when only one is misbehaving.
+          const ws = browserSockets.get(browserId);
+          if (ws && ws.readyState === WebSocket.OPEN) {
             try {
               ws.send(JSON.stringify({ type: 'reload', source: 'diag-ui' }));
-              count++;
-            } catch { /* ignore individual send failure */ }
+              count = 1;
+              matchedBrowserId = browserId;
+            } catch { /* ignore */ }
           }
+          bridgeLog().info('bridge.diag.reload_extension_targeted', {
+            browserId, delivered: count > 0,
+          });
+        } else {
+          // Broadcast — every connected extension reloads. Used by the
+          // top-level "Reload all" button.
+          for (const [, ws] of browserSockets) {
+            if (ws.readyState === WebSocket.OPEN) {
+              try {
+                ws.send(JSON.stringify({ type: 'reload', source: 'diag-ui' }));
+                count++;
+              } catch { /* ignore individual send failure */ }
+            }
+          }
+          bridgeLog().info('bridge.diag.reload_extension_broadcast', { count });
         }
-        bridgeLog().info('bridge.diag.reload_extension_broadcast', { count });
-        return { broadcastTo: count };
+        return { broadcastTo: count, ...(matchedBrowserId ? { matchedBrowserId } : {}) };
       },
       getState: (): StateSource => {
         // Cross-reference: for each connected client / browser, count
@@ -1189,11 +1444,27 @@ export function startServer(port: number): void {
             allowedExtensionIdsCount: allowedExtensionIds.size,
             allowedExtensionIdsSample: Array.from(allowedExtensionIds).map((id) => id.slice(0, 8) + '…'),
           },
-          browsers: Array.from(browserRegistry.entries()).map(([browserId, info]) => ({
-            browserId,
-            connectedAt: info.connectedAt,
-            recentRequestCount: browserCounts.get(browserId) ?? 0,
-          })),
+          browsers: Array.from(browserRegistry.entries()).map(([browserId, info]) => {
+            const lastSeenMs = browserLastSeen.get(browserId);
+            const ageSec = lastSeenMs ? Math.floor((Date.now() - lastSeenMs) / 1000) : null;
+            // Liveness derived from how recently we received any inbound
+            // frame from this browser. Bridge sends server_ping every 20s,
+            // so a healthy SW pongs within ~21s. If we haven't heard
+            // anything in 45s, the SW is probably wedged even though the
+            // OS-level WS still says OPEN.
+            let liveness: 'live' | 'stale' | 'unknown' = 'unknown';
+            if (ageSec !== null) {
+              liveness = ageSec < 45 ? 'live' : 'stale';
+            }
+            return {
+              browserId,
+              connectedAt: info.connectedAt,
+              recentRequestCount: browserCounts.get(browserId) ?? 0,
+              lastSeenAt: lastSeenMs ? new Date(lastSeenMs).toISOString() : null,
+              lastSeenAgeSec: ageSec,
+              liveness,
+            };
+          }),
           mcpClients: Array.from(mcpClientRegistry.entries()).map(([clientId, info]) => ({
             clientId,
             transport: info.transport,
@@ -1277,6 +1548,39 @@ export function startServer(port: number): void {
       handleExtension(ws, params.get('browserId') || 'default');
     }
   });
+
+  // ── Global liveness sweep ────────────────────────────────────────────
+  // Every BROWSER_LIVENESS_INTERVAL_MS, walk every connected browser and
+  // run a fast liveness probe. Browsers that don't pong within
+  // LIVENESS_PROBE_TIMEOUT_MS get their WS forcibly closed — which forces
+  // the extension's reconnect logic to spin up a fresh SW life.
+  //
+  // Why we need this: MV3 service workers get suspended by Chrome aggressively.
+  // The OS-level WS lingers in CLOSE_WAIT state — looks "OPEN" to the bridge
+  // but no JS is actually receiving. Without active probing, the bridge holds
+  // a dead reference and routes tool calls into the void.
+  //
+  // Cost: one tiny ping frame per browser per cycle. With ≤ 5 browsers and
+  // a 15s cycle, that's ≤ 20 frames/minute. Negligible.
+  const BROWSER_LIVENESS_INTERVAL_MS = 15_000;
+  const livenessTimer = setInterval(async () => {
+    const browsers = Array.from(browserSockets.entries())
+      .filter(([id]) => id !== HELPER_PROBE_BROWSER_ID);
+    for (const [browserId, ws] of browsers) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      const alive = await proveLive(browserId, ws, LIVENESS_PROBE_TIMEOUT_MS);
+      if (!alive) {
+        bridgeLog().warn('bridge.browser.liveness_failed', {
+          browserId,
+          reason: 'no_pong_to_periodic_probe',
+          action: 'closing_socket_to_force_reconnect',
+        });
+        try { ws.close(1011, 'liveness_probe_failed'); } catch { /* ignore */ }
+      }
+    }
+  }, BROWSER_LIVENESS_INTERVAL_MS);
+  // Cleanup on bridge shutdown — though typically the bridge dies first.
+  process.on('exit', () => clearInterval(livenessTimer));
 
   // Primary MCP client: read JSON-RPC from own stdio.
   // The MCP spec uses newline-delimited JSON ("\n" separator). Some legacy

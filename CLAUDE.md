@@ -88,6 +88,23 @@ cat "$LOCALAPPDATA/agenthub/com.agenthub.native_host.json"
 - Lock file location: `%LOCALAPPDATA%/agenthub/server.lock`
 - Extension IDs are stored in `%LOCALAPPDATA%/agenthub/extension-ids.json` — must be a JSON array of real Chrome extension IDs, NOT placeholder values like `"myext123"`
 - Extension ID (dev, Profile 1): `ehchmchlmggdigicfjfmlgcbhdcdcmll`
+- **CRITICAL invariant — single-relay rule** (v0.5.10+): `connection-manager.openRelay()` MUST close the existing `relay` before creating a new one. Without this, retry/reconcile/backoff cycles silently leak WS connections — old WS stays open at OS level, bridge still sees it as "connected", but extension's JS has lost its reference so nothing handles incoming tool_request frames. Result: bridge sends tool_request to socket A, extension is listening on socket B, tool times out at 10s. The fix lives in `openRelay()` and `stopAll()`. If you ever see a `bridge.browser.replaced` log spam pattern, this rule was probably broken again.
+- **CRITICAL invariant — helper status truth source** (v0.5.10+): `wsHealthy` is the strongest positive signal. `pidAlive` is advisory only — Windows `process.kill(pid, 0)` from the pkg-bundled helper can false-negative for cross-process-tree perm reasons. `deriveReason()` short-circuits to `'connecting'` when `wsHealthy=true` regardless of `pidAlive`. `getServiceStatus()` ALWAYS probes the port (no longer gates on pidAlive).
+
+## Diagnostics dashboard (v0.5.8+)
+
+Open `http://127.0.0.1:7483/` in any browser while the bridge is running. Single-page HTML served by the bridge. No login (localhost-only). Endpoints:
+
+- `GET /` → dashboard HTML
+- `GET /api/state` → bridge info + browsers (with `liveness` field: live/stale/unknown) + mcpClients + recentRequests + recentRejections
+- `GET /api/request/<browserBoundId>` → per-request drill-down (step-by-step trace with kid-friendly messages + cause hints)
+- `GET /api/logs?file=bridge|extension|helper&n=200` → tailed log lines
+- `POST /api/restart` → graceful bridge exit (autostart respawns)
+- `POST /api/reload-extension[?browserId=...]` → broadcast or targeted extension reload via WS
+
+CORS is enabled on GET endpoints for `chrome-extension://` / `moz-extension://` origins so the side panel can use the bridge's `/api/state` as its source of truth instead of the slow native-messaging helper.
+
+**Liveness model:** browser `liveness` is derived from `browserLastSeen` (updated on EVERY inbound WS frame). 'live' = heard within 45s, 'stale' = no inbound frames for >45s (SW likely wedged). The bridge runs a periodic liveness sweep every 15s: ping every connected browser, force-close any that don't pong within 3s. This is the recovery mechanism for MV3 SW eviction.
 
 ## Debugging via structured logs (v0.5.6+)
 

@@ -168,7 +168,7 @@ describe('mergeFanOutListTabs', () => {
     expect(payload.errors[0].error).toMatch(/^parse_failed:/);
   });
 
-  it('returns an empty tabs array when all browsers fail', () => {
+  it('returns an empty tabs array AND isError:true when all browsers fail', () => {
     const results: Array<FanOutResult | FanOutError> = [
       { browserId: 'chrome:A', ok: false, error: 'timeout' },
       { browserId: 'chrome:B', ok: false, error: 'closed' },
@@ -177,6 +177,25 @@ describe('mergeFanOutListTabs', () => {
     const payload = JSON.parse(merged.content[0].text);
     expect(payload.tabs).toEqual([]);
     expect(payload.errors).toHaveLength(2);
+    // Critical: when EVERY target failed, the MCP result must be flagged
+    // as an error. Otherwise VS Code / Cursor / Claude see a "success"
+    // response whose content text happens to be an error JSON, parse it,
+    // and show confusing timeout messages while bridge reports success.
+    expect(merged.isError).toBe(true);
+  });
+
+  it('does NOT set isError on partial success (some tabs returned)', () => {
+    const results: Array<FanOutResult | FanOutError> = [
+      { browserId: 'chrome:A', ok: true, response: { result: { content: [{ type: 'text', text: '[{"id":"chrome:A:1"}]' }] } } },
+      { browserId: 'chrome:B', ok: false, error: 'timeout' },
+    ];
+    const merged = mergeFanOutListTabs(results);
+    const payload = JSON.parse(merged.content[0].text);
+    expect(payload.tabs).toHaveLength(1);
+    expect(payload.errors).toHaveLength(1);
+    // Partial success: at least one browser returned tabs, so don't flag
+    // as error — the MCP client can surface the `errors` field if it cares.
+    expect(merged.isError).toBeUndefined();
   });
 
   it('surfaces extension tool-error envelope as the actual error message (not parse_failed)', () => {

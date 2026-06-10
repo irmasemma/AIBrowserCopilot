@@ -202,13 +202,18 @@ export function probeWebSocket(port: number, expectedPid?: number, timeoutMs: nu
 
 export function deriveReason(s: Pick<ServiceStatus, 'lockFile' | 'pidAlive' | 'portListening' | 'wsHealthy' | 'wsHealthyError'>): ServiceReason {
   if (!s.lockFile.exists) return 'no_lock_file';
-  if (s.pidAlive === false) return 'bridge_not_started';
-  if (!s.portListening) return 'bridge_not_started';
-  if (!s.wsHealthy) {
-    if (s.wsHealthyError === 'protocol_timeout') return 'protocol_timeout';
-    return 'server_not_responding';
+  // wsHealthy is the strongest positive signal: we successfully completed a
+  // WebSocket handshake AND received server_info. If true, the bridge is
+  // definitely running — return 'connecting' even if pidAlive disagreed.
+  if (s.wsHealthy) return 'connecting';
+  // Below this point wsHealthy is false. Use port + pid to triage why.
+  if (!s.portListening) {
+    // No port listening — bridge process is genuinely absent.
+    return 'bridge_not_started';
   }
-  return 'connecting';
+  // Port listening but WS handshake failed.
+  if (s.wsHealthyError === 'protocol_timeout') return 'protocol_timeout';
+  return 'server_not_responding';
 }
 
 export interface GetServiceStatusOptions {
@@ -239,9 +244,30 @@ export async function getServiceStatus(opts: GetServiceStatusOptions): Promise<S
     pidAlive = (o.isPidAlive ?? isPidAlive)(lockFile.pid);
   }
 
+  // CRITICAL FIX: probe the port REGARDLESS of pidAlive result.
+  //
+  // Why: on Windows, `process.kill(pid, 0)` from a pkg-bundled helper
+  // sometimes returns false even when the target PID is alive (cross
+  // process-tree permission quirks; helper is launched by Chrome and may
+  // have a different security context than the bridge launched by autostart).
+  // We had a recurring "Bridge isn't running" false alarm in the side panel
+  // because pidAlive=false skipped the port probe, derived reason was
+  // 'bridge_not_started', UI scared users.
+  //
+  // Port listening is the only ground truth. If the bridge port is open and
+  // a WS handshake completes (probeWebSocket), the bridge IS running. The
+  // pidAlive signal becomes advisory (informational), not gating.
   let portListening = false;
-  if (lockFile.exists && (pidAlive === true || pidAlive === null)) {
+  if (lockFile.exists) {
     portListening = await (o.probePort ?? probePort)(port);
+  }
+
+  // If port is listening but pidAlive said false, OVERRIDE pidAlive to true.
+  // The pid IS alive — the helper's check was wrong, and we have direct
+  // network proof. Without this override, the UI reports "pidAlive: false"
+  // alongside "WS healthy: true" — confusing and self-contradictory.
+  if (portListening && pidAlive === false) {
+    pidAlive = true;
   }
 
   let wsResult: WsProbeResult = { ok: false, error: 'not_attempted' };
