@@ -139,6 +139,17 @@ const SNAPSHOT_REF_INJECTOR = `(() => {
   return lines.join('\\n');
 })()`;
 
+// Service-worker-safe binary → base64 (no Node Buffer in MV3). Chunked to
+// avoid blowing the call stack on large (multi-hundred-KB) screenshots.
+const bytesToBase64 = (bytes: Uint8Array): string => {
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+};
+
 const captureSnapshot = async (tabId: number): Promise<string> => {
   try {
     return await withPlaywrightPage(tabId, async (page: Page) => {
@@ -328,36 +339,25 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
       );
     }
 
-    // captureVisibleTab only captures the active tab in the window, so we
-    // must activate the target. This is the only tool that needs to.
-    await chrome.tabs.update(tab.id!, { active: true });
-
-    // Use the tab's window ID (more reliable than getCurrent() in service workers)
-    const windowId = tab.windowId ?? (await chrome.windows.getCurrent()).id;
-
+    // ROOT-CAUSE FIX: capture via CDP (Playwright `Page.captureScreenshot`),
+    // NOT `chrome.tabs.captureVisibleTab`. captureVisibleTab only works when
+    // the target WINDOW is focused/visible and HANGS forever — never resolving
+    // OR rejecting — when it isn't (background window, occluded, or a heavy
+    // still-painting tab). That was the actual cause of wedged screenshots
+    // (confirmed via step logging: it never returned from captureVisibleTab).
+    // CDP screenshots are taken from the renderer regardless of window focus,
+    // so there's nothing to activate and nothing to hang on.
     try {
-      const dataUrl = await chrome.tabs.captureVisibleTab(windowId, {
-        format: format as 'png' | 'jpeg',
-        quality,
+      return await withPlaywrightPage(tab.id!, async (page) => {
+        const raw = await page.screenshot(
+          format === 'jpeg' ? { type: 'jpeg', quality } : { type: 'png' },
+        );
+        return {
+          content: [{ type: 'image', data: bytesToBase64(new Uint8Array(raw)), mimeType: `image/${format}` }],
+        };
       });
-
-      const base64 = dataUrl.split(',')[1] ?? dataUrl;
-      return { content: [{ type: 'image', data: base64, mimeType: `image/${format}` }] };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      // Provide helpful error messages for common failures
-      if (message.includes('activeTab') || message.includes('permission')) {
-        throw Object.assign(
-          new Error('Cannot capture this page. Try clicking on the page first, or navigate to a different site.'),
-          { code: 'CONTENT_UNAVAILABLE' },
-        );
-      }
-      if (message.includes('readback') || message.includes('capture')) {
-        throw Object.assign(
-          new Error('Screenshot failed — make sure the browser window is visible (not minimized).'),
-          { code: 'CONTENT_UNAVAILABLE' },
-        );
-      }
       throw Object.assign(new Error(`Screenshot failed: ${message}`), { code: 'CONTENT_UNAVAILABLE' });
     }
   },
@@ -930,7 +930,40 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
   },
 };
 
-export const dispatchTool = async (toolName: string, params: Record<string, unknown>): Promise<unknown> => {
+// Hard ceiling for any single tool. Kept under the bridge's tool_request
+// timeout (30s) so the extension reports a clear, tool-specific error FIRST
+// instead of the bridge giving up with a generic timeout while this promise
+// leaks forever. Chrome/Playwright calls (e.g. captureVisibleTab on a wedged
+// or still-loading page) can hang indefinitely with no rejection — without
+// this race, dispatchTool never settles and `ext.tool.dispatch.complete` is
+// never logged.
+export const TOOL_DISPATCH_TIMEOUT_MS = 25_000;
+
+/**
+ * Race a promise against a timeout. If `p` doesn't settle within `ms`, reject
+ * with a TOOL_TIMEOUT error. The underlying Chrome/Playwright call cannot be
+ * cancelled, so it keeps running and its eventual result is ignored — the
+ * point is that the CALLER always settles instead of hanging forever.
+ * Exported for tests.
+ */
+export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(Object.assign(
+        new Error(`Tool '${label}' timed out after ${ms}ms — the page may be unresponsive (still loading or a heavy SPA). Reload the tab and try again.`),
+        { code: 'TOOL_TIMEOUT' },
+      ));
+    }, ms);
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
+export const dispatchTool = async (
+  toolName: string,
+  params: Record<string, unknown>,
+  timeoutMs: number = TOOL_DISPATCH_TIMEOUT_MS,
+): Promise<unknown> => {
   const handler = tools[toolName];
   if (!handler) {
     void logRecord({
@@ -966,7 +999,7 @@ export const dispatchTool = async (toolName: string, params: Record<string, unkn
   });
 
   try {
-    const result = await handler(params);
+    const result = await withTimeout(handler(params), timeoutMs, toolName);
     entry.status = 'success';
     entry.duration = Date.now() - startTime;
     await logActivity(entry);

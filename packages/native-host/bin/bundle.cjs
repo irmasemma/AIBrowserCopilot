@@ -7921,7 +7921,7 @@ var toolRegistry = [
 ];
 
 // src/version.ts
-var VERSION = "0.5.12";
+var VERSION = "0.5.13";
 var BUILD_ID = process.env.BUILD_ID ?? "dev";
 
 // src/lock-file-manager.ts
