@@ -28,7 +28,10 @@ const main = (): void => {
       --tools        Comma-separated list of AI tools to configure
       --update       Update existing installation
       --uninstall    Remove installation and configs
-      --extension-id Chrome extension ID (for development)
+      --extension-id Chrome extension ID. If omitted, the installer tries to
+                     auto-detect it from your installed browsers; with --yes and
+                     exactly one match it is used automatically, otherwise the
+                     detected ID is suggested for you to confirm.
       --from-local   Install from a local folder instead of GitHub releases.
                      Accepts either a folder containing the binaries directly
                      or the project root (looks in packages/*/bin/).

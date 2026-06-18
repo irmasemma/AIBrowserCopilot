@@ -16,6 +16,11 @@ const defaultFlags: CliFlags = {
   yes: false,
   update: false,
   uninstall: false,
+  // Real installs always carry an extension ID (the side-panel wizard supplies
+  // it). Tests that exercise the registration path need one too, otherwise the
+  // installer short-circuits to the "extension ID required" guidance instead of
+  // calling registerFn. The no-ID path has its own dedicated test below.
+  extensionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 };
 
 const noopDownload = async () => ({ success: true, binaryPath: 'test' });
@@ -281,6 +286,24 @@ describe('App - registration integration', () => {
 
     await delay(150);
     expect(lastFrame()).toContain('EPERM');
+  });
+
+  it('asks for the extension ID (and does not register) when none provided or detected', async () => {
+    // macOS platform with a bogus home dir → auto-detection finds nothing.
+    const mockRegister = vi.fn(async () => ({ success: true, manifestPath: 'x' }));
+
+    const { lastFrame } = render(
+      <App
+        platform={makePlatform({ os: 'macos', homeDir: '/nonexistent-ah-test-home-xyz' })}
+        flags={{ ...defaultFlags, extensionId: undefined }}
+        {...allMocks}
+        registerFn={mockRegister}
+      />,
+    );
+
+    await delay(150);
+    expect(mockRegister).not.toHaveBeenCalled();
+    expect(lastFrame()).toContain('extension ID');
   });
 
   it('passes extensionId flag to register function', async () => {

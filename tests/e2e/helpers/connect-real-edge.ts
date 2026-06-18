@@ -78,7 +78,9 @@ const findAgentHubExtension = async (
       if (!m) continue;
       const extensionId = m[1];
       const name = await fetchManifestName(context, extensionId);
-      if (name === EXTENSION_NAME) {
+      // Match by prefix: the shipped manifest name carries a marketing suffix
+      // ("AgentHub — AI Chat + MCP for …"), so an exact match would miss it.
+      if (name && name.startsWith(EXTENSION_NAME)) {
         return { extensionId, serviceWorker: sw };
       }
     }
