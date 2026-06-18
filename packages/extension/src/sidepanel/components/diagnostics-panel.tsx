@@ -284,6 +284,27 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
   const [status, setStatus] = useState<ServiceStatusSnapshot | null>(null);
   const [statusFetchedAt, setStatusFetchedAt] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+
+  // Always-available manual recovery. The state-derived header buttons only
+  // appear for KNOWN-broken states; this covers the dangerous "UI says
+  // connected but tools time out" case (e.g. a wedged SW or a relay the
+  // bridge silently dropped), where the diagnostics panel is the only
+  // surface the user can reach. Sends restart_service → the helper kills and
+  // respawns the bridge, forcing every browser to reconnect cleanly.
+  const handleRestart = async () => {
+    if (restarting) return;
+    setRestarting(true);
+    try {
+      await chrome.runtime.sendMessage({ type: 'restart_service', userInitiated: true }).catch(() => null);
+      // Give the bridge a moment to come back, then force a reconcile + refresh.
+      await new Promise((r) => setTimeout(r, 1200));
+      await chrome.runtime.sendMessage({ type: 'verify_connection' }).catch(() => null);
+      await refresh();
+    } finally {
+      setTimeout(() => setRestarting(false), 600);
+    }
+  };
 
   /**
    * Pull a status snapshot. Two paths:
@@ -418,6 +439,14 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
             onClick={() => void handleCopy()}
           >
             {copied ? 'Copied!' : 'Copy report'}
+          </button>
+          <button
+            class="text-[10px] px-2 py-0.5 rounded border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-700 transition-colors disabled:opacity-50"
+            onClick={() => void handleRestart()}
+            disabled={restarting}
+            title="Kill and respawn the bridge, then reconnect. Use this if tools time out even though the status looks connected."
+          >
+            {restarting ? 'Restarting…' : 'Restart bridge'}
           </button>
         </div>
       </div>

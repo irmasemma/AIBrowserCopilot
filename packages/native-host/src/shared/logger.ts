@@ -85,6 +85,21 @@ const MAX_LINE_BYTES = 16_000;
  * add `level: 'minimal'|'standard'|'verbose'` once we have telemetry on
  * which events are most actionable.
  */
+/**
+ * Optional remote "tee". When set (by `remote-sink.ts`), every record that
+ * passes the privacy kill-switch is also handed to this callback for batched
+ * upload to a remote ingest endpoint. The tee receives the SAME already-redacted
+ * record the local file write gets — so remote logs inherit redaction for free.
+ *
+ * Contract: the tee MUST NOT throw and MUST NOT block (it only enqueues). The
+ * logger wraps the call in try/catch as a second line of defence — a broken
+ * remote sink must never break local logging or the bridge.
+ */
+let _remoteTee: ((rec: LogRecord) => void) | null = null;
+export function setRemoteTee(fn: ((rec: LogRecord) => void) | null): void {
+  _remoteTee = fn;
+}
+
 let _loggingEnabled: boolean | null = null;
 function isLoggingEnabled(filePath: string): boolean {
   if (_loggingEnabled !== null) return _loggingEnabled;
@@ -111,6 +126,7 @@ function isLoggingEnabled(filePath: string): boolean {
 export function _resetForTest(): void {
   states.clear();
   _loggingEnabled = null;
+  _remoteTee = null;
 }
 
 /**
@@ -249,6 +265,17 @@ function serialize(rec: LogRecord): string {
  */
 export function logRecord(cfg: LoggerConfig, rec: LogRecord): void {
   if (!isLoggingEnabled(cfg.filePath)) return;
+
+  // Remote tee (opt-in). Runs after the kill-switch so disabling logging
+  // disables remote shipping too. Enqueue-only; never blocks, never throws.
+  if (_remoteTee) {
+    try {
+      _remoteTee(rec);
+    } catch {
+      // A broken sink must not break local logging.
+    }
+  }
+
   const state = getOrInit(cfg);
   if (state.disabled) return;
 

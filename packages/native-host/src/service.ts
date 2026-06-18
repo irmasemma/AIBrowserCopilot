@@ -24,6 +24,7 @@ import {
   registerCleanupHandlers,
 } from './lock-file-manager.js';
 import { makeLogger, logRecord, type Logger, type LogRecord } from './shared/logger.js';
+import { initRemoteSink } from './remote-sink.js';
 import { redact, redactError } from './shared/redaction.js';
 import { handleDiagRequest, RecentActivity, type StateSource } from './diag-server.js';
 
@@ -375,9 +376,30 @@ function proveLive(browserId: string, ws: WebSocket, timeoutMs: number): Promise
 
 const LIVENESS_PROBE_TIMEOUT_MS = 3_000;
 
-function handleExtension(ws: WebSocket, browserId: string): void {
+// When a second socket arrives for an already-registered browserId, ping the
+// incumbent and wait this long for a pong before deciding it's a dead orphan
+// that may be replaced. Short enough that a genuine MV3 SW-eviction reconnect
+// isn't meaningfully delayed, but long enough that a live relay reliably
+// answers a loopback ping. See the collision guard in handleExtension().
+const INCUMBENT_LIVENESS_TIMEOUT_MS = 1_500;
+
+// Exported for integration tests (collision guard / single-relay invariant).
+// Production wiring calls this from the WebSocketServer 'connection' handler.
+export function handleExtension(ws: WebSocket, browserId: string): void {
   const connectedAt = Date.now();
   const isProbe = browserId === HELPER_PROBE_BROWSER_ID;
+
+  // Register this socket and wire up all of its handlers. Invoked either
+  // immediately (no browserId collision) or, on a collision, ONLY after we
+  // have proven the incumbent socket is dead — see the collision guard below.
+  const accept = (): void => {
+  // On the collision path, accept() runs after an async liveness probe — the
+  // newcomer may have closed in the meantime (the stale clients that trigger
+  // this path open very short-lived sockets). Never register a dead socket or
+  // send() on it.
+  if (ws.readyState !== WebSocket.OPEN) {
+    return;
+  }
   if (isProbe) {
     // Log probes at debug-level event names so they're trivially greppable
     // separately from real browser activity. Real extension connections
@@ -497,6 +519,44 @@ function handleExtension(ws: WebSocket, browserId: string): void {
       });
     }
   });
+  };
+
+  // ── Collision guard: a live relay must never be torn down ───────────────
+  // A second socket for an already-registered browserId is USUALLY a
+  // legitimate reconnect after MV3 SW eviction — the old socket is an orphan
+  // that stays OPEN from our side but no longer has a JS handler. In that
+  // case replacing it (indexBrowser → terminate) is correct.
+  //
+  // But it can ALSO be a duplicate or a health-probe from a client that does
+  // not use the `helper-probe` sentinel (e.g. a stale extension/helper that
+  // predates it). Then the incumbent is the LIVE relay and terminating it
+  // silently breaks tool routing: the bridge keeps the short-lived newcomer,
+  // the extension keeps listening on the relay, and every tool_request times
+  // out while the UI still shows "connected". That is the failure this guard
+  // prevents. Probes (helper-probe) are exempt — they're expected to be
+  // transient and use a dedicated id that never collides with a real browser.
+  const existing = browserSockets.get(browserId);
+  if (!isProbe && existing && existing !== ws && existing.readyState === WebSocket.OPEN) {
+    proveLive(browserId, existing, INCUMBENT_LIVENESS_TIMEOUT_MS)
+      .then((alive) => {
+        if (alive) {
+          bridgeLog().warn('bridge.browser.duplicate_rejected', {
+            browserId,
+            reason: 'incumbent_socket_still_live',
+            hint: 'A second socket arrived for a browserId whose existing socket still answers pings — keeping the live one and closing the duplicate. Common cause: a stale extension/helper health-probe that predates the helper-probe sentinel. Tool routing is preserved.',
+          });
+          try { ws.close(4002, 'duplicate_live_incumbent'); } catch { /* ignore */ }
+          return;
+        }
+        // Incumbent did not pong within the window — it's a dead orphan.
+        // Safe to replace it (accept → indexBrowser terminates the orphan).
+        accept();
+      })
+      .catch(() => accept());
+    return;
+  }
+
+  accept();
 }
 
 /**
@@ -1321,6 +1381,12 @@ export function startServer(port: number): void {
   // Cheap one-time check; no-op on subsequent startups.
   migrateLegacyBridgeLog();
 
+  // Opt-in remote log shipping. Reads <installDir>/logs-config.json; a no-op
+  // unless `remote.enabled` + endpoint + apiKey are configured. Must run after
+  // migrate (so the dir exists) and is safe even if logging is disabled — it
+  // teees off the same redacted pipeline and honours the master kill-switch.
+  initRemoteSink(getInstallDir());
+
   // Resolve the configured extension-id allowlist once at startup. The set
   // can stay empty — in that case verifyClient falls back to accepting any
   // chrome-extension:// origin (back-compat with installs predating the
@@ -1506,24 +1572,75 @@ export function startServer(port: number): void {
     },
   });
 
-  httpServer.listen(port, '127.0.0.1');
-
-  // Write lock file with current PID/port so the installer can find and
-  // terminate this process before reinstalling. Cleaned up on exit.
-  try {
-    writeLockFile({
-      pid: process.pid,
+  // Bind the port FIRST, then claim the lock file — never the other way
+  // around. Two bridges can race to start (the autostart Run key and the
+  // extension's start_native_host both fire). If we wrote the lock before
+  // confirming we own the port, the LOSER of the bind race would (a) clobber
+  // the winner's lock with its own PID, then (b) delete it via the exit
+  // cleanup handler — leaving a healthy, listening bridge with NO lock file.
+  // Discovery then reports 'no_lock_file', the extension thinks the bridge is
+  // down and spawns yet more racing instances: a self-sustaining churn loop.
+  // Writing the lock only on 'listening' (and never touching it on
+  // EADDRINUSE) guarantees exactly one lock owner: whoever holds the port.
+  // Safety net for the case where we never acquire the port AND never get an
+  // error. On Windows, listen() against a port held by another process can
+  // simply HANG — neither 'listening' nor 'error' ('EADDRINUSE') ever fires —
+  // leaving a zombie bridge that owns nothing, writes no lock, and serves
+  // nothing. If 'listening' hasn't fired by this deadline, assume we lost the
+  // race to a sibling and exit cleanly (no lock was written, none is touched).
+  const LISTEN_DEADLINE_MS = 5_000;
+  const listenWatchdog = setTimeout(() => {
+    bridgeLog().warn('bridge.lifecycle.listen_timeout', {
       port,
-      token: '',
-      ipcPath: '',
-      startedAt: new Date().toISOString(),
-      version: VERSION,
-      startedBy: process.env.AI_BROWSER_COPILOT_STARTED_BY ?? 'service',
+      timeoutMs: LISTEN_DEADLINE_MS,
+      action: 'exiting_lost_bind_race',
+      hint: 'Never became listening and never errored (port held by a sibling; common on Windows). Exiting so we do not linger as a zombie.',
     });
-    registerCleanupHandlers();
-  } catch (err) {
-    bridgeLog().error('bridge.lifecycle.lock_file_write_failed', { ...redactError(err) });
-  }
+    // eslint-disable-next-line n/no-process-exit
+    process.exit(0);
+  }, LISTEN_DEADLINE_MS);
+  // Don't let the watchdog itself keep the event loop alive.
+  if (typeof listenWatchdog.unref === 'function') listenWatchdog.unref();
+
+  httpServer.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      // A sibling bridge already owns the port (and therefore the lock).
+      // registerCleanupHandlers() has NOT run yet, so exiting here leaves the
+      // sibling's lock file untouched — which is exactly what we want.
+      bridgeLog().warn('bridge.lifecycle.port_in_use', {
+        port,
+        action: 'exiting_without_lock_cleanup',
+        hint: 'Another bridge already holds this port; leaving the running instance’s lock file intact.',
+      });
+    } else {
+      bridgeLog().error('bridge.lifecycle.listen_failed', { port, ...redactError(err) });
+    }
+    clearTimeout(listenWatchdog);
+    // eslint-disable-next-line n/no-process-exit
+    process.exit(0);
+  });
+
+  httpServer.on('listening', () => {
+    clearTimeout(listenWatchdog);
+    // We own the port. Only NOW claim the lock file and register the cleanup
+    // handlers that delete it on a clean exit.
+    try {
+      writeLockFile({
+        pid: process.pid,
+        port,
+        token: '',
+        ipcPath: '',
+        startedAt: new Date().toISOString(),
+        version: VERSION,
+        startedBy: process.env.AI_BROWSER_COPILOT_STARTED_BY ?? 'service',
+      });
+      registerCleanupHandlers();
+    } catch (err) {
+      bridgeLog().error('bridge.lifecycle.lock_file_write_failed', { ...redactError(err) });
+    }
+  });
+
+  httpServer.listen(port, '127.0.0.1');
 
   // Crash visibility: when launched detached or via autostart there is no
   // attached console, so any uncaught exception exits silently. Logging to a

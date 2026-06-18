@@ -182,7 +182,17 @@ export default defineBackground(() => {
   // Listen for retry/reconnect/verify/start requests from UI
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === 'retry_connection' || message?.type === 'reconnect') {
-      manager.retry();
+      // Guard: don't tear down a healthy relay. The setup wizard polls
+      // `retry_connection` on a 3s interval; `manager.retry()` does an
+      // unconditional stopAll()+openRelay(), so an unguarded retry while
+      // already connected churns the socket every poll — the bridge then
+      // sees a duplicate connect for the same browserId on each tick. When
+      // the relay is already alive, reconcile (a cheap ping) instead.
+      if (manager.isRelayAlive()) {
+        manager.reconcile().catch(() => {});
+      } else {
+        manager.retry();
+      }
       sendResponse({ ok: true });
       return false;
     }

@@ -90,6 +90,36 @@ Effect:
 
 Change requires restarting the bridge for new connections. The default (file absent) is **enabled = true** — the goal of this work is debuggability, so opt-in privacy.
 
+## Remote sink (opt-in)
+
+Beyond the local files, the bridge can **ship records to a remote ingest
+endpoint** (a Vercel function backed by Neon Postgres) so you can troubleshoot a
+user's machine without asking for their log files. It's off by default.
+
+- Implementation: `packages/native-host/src/remote-sink.ts` tees off the same
+  `logRecord()` funnel — so remote records are the SAME already-redacted lines
+  the local files get, and the `enabled:false` master switch disables remote too.
+- It captures `bridge` AND `ext` records (extension logs arrive over WS and pass
+  through the same `logRecord()` in the bridge).
+- Transport: batched, fire-and-forget over `node:https` (no `fetch` dependency),
+  bounded buffer, drops on failure. Never blocks or crashes the bridge.
+- Enable per machine by adding a `remote` block to `logs-config.json` (see below).
+- Server + Neon schema + setup steps: `packages/log-ingest/` (its README).
+
+```json
+{
+  "enabled": true,
+  "remote": {
+    "enabled": true,
+    "endpoint": "https://YOUR-APP.vercel.app/api/logs",
+    "apiKey": "<INGEST_KEY>"
+  }
+}
+```
+
+Records correlate by a per-install `install-id` (a random UUID persisted at
+`<installDir>/install-id` — identifies an install, not a person).
+
 ## How a future LLM debugs from logs
 
 1. **"MCP timed out"** — search bridge.log for `bridge.tool_request.timed_out`. Check if `bridge.tool_response.received` ever fired with the same `browserBoundId`. If not: extension dropped it. Look in `extension.log` for `ext.tool_request.received` with that `requestId` — present means SW got it, dispatch failed; absent means SW didn't get it (WS dead or SW evicted).

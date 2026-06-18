@@ -79,9 +79,9 @@ var require_buffer_util = __commonJS({
         output[offset + i] = source[i] ^ mask[i & 3];
       }
     }
-    function _unmask(buffer, mask) {
-      for (let i = 0; i < buffer.length; i++) {
-        buffer[i] ^= mask[i & 3];
+    function _unmask(buffer2, mask) {
+      for (let i = 0; i < buffer2.length; i++) {
+        buffer2[i] ^= mask[i & 3];
       }
     }
     function toArrayBuffer(buf) {
@@ -118,9 +118,9 @@ var require_buffer_util = __commonJS({
           if (length < 48) _mask(source, mask, output, offset, length);
           else bufferUtil.mask(source, mask, output, offset, length);
         };
-        module2.exports.unmask = function(buffer, mask) {
-          if (buffer.length < 32) _unmask(buffer, mask);
-          else bufferUtil.unmask(buffer, mask);
+        module2.exports.unmask = function(buffer2, mask) {
+          if (buffer2.length < 32) _unmask(buffer2, mask);
+          else bufferUtil.unmask(buffer2, mask);
         };
       } catch (e) {
       }
@@ -371,26 +371,26 @@ var require_permessage_deflate = __commonJS({
             value = value[0];
             if (key === "client_max_window_bits") {
               if (value !== true) {
-                const num = +value;
-                if (!Number.isInteger(num) || num < 8 || num > 15) {
+                const num2 = +value;
+                if (!Number.isInteger(num2) || num2 < 8 || num2 > 15) {
                   throw new TypeError(
                     `Invalid value for parameter "${key}": ${value}`
                   );
                 }
-                value = num;
+                value = num2;
               } else if (!this._isServer) {
                 throw new TypeError(
                   `Invalid value for parameter "${key}": ${value}`
                 );
               }
             } else if (key === "server_max_window_bits") {
-              const num = +value;
-              if (!Number.isInteger(num) || num < 8 || num > 15) {
+              const num2 = +value;
+              if (!Number.isInteger(num2) || num2 < 8 || num2 > 15) {
                 throw new TypeError(
                   `Invalid value for parameter "${key}": ${value}`
                 );
               }
-              value = num;
+              value = num2;
             } else if (key === "client_no_context_takeover" || key === "server_no_context_takeover") {
               if (value !== true) {
                 throw new TypeError(
@@ -1085,8 +1085,8 @@ var require_receiver = __commonJS({
           return;
         }
         const buf = this.consume(8);
-        const num = buf.readUInt32BE(0);
-        if (num > Math.pow(2, 53 - 32) - 1) {
+        const num2 = buf.readUInt32BE(0);
+        if (num2 > Math.pow(2, 53 - 32) - 1) {
           const error = this.createError(
             RangeError,
             "Unsupported WebSocket frame: payload length > 2^53 - 1",
@@ -1097,7 +1097,7 @@ var require_receiver = __commonJS({
           cb(error);
           return;
         }
-        this._payloadLength = num * Math.pow(2, 32) + buf.readUInt32BE(4);
+        this._payloadLength = num2 * Math.pow(2, 32) + buf.readUInt32BE(4);
         this.haveLength(cb);
       }
       /**
@@ -2235,7 +2235,7 @@ var require_websocket = __commonJS({
     var tls = require("tls");
     var { randomBytes, createHash } = require("crypto");
     var { Duplex, Readable } = require("stream");
-    var { URL: URL2 } = require("url");
+    var { URL: URL3 } = require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
     var Receiver2 = require_receiver();
     var Sender2 = require_sender();
@@ -2728,11 +2728,11 @@ var require_websocket = __commonJS({
         );
       }
       let parsedUrl;
-      if (address instanceof URL2) {
+      if (address instanceof URL3) {
         parsedUrl = address;
       } else {
         try {
-          parsedUrl = new URL2(address);
+          parsedUrl = new URL3(address);
         } catch {
           throw new SyntaxError(`Invalid URL: ${address}`);
         }
@@ -2869,7 +2869,7 @@ var require_websocket = __commonJS({
           req.abort();
           let addr;
           try {
-            addr = new URL2(location, address);
+            addr = new URL3(location, address);
           } catch (e) {
             const err = new SyntaxError(`Invalid URL: ${location}`);
             emitErrorAndClose(websocket, err);
@@ -3665,10 +3665,10 @@ var import_websocket = __toESM(require_websocket(), 1);
 var import_websocket_server = __toESM(require_websocket_server(), 1);
 
 // src/service.ts
-var import_node_http = require("node:http");
-var import_node_crypto = require("node:crypto");
-var import_node_fs4 = require("node:fs");
-var import_node_path3 = require("node:path");
+var import_node_http2 = require("node:http");
+var import_node_crypto2 = require("node:crypto");
+var import_node_fs5 = require("node:fs");
+var import_node_path4 = require("node:path");
 var import_node_os2 = require("node:os");
 
 // ../../node_modules/zod/v3/external.js
@@ -7921,7 +7921,7 @@ var toolRegistry = [
 ];
 
 // src/version.ts
-var VERSION = "0.5.10";
+var VERSION = "0.5.11";
 var BUILD_ID = process.env.BUILD_ID ?? "dev";
 
 // src/lock-file-manager.ts
@@ -7983,6 +7983,10 @@ var import_node_path2 = require("node:path");
 var DEFAULT_MAX_BYTES = 1e6;
 var DEFAULT_KEEP = 4;
 var MAX_LINE_BYTES = 16e3;
+var _remoteTee = null;
+function setRemoteTee(fn) {
+  _remoteTee = fn;
+}
 var _loggingEnabled = null;
 function isLoggingEnabled(filePath) {
   if (_loggingEnabled !== null) return _loggingEnabled;
@@ -8002,31 +8006,31 @@ function isLoggingEnabled(filePath) {
   }
 }
 var states = /* @__PURE__ */ new Map();
-function getOrInit(cfg) {
-  const existing = states.get(cfg.filePath);
+function getOrInit(cfg2) {
+  const existing = states.get(cfg2.filePath);
   if (existing) return existing;
   const state = {
-    filePath: cfg.filePath,
-    maxBytes: cfg.maxBytes ?? DEFAULT_MAX_BYTES,
-    keep: cfg.keep ?? DEFAULT_KEEP,
+    filePath: cfg2.filePath,
+    maxBytes: cfg2.maxBytes ?? DEFAULT_MAX_BYTES,
+    keep: cfg2.keep ?? DEFAULT_KEEP,
     currentBytes: 0,
     disabled: false
   };
   try {
-    const dir = (0, import_node_path2.dirname)(cfg.filePath);
+    const dir = (0, import_node_path2.dirname)(cfg2.filePath);
     if (!(0, import_node_fs2.existsSync)(dir)) (0, import_node_fs2.mkdirSync)(dir, { recursive: true });
   } catch {
     state.disabled = true;
-    states.set(cfg.filePath, state);
+    states.set(cfg2.filePath, state);
     return state;
   }
   try {
-    if ((0, import_node_fs2.existsSync)(cfg.filePath)) {
-      state.currentBytes = (0, import_node_fs2.statSync)(cfg.filePath).size;
+    if ((0, import_node_fs2.existsSync)(cfg2.filePath)) {
+      state.currentBytes = (0, import_node_fs2.statSync)(cfg2.filePath).size;
     }
   } catch {
   }
-  states.set(cfg.filePath, state);
+  states.set(cfg2.filePath, state);
   return state;
 }
 function rotate(state) {
@@ -8081,9 +8085,15 @@ function serialize(rec) {
   }
   return line + "\n";
 }
-function logRecord(cfg, rec) {
-  if (!isLoggingEnabled(cfg.filePath)) return;
-  const state = getOrInit(cfg);
+function logRecord(cfg2, rec) {
+  if (!isLoggingEnabled(cfg2.filePath)) return;
+  if (_remoteTee) {
+    try {
+      _remoteTee(rec);
+    } catch {
+    }
+  }
+  const state = getOrInit(cfg2);
   if (state.disabled) return;
   const line = serialize(rec);
   const bytes = Buffer.byteLength(line, "utf-8");
@@ -8103,18 +8113,181 @@ function stripReservedKeys(fields) {
   const { pid: _pid, src: _src, lvl: _lvl, event: _event, t: _t, ...rest } = fields;
   return rest;
 }
-function makeLogger(cfg, src, pid) {
+function makeLogger(cfg2, src, pid) {
   return {
     info(event, fields) {
-      logRecord(cfg, { src, lvl: "info", pid, event, ...stripReservedKeys(fields) });
+      logRecord(cfg2, { src, lvl: "info", pid, event, ...stripReservedKeys(fields) });
     },
     warn(event, fields) {
-      logRecord(cfg, { src, lvl: "warn", pid, event, ...stripReservedKeys(fields) });
+      logRecord(cfg2, { src, lvl: "warn", pid, event, ...stripReservedKeys(fields) });
     },
     error(event, fields) {
-      logRecord(cfg, { src, lvl: "error", pid, event, ...stripReservedKeys(fields) });
+      logRecord(cfg2, { src, lvl: "error", pid, event, ...stripReservedKeys(fields) });
     }
   };
+}
+
+// src/remote-sink.ts
+var import_node_fs3 = require("node:fs");
+var import_node_https = require("node:https");
+var import_node_http = require("node:http");
+var import_node_path3 = require("node:path");
+var import_node_crypto = require("node:crypto");
+var import_node_url = require("node:url");
+var DEFAULTS = {
+  flushIntervalMs: 5e3,
+  maxBatch: 50,
+  maxBufferRecords: 1e3,
+  /** Hard cap on a single POST so one flush can't send a huge body. */
+  postTimeoutMs: 8e3
+};
+var cfg = null;
+var buffer = [];
+var timer = null;
+var flushing = false;
+function num(v, fallback) {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : fallback;
+}
+function readRemoteConfig(installDir) {
+  try {
+    const raw = (0, import_node_fs3.readFileSync)((0, import_node_path3.join)(installDir, "logs-config.json"), "utf-8");
+    const parsed = JSON.parse(raw);
+    if (parsed.enabled === false) return null;
+    const r = parsed.remote;
+    if (!r || r.enabled !== true) return null;
+    if (typeof r.endpoint !== "string" || typeof r.apiKey !== "string") return null;
+    if (!r.endpoint || !r.apiKey) return null;
+    return {
+      endpoint: r.endpoint,
+      apiKey: r.apiKey,
+      flushIntervalMs: num(r.flushIntervalMs, DEFAULTS.flushIntervalMs),
+      maxBatch: num(r.maxBatch, DEFAULTS.maxBatch),
+      maxBufferRecords: num(r.maxBufferRecords, DEFAULTS.maxBufferRecords)
+    };
+  } catch {
+    return null;
+  }
+}
+function getInstallId(installDir) {
+  const p = (0, import_node_path3.join)(installDir, "install-id");
+  try {
+    if ((0, import_node_fs3.existsSync)(p)) {
+      const existing = (0, import_node_fs3.readFileSync)(p, "utf-8").trim();
+      if (existing) return existing;
+    }
+  } catch {
+  }
+  const id = (0, import_node_crypto.randomUUID)();
+  try {
+    (0, import_node_fs3.writeFileSync)(p, id, "utf-8");
+  } catch {
+  }
+  return id;
+}
+function postBatch(endpoint, apiKey, body) {
+  return new Promise((resolve) => {
+    let u;
+    try {
+      u = new import_node_url.URL(endpoint);
+    } catch {
+      return resolve();
+    }
+    const lib = u.protocol === "http:" ? import_node_http.request : import_node_https.request;
+    const payload = Buffer.from(body, "utf-8");
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    try {
+      const req = lib(
+        {
+          method: "POST",
+          hostname: u.hostname,
+          port: u.port || void 0,
+          path: u.pathname + u.search,
+          headers: {
+            "content-type": "application/json",
+            "content-length": payload.length,
+            "x-ingest-key": apiKey
+          },
+          timeout: DEFAULTS.postTimeoutMs
+        },
+        (res) => {
+          res.on("data", () => {
+          });
+          res.on("end", done);
+          res.on("error", done);
+        }
+      );
+      req.on("error", done);
+      req.on("timeout", () => {
+        req.destroy();
+        done();
+      });
+      req.write(payload);
+      req.end();
+    } catch {
+      done();
+    }
+  });
+}
+function enqueue(rec) {
+  if (!cfg) return;
+  const copy = { ...rec };
+  if (!copy.t) copy.t = (/* @__PURE__ */ new Date()).toISOString();
+  buffer.push(copy);
+  if (buffer.length > cfg.maxBufferRecords) {
+    buffer.splice(0, buffer.length - cfg.maxBufferRecords);
+  }
+  if (buffer.length >= cfg.maxBatch) void flush();
+}
+async function flush() {
+  if (flushing || !cfg || buffer.length === 0) return;
+  flushing = true;
+  const active = cfg;
+  const batch = buffer.splice(0, active.maxBatch);
+  try {
+    const body = JSON.stringify({ installId: active.installId, records: batch });
+    await postBatch(active.endpoint, active.apiKey, body);
+  } catch {
+  } finally {
+    flushing = false;
+  }
+}
+var shutdownHooked = false;
+function initRemoteSink(installDir) {
+  const rc = readRemoteConfig(installDir);
+  if (!rc) {
+    cfg = null;
+    setRemoteTee(null);
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+    return;
+  }
+  cfg = { ...rc, installId: getInstallId(installDir) };
+  buffer = [];
+  setRemoteTee(enqueue);
+  if (timer) clearInterval(timer);
+  timer = setInterval(() => {
+    void flush();
+  }, cfg.flushIntervalMs);
+  if (typeof timer.unref === "function") timer.unref();
+  if (!shutdownHooked) {
+    shutdownHooked = true;
+    process.once("beforeExit", () => {
+      void flush();
+    });
+    process.once("SIGINT", () => {
+      void flush();
+    });
+    process.once("SIGTERM", () => {
+      void flush();
+    });
+  }
 }
 
 // src/shared/redaction.ts
@@ -8328,7 +8501,7 @@ function redactStack(stack) {
 }
 
 // src/diag-server.ts
-var import_node_fs3 = require("node:fs");
+var import_node_fs4 = require("node:fs");
 
 // src/diag-page.ts
 var DIAG_HTML = `<!doctype html>
@@ -9296,11 +9469,11 @@ function respondHtml(res, body) {
   res.end(body);
 }
 function tailLines(filePath, n) {
-  if (!(0, import_node_fs3.existsSync)(filePath)) return [];
+  if (!(0, import_node_fs4.existsSync)(filePath)) return [];
   try {
-    const sz = (0, import_node_fs3.statSync)(filePath).size;
+    const sz = (0, import_node_fs4.statSync)(filePath).size;
     if (sz === 0) return [];
-    const raw = (0, import_node_fs3.readFileSync)(filePath, "utf-8");
+    const raw = (0, import_node_fs4.readFileSync)(filePath, "utf-8");
     const lines = raw.split("\n").filter((l) => l.length > 0);
     return lines.slice(-n);
   } catch {
@@ -9442,9 +9615,9 @@ function loadAllowedExtensionIds(opts) {
   const installDir = opts?.installDir ?? defaultInstallDir();
   if (!installDir) return result;
   try {
-    const configPath = (0, import_node_path3.join)(installDir, "extension-ids.json");
-    if (!(0, import_node_fs4.existsSync)(configPath)) return result;
-    const parsed = JSON.parse((0, import_node_fs4.readFileSync)(configPath, "utf-8"));
+    const configPath = (0, import_node_path4.join)(installDir, "extension-ids.json");
+    if (!(0, import_node_fs5.existsSync)(configPath)) return result;
+    const parsed = JSON.parse((0, import_node_fs5.readFileSync)(configPath, "utf-8"));
     if (Array.isArray(parsed)) {
       for (const entry of parsed) {
         if (typeof entry === "string" && entry.trim()) result.add(entry.trim());
@@ -9457,11 +9630,11 @@ function loadAllowedExtensionIds(opts) {
 function defaultInstallDir() {
   switch ((0, import_node_os2.platform)()) {
     case "win32":
-      return (0, import_node_path3.join)(process.env.LOCALAPPDATA ?? (0, import_node_path3.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "agenthub");
+      return (0, import_node_path4.join)(process.env.LOCALAPPDATA ?? (0, import_node_path4.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "agenthub");
     case "darwin":
-      return (0, import_node_path3.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "agenthub");
+      return (0, import_node_path4.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "agenthub");
     default:
-      return (0, import_node_path3.join)((0, import_node_os2.homedir)(), ".local", "share", "agenthub");
+      return (0, import_node_path4.join)((0, import_node_os2.homedir)(), ".local", "share", "agenthub");
   }
 }
 function indexBrowser(browserId, ws) {
@@ -9574,102 +9747,128 @@ function proveLive(browserId, ws, timeoutMs) {
   });
 }
 var LIVENESS_PROBE_TIMEOUT_MS = 3e3;
+var INCUMBENT_LIVENESS_TIMEOUT_MS = 1500;
 function handleExtension(ws, browserId) {
   const connectedAt = Date.now();
   const isProbe = browserId === HELPER_PROBE_BROWSER_ID;
-  if (isProbe) {
-    bridgeLog().info("bridge.probe.connected", { browserId });
-  } else {
-    bridgeLog().info("bridge.browser.connected", { browserId });
-    browserRegistry.set(browserId, { connectedAt: new Date(connectedAt).toISOString() });
-  }
-  indexBrowser(browserId, ws);
-  ws.send(JSON.stringify(getServerInfo()));
-  const serverPingTimer = setInterval(() => {
-    if (ws.readyState === import_websocket.default.OPEN) {
-      ws.send(JSON.stringify({ type: "server_ping", timestamp: Date.now() }));
+  const accept = () => {
+    if (ws.readyState !== import_websocket.default.OPEN) {
+      return;
     }
-  }, SERVER_PING_INTERVAL_MS);
-  ws.on("message", (data) => {
-    try {
-      const msg = JSON.parse(data.toString());
-      markBrowserAlive(browserId);
-      if (msg.type === "ping") {
-        ws.send(JSON.stringify({ type: "pong", timestamp: msg.timestamp }));
-        return;
+    if (isProbe) {
+      bridgeLog().info("bridge.probe.connected", { browserId });
+    } else {
+      bridgeLog().info("bridge.browser.connected", { browserId });
+      browserRegistry.set(browserId, { connectedAt: new Date(connectedAt).toISOString() });
+    }
+    indexBrowser(browserId, ws);
+    ws.send(JSON.stringify(getServerInfo()));
+    const serverPingTimer = setInterval(() => {
+      if (ws.readyState === import_websocket.default.OPEN) {
+        ws.send(JSON.stringify({ type: "server_ping", timestamp: Date.now() }));
       }
-      if (msg.type === "server_pong") {
-        const waiters = pendingPongs.get(browserId);
-        if (waiters && waiters.length > 0) {
-          const ts = typeof msg.timestamp === "number" ? msg.timestamp : Date.now();
-          for (const w of waiters.slice()) {
-            try {
-              w(ts);
-            } catch {
-            }
-          }
-          pendingPongs.set(browserId, []);
-        }
-        return;
-      }
-      if (msg.type === "request_tool_scan") {
-        ws.send(JSON.stringify({ type: "tool_scan", tools: [] }));
-        return;
-      }
-      if (msg.type === "log_batch" && Array.isArray(msg.entries)) {
-        const MAX_BATCH = 200;
-        if (msg.entries.length > MAX_BATCH) {
-          bridgeLog().warn("bridge.log_batch.oversize_dropped", {
-            browserId,
-            received: msg.entries.length,
-            cap: MAX_BATCH
-          });
+    }, SERVER_PING_INTERVAL_MS);
+    ws.on("message", (data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        markBrowserAlive(browserId);
+        if (msg.type === "ping") {
+          ws.send(JSON.stringify({ type: "pong", timestamp: msg.timestamp }));
           return;
         }
-        for (const entry of msg.entries) {
-          if (!isValidLogEntry(entry)) continue;
-          logRecord({ filePath: getExtensionLogPath() }, {
-            ...entry,
-            _via_bridge_pid: process.pid,
-            _from_browser: browserId
-          });
+        if (msg.type === "server_pong") {
+          const waiters = pendingPongs.get(browserId);
+          if (waiters && waiters.length > 0) {
+            const ts = typeof msg.timestamp === "number" ? msg.timestamp : Date.now();
+            for (const w of waiters.slice()) {
+              try {
+                w(ts);
+              } catch {
+              }
+            }
+            pendingPongs.set(browserId, []);
+          }
+          return;
+        }
+        if (msg.type === "request_tool_scan") {
+          ws.send(JSON.stringify({ type: "tool_scan", tools: [] }));
+          return;
+        }
+        if (msg.type === "log_batch" && Array.isArray(msg.entries)) {
+          const MAX_BATCH = 200;
+          if (msg.entries.length > MAX_BATCH) {
+            bridgeLog().warn("bridge.log_batch.oversize_dropped", {
+              browserId,
+              received: msg.entries.length,
+              cap: MAX_BATCH
+            });
+            return;
+          }
+          for (const entry of msg.entries) {
+            if (!isValidLogEntry(entry)) continue;
+            logRecord({ filePath: getExtensionLogPath() }, {
+              ...entry,
+              _via_bridge_pid: process.pid,
+              _from_browser: browserId
+            });
+          }
+          return;
+        }
+        if (msg.id) {
+          const pending = pendingRequests.get(msg.id);
+          if (pending) {
+            clearTimeout(pending.timer);
+            pendingRequests.delete(msg.id);
+            pending.resolve(msg);
+          }
+        }
+      } catch {
+      }
+    });
+    ws.on("close", () => {
+      clearInterval(serverPingTimer);
+      if (browserSockets.get(browserId) === ws) {
+        unindexBrowser(browserId);
+        browserLastSeen.delete(browserId);
+        const waiters = pendingPongs.get(browserId);
+        if (waiters && waiters.length > 0) {
+        }
+        pendingPongs.delete(browserId);
+        if (!isProbe) browserRegistry.delete(browserId);
+        const event = isProbe ? "bridge.probe.disconnected" : "bridge.browser.disconnected";
+        let pendingForThisBrowser = 0;
+        for (const req of pendingRequests.values()) {
+          if (req.browserId === browserId) pendingForThisBrowser++;
+        }
+        bridgeLog().info(event, {
+          browserId,
+          durationMs: Date.now() - connectedAt,
+          pendingRequestCount: pendingForThisBrowser,
+          totalPendingAcrossAllBrowsers: pendingRequests.size
+        });
+      }
+    });
+  };
+  const existing = browserSockets.get(browserId);
+  if (!isProbe && existing && existing !== ws && existing.readyState === import_websocket.default.OPEN) {
+    proveLive(browserId, existing, INCUMBENT_LIVENESS_TIMEOUT_MS).then((alive) => {
+      if (alive) {
+        bridgeLog().warn("bridge.browser.duplicate_rejected", {
+          browserId,
+          reason: "incumbent_socket_still_live",
+          hint: "A second socket arrived for a browserId whose existing socket still answers pings \u2014 keeping the live one and closing the duplicate. Common cause: a stale extension/helper health-probe that predates the helper-probe sentinel. Tool routing is preserved."
+        });
+        try {
+          ws.close(4002, "duplicate_live_incumbent");
+        } catch {
         }
         return;
       }
-      if (msg.id) {
-        const pending = pendingRequests.get(msg.id);
-        if (pending) {
-          clearTimeout(pending.timer);
-          pendingRequests.delete(msg.id);
-          pending.resolve(msg);
-        }
-      }
-    } catch {
-    }
-  });
-  ws.on("close", () => {
-    clearInterval(serverPingTimer);
-    if (browserSockets.get(browserId) === ws) {
-      unindexBrowser(browserId);
-      browserLastSeen.delete(browserId);
-      const waiters = pendingPongs.get(browserId);
-      if (waiters && waiters.length > 0) {
-      }
-      pendingPongs.delete(browserId);
-      if (!isProbe) browserRegistry.delete(browserId);
-      const event = isProbe ? "bridge.probe.disconnected" : "bridge.browser.disconnected";
-      let pendingForThisBrowser = 0;
-      for (const req of pendingRequests.values()) {
-        if (req.browserId === browserId) pendingForThisBrowser++;
-      }
-      bridgeLog().info(event, {
-        browserId,
-        durationMs: Date.now() - connectedAt,
-        pendingRequestCount: pendingForThisBrowser,
-        totalPendingAcrossAllBrowsers: pendingRequests.size
-      });
-    }
-  });
+      accept();
+    }).catch(() => accept());
+    return;
+  }
+  accept();
 }
 function isValidLogEntry(entry) {
   if (!entry || typeof entry !== "object") return false;
@@ -9680,7 +9879,7 @@ function isValidLogEntry(entry) {
   return true;
 }
 function handleMcpClient(ws) {
-  const clientId = (0, import_node_crypto.randomUUID)();
+  const clientId = (0, import_node_crypto2.randomUUID)();
   mcpClients.set(clientId, ws);
   mcpClientRegistry.set(clientId, { transport: "ws", connectedAt: (/* @__PURE__ */ new Date()).toISOString() });
   bridgeLog().info("bridge.mcp.client_connected", { clientId, transport: "ws" });
@@ -9747,7 +9946,7 @@ async function sendToolRequest(clientId, originalId, tool, params, browserId) {
     throw new Error("No browser extension connected");
   }
   return new Promise((resolve, reject) => {
-    const browserBoundId = `b_${(0, import_node_crypto.randomUUID)()}`;
+    const browserBoundId = `b_${(0, import_node_crypto2.randomUUID)()}`;
     const sentAt = Date.now();
     bridgeLog().info("bridge.tool_request.sent", {
       mcpId: originalId,
@@ -9764,7 +9963,7 @@ async function sendToolRequest(clientId, originalId, tool, params, browserId) {
       browserId,
       tool
     });
-    const timer = setTimeout(() => {
+    const timer2 = setTimeout(() => {
       pendingRequests.delete(browserBoundId);
       bridgeLog().warn("bridge.tool_request.timed_out", {
         mcpId: originalId,
@@ -9801,7 +10000,7 @@ async function sendToolRequest(clientId, originalId, tool, params, browserId) {
         recentActivity.finishRequest(browserBoundId, "error", err.message);
         reject(err);
       },
-      timer
+      timer: timer2
     });
     preWakeSW(ws);
     ws.send(JSON.stringify({ type: "tool_request", id: browserBoundId, tool, params }));
@@ -9834,7 +10033,7 @@ function fanOutToolRequest(clientId, tool, params, brandFilter, fanoutId) {
   }
   return Promise.all(
     targets.map(({ browserId, ws }) => (async () => {
-      const browserBoundId = `b_${(0, import_node_crypto.randomUUID)()}`;
+      const browserBoundId = `b_${(0, import_node_crypto2.randomUUID)()}`;
       const sentAt = Date.now();
       const brand = browserId.split(":")[0] || "browser";
       if (fanoutId) {
@@ -9887,7 +10086,7 @@ function fanOutToolRequest(clientId, tool, params, brandFilter, fanoutId) {
         });
       }
       return new Promise((resolve) => {
-        const timer = setTimeout(() => {
+        const timer2 = setTimeout(() => {
           pendingRequests.delete(browserBoundId);
           if (fanoutId) {
             bridgeLog().warn("bridge.fanout.target_timed_out", {
@@ -9942,7 +10141,7 @@ function fanOutToolRequest(clientId, tool, params, brandFilter, fanoutId) {
             }
             resolve({ browserId, ok: false, error: err.message });
           },
-          timer
+          timer: timer2
         });
         if (fanoutId) {
           recentActivity.addStep(browserBoundId, {
@@ -10134,7 +10333,7 @@ function handleMcpMessage(clientId, raw, reply) {
       };
       if (toolName === "list_tabs") {
         const brandFilter = browserId === "default" ? null : browserId;
-        const fanoutId = `fo_${(0, import_node_crypto.randomUUID)()}`;
+        const fanoutId = `fo_${(0, import_node_crypto2.randomUUID)()}`;
         bridgeLog().info("bridge.fanout.started", { fanoutId, mcpId: originalId, toolName, brandFilter });
         fanOutToolRequest(clientId, toolName, toolArgs, brandFilter, fanoutId).then((results) => {
           const succeeded = results.filter((r) => r.ok).length;
@@ -10217,31 +10416,31 @@ function zodToJsonSchema(z) {
 function getInstallDir() {
   switch ((0, import_node_os2.platform)()) {
     case "win32":
-      return (0, import_node_path3.join)(process.env.LOCALAPPDATA ?? (0, import_node_path3.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "agenthub");
+      return (0, import_node_path4.join)(process.env.LOCALAPPDATA ?? (0, import_node_path4.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "agenthub");
     case "darwin":
-      return (0, import_node_path3.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "agenthub");
+      return (0, import_node_path4.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "agenthub");
     default:
-      return (0, import_node_path3.join)((0, import_node_os2.homedir)(), ".local", "share", "agenthub");
+      return (0, import_node_path4.join)((0, import_node_os2.homedir)(), ".local", "share", "agenthub");
   }
 }
 function getBridgeLogPath() {
-  return (0, import_node_path3.join)(getInstallDir(), "logs", "bridge.log");
+  return (0, import_node_path4.join)(getInstallDir(), "logs", "bridge.log");
 }
 function getExtensionLogPath() {
-  return (0, import_node_path3.join)(getInstallDir(), "logs", "extension.log");
+  return (0, import_node_path4.join)(getInstallDir(), "logs", "extension.log");
 }
 function getLegacyBridgeLogPath() {
-  return (0, import_node_path3.join)(getInstallDir(), "bridge.log");
+  return (0, import_node_path4.join)(getInstallDir(), "bridge.log");
 }
 function migrateLegacyBridgeLog() {
   const legacy = getLegacyBridgeLogPath();
-  const target = (0, import_node_path3.join)(getInstallDir(), "logs", "bridge.log.legacy");
+  const target = (0, import_node_path4.join)(getInstallDir(), "logs", "bridge.log.legacy");
   try {
-    if (!(0, import_node_fs4.existsSync)(legacy)) return;
-    if ((0, import_node_fs4.existsSync)(target)) return;
-    const dir = (0, import_node_path3.join)(getInstallDir(), "logs");
-    if (!(0, import_node_fs4.existsSync)(dir)) (0, import_node_fs4.mkdirSync)(dir, { recursive: true });
-    (0, import_node_fs4.renameSync)(legacy, target);
+    if (!(0, import_node_fs5.existsSync)(legacy)) return;
+    if ((0, import_node_fs5.existsSync)(target)) return;
+    const dir = (0, import_node_path4.join)(getInstallDir(), "logs");
+    if (!(0, import_node_fs5.existsSync)(dir)) (0, import_node_fs5.mkdirSync)(dir, { recursive: true });
+    (0, import_node_fs5.renameSync)(legacy, target);
   } catch {
   }
 }
@@ -10255,6 +10454,7 @@ function bridgeLog() {
 function startServer(port) {
   serverPort = port;
   migrateLegacyBridgeLog();
+  initRemoteSink(getInstallDir());
   const allowedExtensionIds = loadAllowedExtensionIds();
   bridgeLog().info("bridge.lifecycle.start", {
     port,
@@ -10289,7 +10489,7 @@ function startServer(port) {
     if (lvl === "info") bridgeLog().info(eventName, extras);
     else bridgeLog().warn(eventName, extras);
   }
-  const httpServer = (0, import_node_http.createServer)((req, res) => {
+  const httpServer = (0, import_node_http2.createServer)((req, res) => {
     handleDiagRequest(req, res, {
       onRestartRequest: () => {
         bridgeLog().info("bridge.lifecycle.restart_requested", { initiator: "diag-ui" });
@@ -10374,7 +10574,7 @@ function startServer(port) {
       logPaths: () => ({
         bridge: getBridgeLogPath(),
         extension: getExtensionLogPath(),
-        helper: (0, import_node_path3.join)(getInstallDir(), "logs", "helper.log")
+        helper: (0, import_node_path4.join)(getInstallDir(), "logs", "helper.log")
       })
     });
   });
@@ -10400,21 +10600,48 @@ function startServer(port) {
       }
     }
   });
-  httpServer.listen(port, "127.0.0.1");
-  try {
-    writeLockFile({
-      pid: process.pid,
+  const LISTEN_DEADLINE_MS = 5e3;
+  const listenWatchdog = setTimeout(() => {
+    bridgeLog().warn("bridge.lifecycle.listen_timeout", {
       port,
-      token: "",
-      ipcPath: "",
-      startedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      version: VERSION,
-      startedBy: process.env.AI_BROWSER_COPILOT_STARTED_BY ?? "service"
+      timeoutMs: LISTEN_DEADLINE_MS,
+      action: "exiting_lost_bind_race",
+      hint: "Never became listening and never errored (port held by a sibling; common on Windows). Exiting so we do not linger as a zombie."
     });
-    registerCleanupHandlers();
-  } catch (err) {
-    bridgeLog().error("bridge.lifecycle.lock_file_write_failed", { ...redactError(err) });
-  }
+    process.exit(0);
+  }, LISTEN_DEADLINE_MS);
+  if (typeof listenWatchdog.unref === "function") listenWatchdog.unref();
+  httpServer.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+      bridgeLog().warn("bridge.lifecycle.port_in_use", {
+        port,
+        action: "exiting_without_lock_cleanup",
+        hint: "Another bridge already holds this port; leaving the running instance\u2019s lock file intact."
+      });
+    } else {
+      bridgeLog().error("bridge.lifecycle.listen_failed", { port, ...redactError(err) });
+    }
+    clearTimeout(listenWatchdog);
+    process.exit(0);
+  });
+  httpServer.on("listening", () => {
+    clearTimeout(listenWatchdog);
+    try {
+      writeLockFile({
+        pid: process.pid,
+        port,
+        token: "",
+        ipcPath: "",
+        startedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        version: VERSION,
+        startedBy: process.env.AI_BROWSER_COPILOT_STARTED_BY ?? "service"
+      });
+      registerCleanupHandlers();
+    } catch (err) {
+      bridgeLog().error("bridge.lifecycle.lock_file_write_failed", { ...redactError(err) });
+    }
+  });
+  httpServer.listen(port, "127.0.0.1");
   process.on("uncaughtException", (err) => {
     bridgeLog().error("bridge.lifecycle.uncaught", { ...redactError(err) });
     setTimeout(() => {
@@ -10473,7 +10700,7 @@ ${body}`);
   mcpClientRegistry.set("stdio", { transport: "stdio", connectedAt: (/* @__PURE__ */ new Date()).toISOString() });
 }
 function parseStdioMessages(stream, onMessage, formatHolder) {
-  let buffer = Buffer.alloc(0);
+  let buffer2 = Buffer.alloc(0);
   let contentLength = -1;
   let latched = false;
   const latch = (f) => {
@@ -10483,37 +10710,37 @@ function parseStdioMessages(stream, onMessage, formatHolder) {
     }
   };
   stream.on("data", (chunk) => {
-    buffer = Buffer.concat([buffer, typeof chunk === "string" ? Buffer.from(chunk) : chunk]);
+    buffer2 = Buffer.concat([buffer2, typeof chunk === "string" ? Buffer.from(chunk) : chunk]);
     while (true) {
       if (contentLength !== -1) {
-        if (buffer.length < contentLength) break;
-        const json = buffer.subarray(0, contentLength).toString();
-        buffer = buffer.subarray(contentLength);
+        if (buffer2.length < contentLength) break;
+        const json = buffer2.subarray(0, contentLength).toString();
+        buffer2 = buffer2.subarray(contentLength);
         contentLength = -1;
         latch("lsp");
         onMessage(json);
         continue;
       }
       let i = 0;
-      while (i < buffer.length && (buffer[i] === 10 || buffer[i] === 13 || buffer[i] === 32 || buffer[i] === 9)) i++;
-      if (i > 0) buffer = buffer.subarray(i);
-      if (buffer.length === 0) break;
-      if (buffer[0] === 123 || buffer[0] === 91) {
-        const nl = buffer.indexOf(10);
+      while (i < buffer2.length && (buffer2[i] === 10 || buffer2[i] === 13 || buffer2[i] === 32 || buffer2[i] === 9)) i++;
+      if (i > 0) buffer2 = buffer2.subarray(i);
+      if (buffer2.length === 0) break;
+      if (buffer2[0] === 123 || buffer2[0] === 91) {
+        const nl = buffer2.indexOf(10);
         if (nl === -1) break;
-        const line = buffer.subarray(0, nl).toString().replace(/\r$/, "");
-        buffer = buffer.subarray(nl + 1);
+        const line = buffer2.subarray(0, nl).toString().replace(/\r$/, "");
+        buffer2 = buffer2.subarray(nl + 1);
         if (line) {
           latch("ndjson");
           onMessage(line);
         }
         continue;
       }
-      const headerEnd = buffer.indexOf("\r\n\r\n");
+      const headerEnd = buffer2.indexOf("\r\n\r\n");
       if (headerEnd === -1) break;
-      const header = buffer.subarray(0, headerEnd).toString();
+      const header = buffer2.subarray(0, headerEnd).toString();
       const m = header.match(/Content-Length:\s*(\d+)/i);
-      buffer = buffer.subarray(headerEnd + 4);
+      buffer2 = buffer2.subarray(headerEnd + 4);
       if (m) {
         contentLength = parseInt(m[1], 10);
       }

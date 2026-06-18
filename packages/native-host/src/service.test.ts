@@ -8,6 +8,7 @@ import {
   extensionIdFromOrigin,
   loadAllowedExtensionIds,
   translateExtensionResponse,
+  handleExtension,
   type FanOutResult,
   type FanOutError,
 } from './service.js';
@@ -80,6 +81,76 @@ describe('multi-browser WS', () => {
 
     ext.close(); mcp.close(); wss.close();
   });
+});
+
+describe('collision guard (single-relay invariant)', () => {
+  // Boots a bare WS server that routes every connection through the real
+  // handleExtension() — the production collision logic, minus origin auth.
+  function makeServer(): { wss: WebSocketServer; port: number } {
+    const port = 19500 + Math.floor(Math.random() * 400);
+    const wss = new WebSocketServer({ host: '127.0.0.1', port });
+    wss.on('connection', (ws, req) => {
+      const qi = (req.url ?? '').indexOf('?');
+      const p = qi !== -1 ? new URLSearchParams(req.url!.slice(qi + 1)) : new URLSearchParams();
+      handleExtension(ws as unknown as Parameters<typeof handleExtension>[0], p.get('browserId') || 'default');
+    });
+    return { wss, port };
+  }
+
+  function waitFor<T>(p: Promise<T>, ms: number): Promise<T> {
+    return Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+  }
+  function onceServerInfo(ws: WebSocket): Promise<void> {
+    return new Promise((resolve) => {
+      ws.on('message', (d) => { try { if (JSON.parse(String(d)).type === 'server_info') resolve(); } catch { /* */ } });
+    });
+  }
+
+  it('does NOT replace a LIVE incumbent — rejects the duplicate with 4002', async () => {
+    const { wss, port } = makeServer();
+    const id = 'chrome:live-incumbent';
+
+    // Incumbent answers server_ping with server_pong → proves itself alive.
+    const ws1 = new WebSocket(`ws://127.0.0.1:${port}?browserId=${id}`);
+    ws1.on('message', (d) => {
+      try { if (JSON.parse(String(d)).type === 'server_ping') ws1.send(JSON.stringify({ type: 'server_pong', timestamp: Date.now() })); } catch { /* */ }
+    });
+    let ws1Closed = false;
+    ws1.on('close', () => { ws1Closed = true; });
+    await waitFor(onceServerInfo(ws1), 3000);
+
+    // Duplicate for the same browserId arrives.
+    const ws2 = new WebSocket(`ws://127.0.0.1:${port}?browserId=${id}`);
+    const ws2Close = await waitFor(new Promise<number>((resolve) => ws2.on('close', (code) => resolve(code))), 4000);
+
+    expect(ws2Close).toBe(4002);     // duplicate rejected
+    expect(ws1Closed).toBe(false);   // live relay preserved
+    expect(ws1.readyState).toBe(WebSocket.OPEN);
+
+    ws1.close(); wss.close();
+  }, 10_000);
+
+  it('DOES replace a DEAD incumbent (orphan) — accepts the reconnect', async () => {
+    const { wss, port } = makeServer();
+    const id = 'chrome:dead-incumbent';
+
+    // Incumbent ignores server_ping → wedged orphan.
+    const ws1 = new WebSocket(`ws://127.0.0.1:${port}?browserId=${id}`);
+    let ws1Closed = false;
+    ws1.on('close', () => { ws1Closed = true; });
+    await waitFor(onceServerInfo(ws1), 3000);
+
+    // Reconnect for the same browserId — should be accepted after the
+    // incumbent fails its liveness probe (~1.5s), and the orphan terminated.
+    const ws2 = new WebSocket(`ws://127.0.0.1:${port}?browserId=${id}`);
+    await waitFor(onceServerInfo(ws2), 4000);   // accepted (got server_info)
+
+    expect(ws2.readyState).toBe(WebSocket.OPEN);
+    await waitFor(new Promise<void>((resolve) => { if (ws1Closed) resolve(); else ws1.on('close', () => resolve()); }), 2000);
+    expect(ws1Closed).toBe(true);   // orphan replaced
+
+    ws2.close(); wss.close();
+  }, 10_000);
 });
 
 describe('parseBrand', () => {
