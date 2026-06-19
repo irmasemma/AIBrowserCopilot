@@ -92,7 +92,11 @@ describe('collision guard (single-relay invariant)', () => {
     wss.on('connection', (ws, req) => {
       const qi = (req.url ?? '').indexOf('?');
       const p = qi !== -1 ? new URLSearchParams(req.url!.slice(qi + 1)) : new URLSearchParams();
-      handleExtension(ws as unknown as Parameters<typeof handleExtension>[0], p.get('browserId') || 'default');
+      handleExtension(
+        ws as unknown as Parameters<typeof handleExtension>[0],
+        p.get('browserId') || 'default',
+        p.get('role') === 'relay', // canonical relay marker, mirrors production routing
+      );
     });
     return { wss, port };
   }
@@ -106,7 +110,9 @@ describe('collision guard (single-relay invariant)', () => {
     });
   }
 
-  it('does NOT replace a LIVE incumbent — rejects the duplicate with 4002', async () => {
+  it('rejects a NON-canonical duplicate (no role=relay) against a LIVE incumbent with 4002', async () => {
+    // A stale-client probe / legacy build using the real browserId but WITHOUT
+    // role=relay must NOT kill the live relay — the original v0.5.11 protection.
     const { wss, port } = makeServer();
     const id = 'chrome:live-incumbent';
 
@@ -119,7 +125,7 @@ describe('collision guard (single-relay invariant)', () => {
     ws1.on('close', () => { ws1Closed = true; });
     await waitFor(onceServerInfo(ws1), 3000);
 
-    // Duplicate for the same browserId arrives.
+    // Non-canonical duplicate (no role=relay) for the same browserId.
     const ws2 = new WebSocket(`ws://127.0.0.1:${port}?browserId=${id}`);
     const ws2Close = await waitFor(new Promise<number>((resolve) => ws2.on('close', (code) => resolve(code))), 4000);
 
@@ -128,6 +134,37 @@ describe('collision guard (single-relay invariant)', () => {
     expect(ws1.readyState).toBe(WebSocket.OPEN);
 
     ws1.close(); wss.close();
+  }, 10_000);
+
+  it('INVERSE CASE: a canonical relay (role=relay) SUPERSEDES a still-live incumbent — accepted, not 4002-looped', async () => {
+    // This is the case the v0.5.11 liveness heuristic got WRONG: a real client
+    // reconnecting (new SW life, role=relay) while a stale socket still pongs.
+    // Identity wins: the newest canonical relay is accepted; the old is closed.
+    const { wss, port } = makeServer();
+    const id = 'chrome:reconnecting-relay';
+
+    // Incumbent: a canonical relay that STILL answers server_ping (lingering).
+    const ws1 = new WebSocket(`ws://127.0.0.1:${port}?browserId=${id}&role=relay`);
+    ws1.on('message', (d) => {
+      try { if (JSON.parse(String(d)).type === 'server_ping') ws1.send(JSON.stringify({ type: 'server_pong', timestamp: Date.now() })); } catch { /* */ }
+    });
+    let ws1Closed = false;
+    ws1.on('close', () => { ws1Closed = true; });
+    await waitFor(onceServerInfo(ws1), 3000);
+
+    // The real client reconnects as a canonical relay for the same browserId.
+    const ws2 = new WebSocket(`ws://127.0.0.1:${port}?browserId=${id}&role=relay`);
+    let ws2Closed4002 = false;
+    ws2.on('close', (code) => { if (code === 4002) ws2Closed4002 = true; });
+
+    await waitFor(onceServerInfo(ws2), 4000);   // ACCEPTED — got server_info, not 4002
+
+    expect(ws2.readyState).toBe(WebSocket.OPEN);
+    expect(ws2Closed4002).toBe(false);          // no 4002 loop
+    await waitFor(new Promise<void>((resolve) => { if (ws1Closed) resolve(); else ws1.on('close', () => resolve()); }), 2000);
+    expect(ws1Closed).toBe(true);               // superseded incumbent closed
+
+    ws2.close(); wss.close();
   }, 10_000);
 
   it('DOES replace a DEAD incumbent (orphan) — accepts the reconnect', async () => {

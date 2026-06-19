@@ -15,6 +15,11 @@ const getApp = async (): Promise<CrxApplication> => {
 /**
  * Attach playwright-crx to a tab, run a callback with the Page object, then detach.
  * Handles: already-attached debugger, detach on error, timeout.
+ *
+ * NOTE: attach/detach is cheap (~0-80ms — measured). Do NOT add page caching to
+ * "speed this up": the real cost in screenshot/snapshot is the Playwright op
+ * itself (font/animation stability waits), not attach. Caching only adds a
+ * persistent debugger banner per tab for no gain. Fix slow ops at the call site.
  */
 export const withPlaywrightPage = async <T>(
   tabId: number,

@@ -422,6 +422,19 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
     : 'npx agenthub-setup@latest --update';
   const steps = buildSteps(status, connectionContext, installCommand);
 
+  // The bridge serves its full diagnostics dashboard (live state, per-request
+  // drill-down, log tails) at http://127.0.0.1:<port>/. Open it in a real tab.
+  // Always clickable: the dashboard is served by the BRIDGE PROCESS, not by the
+  // extension's relay connection. A lost/flapping relay is exactly when the
+  // user needs to open it to debug. If the bridge is truly down, the new tab
+  // shows connection-refused — which is itself useful signal. Port falls back
+  // to the default when we have no live serverInfo.
+  const dashboardPort = serverInfo?.port ?? status?.lockFile?.port ?? 7483;
+  const dashboardUrl = `http://127.0.0.1:${dashboardPort}/`;
+  const openDashboard = (): void => {
+    try { chrome.tabs.create({ url: dashboardUrl }); } catch { window.open(dashboardUrl, '_blank'); }
+  };
+
   return (
     <div class="px-4 pb-3 text-xs text-neutral-700 border-t border-neutral-100 pt-3 bg-neutral-50/50">
       <div class="flex justify-between items-center mb-2">
@@ -450,6 +463,23 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
           </button>
         </div>
       </div>
+
+      {/* Entry point to the bridge's full diagnostics dashboard (served at
+          http://127.0.0.1:<port>/). Opens in a real browser tab. */}
+      <button
+        type="button"
+        onClick={openDashboard}
+        title={`Open the bridge diagnostics dashboard (${dashboardUrl})`}
+        data-testid="open-dashboard"
+        class="w-full mb-2 flex items-center gap-2.5 rounded-md border border-brand-primary bg-white px-3 py-2 text-left transition-colors hover:bg-neutral-50"
+      >
+        <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-brand-primary text-white text-[13px]" aria-hidden="true">{'▦'}</span>
+        <span class="min-w-0 flex-1">
+          <span class="block text-[11px] font-semibold text-neutral-800">Open diagnostics dashboard</span>
+          <span class="block text-[10px] text-neutral-500 truncate">Live state, request traces &amp; logs</span>
+        </span>
+        <span class="text-brand-primary text-sm" aria-hidden="true">{'↗'}</span>
+      </button>
 
       <div class="mb-2 space-y-0.5">
         {steps.map((step, i) => <StepRow key={i} step={step} />)}

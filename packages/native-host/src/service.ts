@@ -385,7 +385,10 @@ const INCUMBENT_LIVENESS_TIMEOUT_MS = 1_500;
 
 // Exported for integration tests (collision guard / single-relay invariant).
 // Production wiring calls this from the WebSocketServer 'connection' handler.
-export function handleExtension(ws: WebSocket, browserId: string): void {
+// `isCanonicalRelay` = the connection declared `?role=relay`: it is the real
+// extension relay for this browserId (not a probe or a stale-client duplicate).
+// That IDENTITY — not a liveness guess — decides who wins a browserId collision.
+export function handleExtension(ws: WebSocket, browserId: string, isCanonicalRelay = false): void {
   const connectedAt = Date.now();
   const isProbe = browserId === HELPER_PROBE_BROWSER_ID;
 
@@ -521,29 +524,47 @@ export function handleExtension(ws: WebSocket, browserId: string): void {
   });
   };
 
-  // ── Collision guard: a live relay must never be torn down ───────────────
-  // A second socket for an already-registered browserId is USUALLY a
-  // legitimate reconnect after MV3 SW eviction — the old socket is an orphan
-  // that stays OPEN from our side but no longer has a JS handler. In that
-  // case replacing it (indexBrowser → terminate) is correct.
+  // ── Collision guard — decided by IDENTITY, not a liveness guess ─────────
+  // A second socket for an already-registered browserId has exactly two
+  // possible meanings, and we tell them apart by who DECLARED itself the
+  // canonical relay (`?role=relay`), not by pinging the incumbent:
   //
-  // But it can ALSO be a duplicate or a health-probe from a client that does
-  // not use the `helper-probe` sentinel (e.g. a stale extension/helper that
-  // predates it). Then the incumbent is the LIVE relay and terminating it
-  // silently breaks tool routing: the bridge keeps the short-lived newcomer,
-  // the extension keeps listening on the relay, and every tool_request times
-  // out while the UI still shows "connected". That is the failure this guard
-  // prevents. Probes (helper-probe) are exempt — they're expected to be
-  // transient and use a dedicated id that never collides with a real browser.
+  //   1. Newcomer IS the canonical relay → it is the real extension reconnecting
+  //      (a fresh MV3 service-worker life). A browser has exactly one canonical
+  //      relay, so the NEWEST one is by definition the current client. It WINS
+  //      unconditionally — accept it; indexBrowser() terminates the superseded
+  //      socket. No liveness check, so a stale-but-still-ponging old socket can
+  //      NEVER block a real reconnect. This is the fix for the v0.5.11 `4002`
+  //      reconnect loop (where a lingering live socket rejected the real client).
+  //
+  //   2. Newcomer is NOT a canonical relay → it's a legacy build with no marker,
+  //      or a stale-client health-probe using the real browserId. Here the
+  //      incumbent may be the LIVE relay, and terminating it would silently
+  //      break tool routing. So we keep the liveness guard: prove the incumbent
+  //      dead before replacing; if it's alive, reject the non-canonical newcomer
+  //      with 4002. This preserves the original protection for old clients.
+  //
+  // Probes (helper-probe) use a dedicated id that never collides — exempt.
   const existing = browserSockets.get(browserId);
   if (!isProbe && existing && existing !== ws && existing.readyState === WebSocket.OPEN) {
+    if (isCanonicalRelay) {
+      // Newest canonical relay wins — no liveness check.
+      bridgeLog().info('bridge.browser.relay_superseded', {
+        browserId,
+        reason: 'newer_canonical_relay',
+        hint: 'A newer role=relay socket arrived for this browser (fresh SW life). Newest relay wins; the previous socket is closed by indexBrowser.',
+      });
+      accept();
+      return;
+    }
+    // Non-canonical newcomer: keep a live incumbent, reject the duplicate.
     proveLive(browserId, existing, INCUMBENT_LIVENESS_TIMEOUT_MS)
       .then((alive) => {
         if (alive) {
           bridgeLog().warn('bridge.browser.duplicate_rejected', {
             browserId,
-            reason: 'incumbent_socket_still_live',
-            hint: 'A second socket arrived for a browserId whose existing socket still answers pings — keeping the live one and closing the duplicate. Common cause: a stale extension/helper health-probe that predates the helper-probe sentinel. Tool routing is preserved.',
+            reason: 'incumbent_live_newcomer_not_canonical_relay',
+            hint: 'A non-canonical socket (no role=relay — legacy build or a stale health-probe) arrived while the live relay is still answering pings. Keeping the live relay; closing the duplicate. Tool routing is preserved.',
           });
           try { ws.close(4002, 'duplicate_live_incumbent'); } catch { /* ignore */ }
           return;
@@ -1662,7 +1683,8 @@ export function startServer(port: number): void {
     if (params.get('role') === 'mcp') {
       handleMcpClient(ws);
     } else {
-      handleExtension(ws, params.get('browserId') || 'default');
+      // `role=relay` marks the canonical extension relay (see handleExtension).
+      handleExtension(ws, params.get('browserId') || 'default', params.get('role') === 'relay');
     }
   });
 

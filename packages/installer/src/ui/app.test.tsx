@@ -1,16 +1,39 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import React from 'react';
 import { render } from 'ink-testing-library';
+import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { App } from './app.js';
-import type { PlatformInfo } from '../shared/platform.js';
+import { getInstallDir, type PlatformInfo } from '../shared/platform.js';
 import type { CliFlags } from './app.js';
 import type { DownloadProgress, InstallResult } from '../installers/binary-installer.js';
 import type { RegistrationResult } from '../installers/host-registrar.js';
+import { ALLOWED_IDS_FILENAME } from '../installers/allowed-ids-writer.js';
 
 // Mock browser-registrar to avoid reg query calls in tests
 vi.mock('../installers/browser-registrar.js', () => ({
   registerAllBrowsers: vi.fn(() => []),
 }));
+
+// These tests run the REAL registration path, which calls writeAllowedExtensionIds
+// against the REAL install dir (getInstallDir reads process.env.LOCALAPPDATA on
+// Windows, not the mocked platform). That's intentional — but it MUST roll back
+// so the suite never clobbers a developer's live `extension-ids.json` (which the
+// bridge uses as its origin allowlist — a stale value silently 401-rejects the
+// real extension). Snapshot before, restore after.
+const ALLOWLIST_PATH = join(getInstallDir({ os: 'windows', arch: 'x64', homeDir: '', isSupported: true } as PlatformInfo), ALLOWED_IDS_FILENAME);
+let allowlistBackup: { existed: boolean; content?: string };
+beforeAll(() => {
+  allowlistBackup = existsSync(ALLOWLIST_PATH)
+    ? { existed: true, content: readFileSync(ALLOWLIST_PATH, 'utf-8') }
+    : { existed: false };
+});
+afterAll(() => {
+  try {
+    if (allowlistBackup.existed) writeFileSync(ALLOWLIST_PATH, allowlistBackup.content ?? '', 'utf-8');
+    else if (existsSync(ALLOWLIST_PATH)) rmSync(ALLOWLIST_PATH);
+  } catch { /* best-effort restore */ }
+});
 
 const defaultFlags: CliFlags = {
   yes: false,

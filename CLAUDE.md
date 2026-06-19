@@ -93,7 +93,7 @@ cat "$LOCALAPPDATA/agenthub/com.agenthub.native_host.json"
 
 ## Diagnostics dashboard (v0.5.8+)
 
-Open `http://127.0.0.1:7483/` in any browser while the bridge is running. Single-page HTML served by the bridge. No login (localhost-only). Endpoints:
+Open `http://127.0.0.1:7483/` in any browser while the bridge is running. Single-page HTML served by the bridge. No login (localhost-only). The side panel links to it: **"Open diagnostics dashboard"** in the Connection diagnostics panel (`diagnostics-panel.tsx`, v0.5.14+) opens it in a new tab at the live bridge port. Endpoints:
 
 - `GET /` → dashboard HTML
 - `GET /api/state` → bridge info + browsers (with `liveness` field: live/stale/unknown) + mcpClients + recentRequests + recentRejections
@@ -141,6 +141,7 @@ If a step is missing, that's where the failure is. Full reference + 5 common deb
 
 ## Common Pitfalls
 
+- **`take_screenshot` captures via CDP (`withPlaywrightPage` → `page.screenshot`), NOT `chrome.tabs.captureVisibleTab` (v0.5.13+).** captureVisibleTab hangs forever — never resolves or rejects — when the target window isn't focused/visible. Don't reintroduce it. Defense-in-depth: `dispatchTool` wraps every handler in a 25s `withTimeout` (under the bridge's 30s tool_request timeout) so any hanging tool settles with a `TOOL_TIMEOUT` error instead of leaking.
 - Native messaging host registration requires Chrome restart to take effect
 - `allowed_origins` in native messaging manifests must include the actual extension ID, not empty string
 - Multiple native host processes can run on different ports — always check the lock file for the current one

@@ -181,6 +181,42 @@ test.describe('connection resilience (real bridge process)', () => {
     }
   });
 
+  test('inverse of the 4002 bug: a canonical relay (role=relay) SUPERSEDES a still-live incumbent', async () => {
+    // The real client reconnecting (new SW life, role=relay) while a stale
+    // socket still pongs must be ACCEPTED — not 4002-looped. Identity wins.
+    const lad = makeLocalAppData();
+    const port = freePort();
+    const bridge = spawnBridge(port, lad);
+    try {
+      await waitForServerInfo(port);
+      const id = 'chrome:e2e-reconnect';
+
+      // Incumbent: a canonical relay that keeps answering pings (lingering).
+      const old = new WebSocket(`ws://127.0.0.1:${port}?browserId=${id}&role=relay`);
+      old.on('message', (d) => {
+        try { if (JSON.parse(String(d)).type === 'server_ping') old.send(JSON.stringify({ type: 'server_pong', timestamp: Date.now() })); } catch { /* */ }
+      });
+      let oldClosed = false;
+      old.on('close', () => { oldClosed = true; });
+      await onceServerInfo(old);
+
+      // Real client reconnects as a canonical relay for the same browserId.
+      const fresh = new WebSocket(`ws://127.0.0.1:${port}?browserId=${id}&role=relay`);
+      let fresh4002 = false;
+      fresh.on('close', (c) => { if (c === 4002) fresh4002 = true; });
+
+      await onceServerInfo(fresh);                  // ACCEPTED (server_info), not 4002
+
+      expect(fresh.readyState).toBe(WebSocket.OPEN);
+      expect(fresh4002).toBe(false);                // no 4002 loop
+      await expect.poll(() => oldClosed, { timeout: 2000 }).toBe(true); // superseded
+      fresh.close();
+    } finally {
+      bridge.kill();
+      rmSync(lad, { recursive: true, force: true });
+    }
+  });
+
   test('bug #1: a DEAD/orphaned relay IS replaced by a reconnect', async () => {
     const lad = makeLocalAppData();
     const port = freePort();

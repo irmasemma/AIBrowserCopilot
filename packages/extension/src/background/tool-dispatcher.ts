@@ -139,6 +139,11 @@ const SNAPSHOT_REF_INJECTOR = `(() => {
   return lines.join('\\n');
 })()`;
 
+// Bounded timeout for fill_form field actions (fill/check/select/setInputFiles)
+// so a slow/ambiguous locator fails fast per-field instead of waiting out the
+// Playwright default (~30s) — same "no unbounded locator op" rule as click/press.
+const FIELD_OPTS = { timeout: 8_000 };
+
 // Service-worker-safe binary → base64 (no Node Buffer in MV3). Chunked to
 // avoid blowing the call stack on large (multi-hundred-KB) screenshots.
 const bytesToBase64 = (bytes: Uint8Array): string => {
@@ -153,6 +158,13 @@ const bytesToBase64 = (bytes: Uint8Array): string => {
 const captureSnapshot = async (tabId: number): Promise<string> => {
   try {
     return await withPlaywrightPage(tabId, async (page: Page) => {
+      // If a mutating tool (e.g. a navigating click) just changed the page, the
+      // new DOM may not be ready yet — snapshotting immediately yields nothing
+      // (the empty-snapshot-after-navigation gap). Wait, BOUNDED + best-effort,
+      // for the new document so the refs reflect the post-action page. On an
+      // already-loaded page this returns instantly, so non-navigating tools are
+      // not slowed.
+      await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => { /* best-effort */ });
       const refLines = await page.evaluate(SNAPSHOT_REF_INJECTOR).catch(() => '') as string;
       let aria = '';
       try {
@@ -182,7 +194,18 @@ const withSnapshot = async (
   result: { content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> },
 ): Promise<typeof result> => {
   const snapshot = await captureSnapshot(tabId);
-  if (!snapshot) return result;
+  if (!snapshot) {
+    // Empty snapshot almost always means the action navigated and the
+    // destination is still loading (its JS context is mid-rebuild, so the ref
+    // injector finds nothing yet). Returning no refs is the SAFE choice — never
+    // emit stale pre-navigation refs. Tell the caller so it fetches the fresh
+    // page next turn instead of assuming the snapshot was simply empty.
+    result.content.push({
+      type: 'text',
+      text: '\n--- Page Snapshot ---\n(unavailable — the page is still loading after this action; call get_page_content or take_screenshot on the next step to see the updated page.)',
+    });
+    return result;
+  }
   result.content.push({
     type: 'text',
     text: `\n--- Page Snapshot ---\n\`\`\`yaml\n${snapshot}\n\`\`\``,
@@ -349,8 +372,20 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
     // so there's nothing to activate and nothing to hang on.
     try {
       return await withPlaywrightPage(tab.id!, async (page) => {
+        // If the tab just navigated, the renderer hasn't painted the new page
+        // yet and the capture blocks waiting for it. Bounded-wait for load
+        // first (instant on an already-settled tab) so we screenshot a painted
+        // page instead of racing the navigation.
+        await page.waitForLoadState('load', { timeout: 5_000 }).catch(() => { /* best-effort */ });
+        // `animations: 'disabled'` + `caret: 'hide'` stop Playwright from
+        // blocking on render/animation stability and a blinking caret before
+        // capture — that wait is what made screenshots take up to ~13s on pages
+        // with web fonts/animations (measured: attach ~0ms, the screenshot op
+        // itself was the cost). `timeout` caps a genuinely stuck capture so it
+        // fails fast with a clean error instead of hanging to the dispatch cap.
+        const base = { animations: 'disabled' as const, caret: 'hide' as const, timeout: 12_000 };
         const raw = await page.screenshot(
-          format === 'jpeg' ? { type: 'jpeg', quality } : { type: 'png' },
+          format === 'jpeg' ? { ...base, type: 'jpeg', quality } : { ...base, type: 'png' },
         );
         return {
           content: [{ type: 'image', data: bytesToBase64(new Uint8Array(raw)), mimeType: `image/${format}` }],
@@ -552,14 +587,14 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
                 fieldResults.push({ field: fieldId, success: false, error: 'select requires `value` or `values`' });
                 continue;
               }
-              await locator.selectOption(detected.multiple ? opts : opts[0]);
+              await locator.selectOption(detected.multiple ? opts : opts[0], FIELD_OPTS);
               break;
             }
             case 'checkbox': {
               // Prefer explicit `checked`. Fallback: parse common truthy strings.
               const truthy = field.checked ?? /^(true|on|yes|1|checked)$/i.test(valueStr);
-              if (truthy) await locator.check();
-              else await locator.uncheck();
+              if (truthy) await locator.check(FIELD_OPTS);
+              else await locator.uncheck(FIELD_OPTS);
               break;
             }
             case 'radio': {
@@ -569,14 +604,14 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
                 fieldResults.push({ field: fieldId, success: false, error: 'radio cannot be unchecked; check a sibling radio instead' });
                 continue;
               }
-              await locator.check();
+              await locator.check(FIELD_OPTS);
               break;
             }
             case 'file':
-              await locator.setInputFiles(field.values ?? valueStr);
+              await locator.setInputFiles(field.values ?? valueStr, FIELD_OPTS);
               break;
             default:
-              await locator.fill(valueStr);
+              await locator.fill(valueStr, FIELD_OPTS);
               break;
           }
 
@@ -617,18 +652,43 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
 
       if (index > 0) locator = locator.nth(index);
 
-      await locator.scrollIntoViewIfNeeded();
-      await locator.click();
+      // ROOT-CAUSE FIX: every locator op here is BOUNDED. The original bug was
+      // an UNBOUNDED post-click `evaluateHandle` re-resolve that hung ~16-18s on
+      // a detached/re-rendered element and reported a LANDED click as a failure.
+      // Bounding everything — and never re-resolving after the click — makes a
+      // click either succeed fast or fail fast & cleanly, with a fresh snapshot.
+      await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => { /* best-effort */ });
 
-      const el = await locator.evaluateHandle((el) => ({
-        tag: el.tagName,
-        text: el.textContent?.trim().slice(0, 100) ?? '',
-        href: (el as HTMLAnchorElement).href ?? null,
-      }));
+      // Element identity is nice-to-have, NOT essential — the fresh snapshot
+      // below is the source of truth for what happened. Read it best-effort with
+      // a hard 1.5s cap so a slow/ambiguous locator can never hang the tool.
+      const element = await Promise.race([
+        locator
+          .evaluateHandle((el) => ({
+            tag: el.tagName,
+            text: el.textContent?.trim().slice(0, 100) ?? '',
+            href: (el as HTMLAnchorElement).href ?? null,
+          }))
+          .then((h) => h.jsonValue())
+          .catch(() => null),
+        new Promise<null>((res) => setTimeout(() => res(null), 1500)),
+      ]);
 
-      return await el.jsonValue();
+      // Bounded click. The original hang was the UNBOUNDED post-click element
+      // re-resolve (removed above), NOT the click itself — so we let the click
+      // wait for any post-click navigation, but BOUNDED to 8s. This leaves the
+      // page SETTLED for the snapshot below (and for the caller's next tool),
+      // unlike fire-and-forget which left the page mid-navigation. If the click
+      // genuinely can't complete in 8s it throws a clean, fast error. We never
+      // re-resolve the locator afterward — the element may already be gone.
+      await locator.click({ timeout: 8_000 });
+
+      return element;
     });
 
+    // Always return a FRESH snapshot (best-effort) so the caller gets current
+    // refs even after a navigation/re-render — no separate re-snapshot round
+    // trip. Refs are render-scoped; this is the contract that makes them usable.
     return withSnapshot(tab.id!, { content: [{ type: 'text', text: JSON.stringify({ success: true, element: result }) }] });
   },
 
@@ -640,10 +700,14 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
     const tab = await getTab(params.tab_id as number | undefined);
 
     await withPlaywrightPage(tab.id!, async (page) => {
+      // Bounded + noWaitAfter, same as click_element: a key like Enter submits
+      // and navigates; without these a press on a slow/navigating target hangs
+      // up to the default 30s (only the 25s dispatch cap would catch it).
+      const pressOpts = { timeout: 8_000, noWaitAfter: true };
       if (ref) {
-        await page.locator(`[data-ai-ref="${ref}"]`).press(key);
+        await page.locator(`[data-ai-ref="${ref}"]`).press(key, pressOpts);
       } else if (selector) {
-        await page.locator(selector).press(key);
+        await page.locator(selector).press(key, pressOpts);
       } else {
         // No target — fire as a global keyboard event on the page.
         await page.keyboard.press(key);

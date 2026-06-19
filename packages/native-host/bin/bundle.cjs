@@ -7921,7 +7921,7 @@ var toolRegistry = [
 ];
 
 // src/version.ts
-var VERSION = "0.5.13";
+var VERSION = "0.5.14";
 var BUILD_ID = process.env.BUILD_ID ?? "dev";
 
 // src/lock-file-manager.ts
@@ -9748,7 +9748,7 @@ function proveLive(browserId, ws, timeoutMs) {
 }
 var LIVENESS_PROBE_TIMEOUT_MS = 3e3;
 var INCUMBENT_LIVENESS_TIMEOUT_MS = 1500;
-function handleExtension(ws, browserId) {
+function handleExtension(ws, browserId, isCanonicalRelay = false) {
   const connectedAt = Date.now();
   const isProbe = browserId === HELPER_PROBE_BROWSER_ID;
   const accept = () => {
@@ -9851,12 +9851,21 @@ function handleExtension(ws, browserId) {
   };
   const existing = browserSockets.get(browserId);
   if (!isProbe && existing && existing !== ws && existing.readyState === import_websocket.default.OPEN) {
+    if (isCanonicalRelay) {
+      bridgeLog().info("bridge.browser.relay_superseded", {
+        browserId,
+        reason: "newer_canonical_relay",
+        hint: "A newer role=relay socket arrived for this browser (fresh SW life). Newest relay wins; the previous socket is closed by indexBrowser."
+      });
+      accept();
+      return;
+    }
     proveLive(browserId, existing, INCUMBENT_LIVENESS_TIMEOUT_MS).then((alive) => {
       if (alive) {
         bridgeLog().warn("bridge.browser.duplicate_rejected", {
           browserId,
-          reason: "incumbent_socket_still_live",
-          hint: "A second socket arrived for a browserId whose existing socket still answers pings \u2014 keeping the live one and closing the duplicate. Common cause: a stale extension/helper health-probe that predates the helper-probe sentinel. Tool routing is preserved."
+          reason: "incumbent_live_newcomer_not_canonical_relay",
+          hint: "A non-canonical socket (no role=relay \u2014 legacy build or a stale health-probe) arrived while the live relay is still answering pings. Keeping the live relay; closing the duplicate. Tool routing is preserved."
         });
         try {
           ws.close(4002, "duplicate_live_incumbent");
@@ -10656,7 +10665,7 @@ function startServer(port) {
     if (params.get("role") === "mcp") {
       handleMcpClient(ws);
     } else {
-      handleExtension(ws, params.get("browserId") || "default");
+      handleExtension(ws, params.get("browserId") || "default", params.get("role") === "relay");
     }
   });
   const BROWSER_LIVENESS_INTERVAL_MS = 15e3;

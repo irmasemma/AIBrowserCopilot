@@ -13,6 +13,18 @@ import { logRecord, flushPending } from '../shared/logger';
 const DEFAULT_URL = 'ws://127.0.0.1:7483';
 const SERVER_INFO_TIMEOUT_MS = 10_000;
 
+/**
+ * Mark this connection as the canonical extension relay (`role=relay`). The
+ * bridge uses this IDENTITY — not a liveness guess — to decide browserId
+ * collisions: the newest canonical relay (a fresh SW life reconnecting) always
+ * wins, so a real reconnect is never rejected by a stale-but-still-ponging
+ * socket. Probes/health-checks must NOT carry this marker.
+ */
+function withRelayRole(url: string): string {
+  if (/[?&]role=relay(&|$)/.test(url)) return url;
+  return url.includes('?') ? `${url}&role=relay` : `${url}?role=relay`;
+}
+
 export type ToolRequestHandler = (id: string, tool: string, params: Record<string, unknown>) => void;
 export type ToolScanHandler = (tools: ToolScanResult[]) => void;
 export type DiscoverUrlFn = () => Promise<DiscoveryResult>;
@@ -363,7 +375,7 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
       },
     });
 
-    relay.connect(currentUrl);
+    relay.connect(withRelayRole(currentUrl));
   }
 
   function startHeartbeat(): void {
