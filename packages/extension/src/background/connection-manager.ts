@@ -1,4 +1,4 @@
-import type { ConnectionContext, ServerInfo, ToolScanResult, DiagnosticReason } from '../shared/types';
+import type { ConnectionContext, ConnectionState, ServerInfo, ToolScanResult, DiagnosticReason } from '../shared/types';
 import { transition, createInitialContext } from './connection-machine';
 import type { ConnectionEvent } from './connection-machine';
 import { createBackoffTimer } from './backoff-manager';
@@ -7,9 +7,23 @@ import type { HeartbeatMonitor } from './heartbeat-monitor';
 import { createRelay } from './relay-client';
 import type { Relay } from './relay-client';
 import type { DiscoveryResult } from './service-discovery';
+import { checkBridgeVersion } from '../shared/version-check';
+import { logRecord, flushPending } from '../shared/logger';
 
 const DEFAULT_URL = 'ws://127.0.0.1:7483';
 const SERVER_INFO_TIMEOUT_MS = 10_000;
+
+/**
+ * Mark this connection as the canonical extension relay (`role=relay`). The
+ * bridge uses this IDENTITY — not a liveness guess — to decide browserId
+ * collisions: the newest canonical relay (a fresh SW life reconnecting) always
+ * wins, so a real reconnect is never rejected by a stale-but-still-ponging
+ * socket. Probes/health-checks must NOT carry this marker.
+ */
+function withRelayRole(url: string): string {
+  if (/[?&]role=relay(&|$)/.test(url)) return url;
+  return url.includes('?') ? `${url}&role=relay` : `${url}?role=relay`;
+}
 
 export type ToolRequestHandler = (id: string, tool: string, params: Record<string, unknown>) => void;
 export type ToolScanHandler = (tools: ToolScanResult[]) => void;
@@ -51,6 +65,12 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
   let heartbeat: HeartbeatMonitor | null = null;
   const backoffTimer = createBackoffTimer();
   let serverInfoTimer: ReturnType<typeof setTimeout> | null = null;
+  // Periodic log-flush timer: ensures extension log entries reach the bridge
+  // every ~10s while connected, not just on reconnect. Without this, a
+  // long-running healthy session would never write its extension events to
+  // extension.log — defeating the "grep all logs to debug" goal.
+  let logFlushTimer: ReturnType<typeof setInterval> | null = null;
+  const LOG_FLUSH_INTERVAL_MS = 10_000;
   let currentUrl: string = DEFAULT_URL;
 
   const listeners = new Set<(ctx: ConnectionContext) => void>();
@@ -66,13 +86,50 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
     }
   }
 
+  /**
+   * Send pending log entries to the bridge. Wrapped here so onServerInfo
+   * AND the periodic timer can both call the same path with the same
+   * delivery semantics (return true only when WS is open and send
+   * synchronously queues the frame).
+   */
+  function sendLogBatch(envelope: { type: 'log_batch'; entries: unknown[] }): boolean {
+    if (!relay || !relay.isConnected()) return false;
+    relay.send(envelope);
+    return true;
+  }
+
+  function startLogFlushTimer(): void {
+    if (logFlushTimer !== null) return;
+    logFlushTimer = setInterval(() => {
+      flushPending(sendLogBatch).catch(() => { /* logger never throws but be safe */ });
+    }, LOG_FLUSH_INTERVAL_MS);
+  }
+
+  function stopLogFlushTimer(): void {
+    if (logFlushTimer !== null) {
+      clearInterval(logFlushTimer);
+      logFlushTimer = null;
+    }
+  }
+
   function stopAll(): void {
     heartbeat?.stop();
     heartbeat = null;
     backoffTimer.cancel();
+    stopLogFlushTimer();
     if (serverInfoTimer !== null) {
       clearTimeout(serverInfoTimer);
       serverInfoTimer = null;
+    }
+    // Also close any open relay. Previously, stopAll left the relay alive,
+    // and callers (retry / reconcile / scheduleBackoff) relied on openRelay
+    // to overwrite it — but overwriting only nulled the JS reference, the
+    // underlying WS stayed connected to the bridge with no JS handler. The
+    // bridge would then route tool_request frames to a socket the extension
+    // had forgotten about, causing silent 10s timeouts.
+    if (relay !== null) {
+      try { relay.disconnect(); } catch { /* ignore */ }
+      relay = null;
     }
   }
 
@@ -83,9 +140,28 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
     });
   }
 
+  // Diagnostics that name a specific recoverable failure. Surface these as-is
+  // (even after a prior successful connection) so the UI shows the actionable
+  // button ("Start AgentHub service", "Restart service", "Copy install command")
+  // instead of the generic "Lost connection — Reopen autostart to reconnect"
+  // and so the SW's auto-recovery loop (background.ts:RECOVERABLE_REASONS)
+  // can fire.
+  const ACTIONABLE_REASONS: DiagnosticReason[] = [
+    'no_lock_file',
+    'bridge_not_started',
+    'server_not_responding',
+    'protocol_timeout',
+    'helper_unavailable',
+  ];
+
   function setDiagnostic(reason: DiagnosticReason): void {
-    // If we previously had a connection, override to 'was_connected'
-    const effectiveReason = context.serverInfo !== null && reason !== 'connecting' ? 'was_connected' : reason;
+    // After a successful connection, if the new reason isn't itself actionable,
+    // surface 'was_connected' so the UI tells the user how to reconnect.
+    // Actionable reasons pass through so recovery can drive the fix.
+    const effectiveReason =
+      context.serverInfo !== null && reason !== 'connecting' && !ACTIONABLE_REASONS.includes(reason)
+        ? 'was_connected'
+        : reason;
     if (context.diagnosticReason !== effectiveReason) {
       context = { ...context, diagnosticReason: effectiveReason };
       persistContext(context);
@@ -113,11 +189,36 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
   }
 
   function openRelay(): void {
+    // CRITICAL: close any pre-existing relay BEFORE creating a new one.
+    // Without this, retry()/reconcile()/backoff cycles silently leak WS
+    // connections — the old WS stays open at the OS level (bridge still
+    // sees it as "connected"), but the extension's JS has lost its reference
+    // so nothing handles incoming tool_request frames on it. Result: bridge
+    // sends tool_request to socket A, but extension is listening on socket B
+    // — tool times out at 10s with no log entry. Single root cause of the
+    // recurring "Chrome didn't answer within 10 seconds" issue.
+    if (relay !== null) {
+      void logRecord({
+        event: 'ext.ws.replacing_relay',
+        lvl: 'warn',
+        reason: 'reconnect_before_old_close',
+      });
+      try { relay.disconnect(); } catch { /* ignore */ }
+      relay = null;
+    }
+    void logRecord({ event: 'ext.ws.connect.attempt', url: currentUrl });
     relay = createRelay({
       onOpen() {
+        void logRecord({ event: 'ext.ws.open', url: currentUrl });
         // Wait for server_info before dispatching WS_OPEN
         serverInfoTimer = setTimeout(() => {
           serverInfoTimer = null;
+          void logRecord({
+            event: 'ext.ws.server_info_timeout',
+            lvl: 'warn',
+            timeoutMs: SERVER_INFO_TIMEOUT_MS,
+            url: currentUrl,
+          });
           relay?.disconnect();
         }, SERVER_INFO_TIMEOUT_MS);
       },
@@ -127,7 +228,64 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
           clearTimeout(serverInfoTimer);
           serverInfoTimer = null;
         }
-        context = { ...context, serverInfo: info, lastConnectedAt: Date.now(), lastVerifiedAt: Date.now() };
+        const versionStatus = checkBridgeVersion(info.version);
+        // Detect bridge generation change. When the bridge restarts, its
+        // PID changes. The previously-cached serviceStatus snapshot (from
+        // a slow helper invoke) might still reference the OLD pid — that
+        // would cause the diagnostics panel to show stale data ("Helper
+        // version: 0.5.7" when bridge is now 0.5.8). Force a fresh helper
+        // status fetch when we detect a PID change so the side panel UI
+        // converges quickly.
+        const prevPid = context.serverInfo?.pid;
+        const pidChanged = prevPid !== undefined && prevPid !== info.pid;
+        context = {
+          ...context,
+          serverInfo: info,
+          lastConnectedAt: Date.now(),
+          lastVerifiedAt: Date.now(),
+          versionStatus,
+          // Clear diagnosticReason on successful connection. Previously,
+          // a stale `bridge_not_started` (from a discovery cycle that
+          // happened just before the WS opened) would persist forever
+          // because setDiagnostic('connecting') only fired on the next
+          // refreshUrl call, which can be 30s away.
+          diagnosticReason: null,
+          // Reset failureCount + missedHeartbeats — fresh connection.
+          failureCount: 0,
+          missedHeartbeats: 0,
+        };
+        if (pidChanged) {
+          void logRecord({
+            event: 'ext.bridge.pid_changed',
+            lvl: 'info',
+            previousPid: prevPid,
+            currentPid: info.pid,
+            currentVersion: info.version,
+          });
+          // Force a discovery refresh so the helper status snapshot
+          // catches up to the new bridge generation.
+          void refreshUrl();
+        }
+        void logRecord({
+          event: 'ext.ws.server_info',
+          bridgePid: info.pid,
+          bridgePort: info.port,
+          bridgeVersion: info.version,
+          bridgeBuildId: info.buildId,
+          versionStatus,
+          uptime: info.uptime,
+        });
+        // Flush any pending log entries (e.g. from a previous SW life that
+        // died before reconnecting). The bridge gets a single batch and
+        // writes them to extension.log alongside its own bridge.log.
+        flushPending(sendLogBatch).then((n) => {
+          if (n > 0) {
+            void logRecord({ event: 'ext.log.flushed', flushed: n });
+          }
+        });
+        // Periodic flush so current-session events reach extension.log
+        // without waiting for a reconnect.
+        startLogFlushTimer();
         dispatch({ type: 'WS_OPEN' });
         startHeartbeat();
       },
@@ -138,16 +296,36 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
         dispatch({ type: 'HEARTBEAT_OK' });
       },
 
-      onClose(_code: number, _reason: string) {
+      onClose(code: number, reason: string) {
         if (serverInfoTimer !== null) {
           clearTimeout(serverInfoTimer);
           serverInfoTimer = null;
         }
+        stopLogFlushTimer();
+        void logRecord({
+          event: 'ext.ws.close',
+          lvl: code === 1000 ? 'info' : 'warn',
+          code,
+          reason,
+        });
         heartbeat?.stop();
         heartbeat = null;
         relay = null;
+        // Drop the cached serverInfo on close: the previously-connected
+        // bridge generation is now gone, and continuing to display its
+        // PID / port / uptime would be a lie. The diagnostics panel will
+        // show "—" / "N/A" until the next bridge sends a fresh server_info.
+        // (Previous behavior kept the stale serverInfo and showed it as
+        // "Server PID: <old-pid>, Uptime: <duration-of-old-connection>"
+        // which confused users — see fix1-invalidate-stale.)
+        context = {
+          ...context,
+          serverInfo: null,
+          // Keep lastConnectedAt — it's still useful as "last successful
+          // connection", e.g. "Last connected: 30s ago".
+        };
         // Set diagnostic immediately — don't wait for next discovery cycle
-        if (context.serverInfo !== null) {
+        if (context.lastConnectedAt !== null) {
           setDiagnostic('was_connected');
         }
         dispatch({ type: 'WS_CLOSE' });
@@ -158,6 +336,14 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
       },
 
       onError(_error: Event) {
+        // WebSocket onerror events deliberately carry no diagnostic detail
+        // (browser security). Logging the type tag is the most we can do.
+        void logRecord({
+          event: 'ext.ws.error',
+          lvl: 'warn',
+          state: context.state,
+          diagnosticReason: context.diagnosticReason,
+        });
         if (context.state === 'connecting') {
           // If diagnostic was 'connecting' (lock file said server exists), but WS failed → server not responding
           if (context.diagnosticReason === 'connecting') {
@@ -165,14 +351,22 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
           }
           dispatch({ type: 'WS_ERROR' });
           // Safety: if onClose doesn't fire after onError, ensure backoff is scheduled.
-          // Some WebSocket implementations may not fire close after error.
-          if (context.state === 'reconnecting') {
+          // Some WebSocket implementations may not fire close after error. The
+          // dispatch() above may have transitioned state to 'reconnecting'; TS
+          // can't follow state-machine transitions through dispatch, so cast.
+          if ((context.state as ConnectionState) === 'reconnecting') {
             scheduleBackoff();
           }
         }
       },
 
       onToolRequest(id: string, tool: string, params: Record<string, unknown>) {
+        void logRecord({
+          event: 'ext.tool_request.received',
+          requestId: id,
+          tool,
+          params,
+        });
         options.onToolRequest?.(id, tool, params);
       },
 
@@ -181,7 +375,7 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
       },
     });
 
-    relay.connect(currentUrl);
+    relay.connect(withRelayRole(currentUrl));
   }
 
   function startHeartbeat(): void {
@@ -190,9 +384,19 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
         relay?.sendPing(Date.now());
       },
       onMiss() {
+        void logRecord({
+          event: 'ext.heartbeat.miss',
+          lvl: 'warn',
+          missedCount: heartbeat?.getMissedCount() ?? 0,
+        });
         dispatch({ type: 'HEARTBEAT_MISS' });
       },
       onDead() {
+        void logRecord({
+          event: 'ext.heartbeat.dead',
+          lvl: 'warn',
+          missedCount: heartbeat?.getMissedCount() ?? 0,
+        });
         dispatch({ type: 'HEARTBEAT_MISS' });
         relay?.disconnect();
       },
@@ -235,20 +439,21 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
         return;
       }
 
-      // Relay is dead in memory. Check if persisted state claims we're connected.
-      if (context.state === 'connected' || context.state === 'degraded' || context.state === 'reconnecting') {
-        // Persisted state is lying. Attempt rediscovery.
-        stopAll();
-        await refreshUrl();
+      // Relay is dead in memory. Attempt rediscovery regardless of persisted state.
+      // This covers:
+      //   - connected/degraded/reconnecting: persisted state is lying after SW resume
+      //   - disconnected: the sidepanel fast-poll case — server was down, came back,
+      //     but context stayed 'disconnected' because no reconnect was ever dispatched
+      stopAll();
+      await refreshUrl();
 
-        // If discovery found a live server (diagnostic === 'connecting'), try to reconnect
-        if (context.diagnosticReason === 'connecting') {
-          dispatch({ type: 'CONNECT' });
-          openRelay();
-        } else {
-          // No server found — transition to disconnected
-          dispatch({ type: 'DISCONNECT' });
-        }
+      // If discovery found a live server (diagnostic === 'connecting'), try to reconnect
+      if (context.diagnosticReason === 'connecting') {
+        dispatch({ type: 'CONNECT' });
+        openRelay();
+      } else if (context.state !== 'disconnected') {
+        // Server not found and we were supposedly connected — surface the break
+        dispatch({ type: 'DISCONNECT' });
       }
     },
 

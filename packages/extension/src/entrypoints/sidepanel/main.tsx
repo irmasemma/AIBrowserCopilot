@@ -7,8 +7,10 @@ import { ActivityEntryComponent } from '../../sidepanel/components/activity-entr
 import { SetupWizard } from '../../sidepanel/components/setup-wizard.js';
 import { ChatTab } from '../../sidepanel/components/chat-tab.js';
 import { SettingsTab } from '../../sidepanel/components/settings-tab.js';
-import { useLicense } from '../../sidepanel/hooks/use-license.js';
+import { OutdatedBridgeBanner } from '../../sidepanel/components/outdated-bridge-banner.js';
+import { SiteAccessBanner } from '../../sidepanel/components/site-access-banner.js';
 import { TOOL_DEFINITIONS } from '../../shared/tool-definitions.js';
+import { MIN_NATIVE_HOST_VERSION } from '../../shared/version-check.js';
 
 type TabId = 'chat' | 'tools' | 'settings';
 
@@ -19,7 +21,7 @@ const TabStrip = ({ active, onChange }: { active: TabId; onChange: (id: TabId) =
     { id: 'settings', label: 'Settings' },
   ];
   return (
-    <nav class="flex border-b border-neutral-200 bg-white" role="tablist">
+    <nav class="flex border-b border-card-border bg-white" role="tablist">
       {tabs.map((t) => {
         const isActive = active === t.id;
         return (
@@ -42,39 +44,50 @@ const TabStrip = ({ active, onChange }: { active: TabId; onChange: (id: TabId) =
   );
 };
 
-const ToolsTab = ({ hasLicense }: { hasLicense: boolean }) => {
+const ToolsTab = () => {
   const activityLog = useStore((s) => s.activityLog);
   const toolPermissions = useStore((s) => s.toolPermissions);
   const toggleTool = useStore((s) => s.toggleTool);
 
   return (
-    <div class="h-full overflow-y-auto">
-      <section class="py-3">
-        <h2 class="px-3 text-sm font-semibold text-neutral-500 mb-1">Tools</h2>
-        {TOOL_DEFINITIONS.map((tool) => (
-          <ToolCard
-            key={tool.name}
-            name={tool.name}
-            displayName={tool.displayName}
-            description={tool.description}
-            icon={tool.icon}
-            tier={tool.tier}
-            enabled={toolPermissions[tool.name] ?? true}
-            hasLicense={hasLicense}
-            onToggle={() => toggleTool(tool.name)}
-          />
-        ))}
+    <div class="h-full overflow-y-auto px-3 py-3 space-y-3">
+      <section>
+        <h2 class="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
+          Permissions
+        </h2>
+        <p class="text-xs text-neutral-500 mb-2">
+          Toggle which browser actions external AI tools (and the Chat tab) are
+          allowed to use. All tools are free.
+        </p>
+        <div class="bg-white border border-card-border rounded-lg overflow-hidden divide-y divide-neutral-100">
+          {TOOL_DEFINITIONS.map((tool) => (
+            <ToolCard
+              key={tool.name}
+              name={tool.name}
+              displayName={tool.displayName}
+              description={tool.description}
+              icon={tool.icon}
+              enabled={toolPermissions[tool.name] ?? true}
+              onToggle={() => toggleTool(tool.name)}
+            />
+          ))}
+        </div>
       </section>
-      <section class="py-3 border-t border-neutral-200">
-        <h2 class="px-3 text-sm font-semibold text-neutral-500 mb-1">Activity</h2>
+      <section>
+        <h2 class="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
+          Activity Log
+        </h2>
         {activityLog.length === 0 ? (
-          <p class="px-3 text-xs text-neutral-400 py-4">
-            No activity yet. Ask CoPilot to do something or connect an MCP tool.
-          </p>
+          <div class="bg-log-bg text-log-text rounded-lg px-3 py-3 font-mono text-[11px] text-neutral-400 italic">
+            No activity yet — try asking AgentHub to do something, or connect an
+            MCP-capable AI tool.
+          </div>
         ) : (
-          activityLog.slice(0, 50).map((entry) => (
-            <ActivityEntryComponent key={entry.id} entry={entry} />
-          ))
+          <div class="bg-log-bg rounded-lg py-2 max-h-96 overflow-y-auto">
+            {activityLog.slice(0, 50).map((entry) => (
+              <ActivityEntryComponent key={entry.id} entry={entry} />
+            ))}
+          </div>
         )}
       </section>
     </div>
@@ -85,7 +98,6 @@ const App = () => {
   const connectionContext = useStore((s) => s.connectionContext);
   const [setupComplete, setSetupComplete] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>('chat');
-  const license = useLicense();
 
   useEffect(() => {
     initStoreFromStorage();
@@ -93,6 +105,32 @@ const App = () => {
     chrome.storage.local.get('setupComplete', (data) => {
       if (data.setupComplete) setSetupComplete(true);
     });
+
+    // Keepalive port — prevents the background SW from being evicted while
+    // this panel is open. The SW is the only thing that owns the WebSocket
+    // to the bridge, so eviction = lost connection mid-agent-run. While this
+    // port is connected, port message activity counts as SW activity.
+    let keepalivePort: chrome.runtime.Port | null = null;
+    let keepaliveTimer: number | null = null;
+    try {
+      keepalivePort = chrome.runtime.connect({ name: 'panel-keepalive' });
+      keepaliveTimer = window.setInterval(() => {
+        try {
+          keepalivePort?.postMessage({ ping: Date.now() });
+        } catch {
+          // Port may have been disconnected — let the SW respawn handle it.
+        }
+      }, 25_000);
+    } catch {
+      // chrome.runtime may not be available in some test contexts.
+    }
+
+    return () => {
+      if (keepaliveTimer !== null) window.clearInterval(keepaliveTimer);
+      try {
+        keepalivePort?.disconnect();
+      } catch { /* ignore */ }
+    };
   }, []);
 
   const handleSetupComplete = () => {
@@ -100,7 +138,6 @@ const App = () => {
     chrome.storage.local.set({ setupComplete: true });
   };
 
-  const hasLicense = license.hasLicense;
   const { state, diagnosticReason, lastConnectedAt } = connectionContext;
 
   // First-launch onboarding: only override if user has never connected MCP and the helper
@@ -113,7 +150,7 @@ const App = () => {
 
   if (needsSetup) {
     return (
-      <div class="flex flex-col h-screen bg-neutral-50">
+      <div class="flex flex-col h-screen bg-panel">
         <ConnectionHeader />
         <div class="flex-1 overflow-y-auto">
           <SetupWizard onComplete={handleSetupComplete} />
@@ -123,28 +160,37 @@ const App = () => {
   }
 
   return (
-    <div class="flex flex-col h-screen bg-neutral-50">
+    <div class="flex flex-col h-screen bg-panel">
       <ConnectionHeader />
-      <TabStrip active={activeTab} onChange={setActiveTab} />
-      <div class="flex-1 min-h-0">
-        {activeTab === 'chat' && <ChatTab onOpenSettings={() => setActiveTab('settings')} />}
-        {activeTab === 'tools' && <ToolsTab hasLicense={hasLicense} />}
-        {activeTab === 'settings' && (
-          <div class="h-full overflow-y-auto">
-            <SettingsTab />
-          </div>
-        )}
-      </div>
-      {!hasLicense && (
-        <div class="border-t border-neutral-200 px-3 py-2 bg-white">
-          <button
-            class="w-full text-sm font-medium text-white bg-brand-primary py-2 rounded hover:bg-brand-primary-dark"
-            onClick={() => chrome.tabs.create({ url: 'https://github.com/irmasemma/AIBrowserCopilot/wiki/Pro' })}
-          >
-            Upgrade to Pro
-          </button>
-        </div>
+      <SiteAccessBanner />
+      {connectionContext.versionStatus === 'outdated' && (
+        <OutdatedBridgeBanner
+          installedVersion={connectionContext.serverInfo?.version ?? null}
+          minimumVersion={MIN_NATIVE_HOST_VERSION}
+        />
       )}
+      <TabStrip active={activeTab} onChange={setActiveTab} />
+      {/*
+        Tab panels are always mounted; visibility is toggled with `hidden`
+        so per-tab state (chat transcript, in-flight model run, drafts,
+        revealed keys, etc.) survives tab switches. Unmounting these
+        components on every switch would discard the chat history and
+        cancel any active conversation, which was the prior behavior.
+      */}
+      <div class="flex-1 min-h-0">
+        <div class={`h-full ${activeTab === 'chat' ? '' : 'hidden'}`}>
+          <ChatTab
+            isActive={activeTab === 'chat'}
+            onOpenSettings={() => setActiveTab('settings')}
+          />
+        </div>
+        <div class={`h-full ${activeTab === 'tools' ? '' : 'hidden'}`}>
+          <ToolsTab />
+        </div>
+        <div class={`h-full overflow-y-auto ${activeTab === 'settings' ? '' : 'hidden'}`}>
+          <SettingsTab />
+        </div>
+      </div>
     </div>
   );
 };

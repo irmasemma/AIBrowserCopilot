@@ -2,7 +2,7 @@
 
 ## Context
 
-You are testing **AI Browser CoPilot**, a Chrome extension that reads and fills web forms via MCP tools: `read_form` and `fill_form`. The extension claims to handle modern web forms across frameworks.
+You are testing **AgentHub**, a Chrome extension that reads and fills web forms via MCP tools: `read_form` and `fill_form`. The extension claims to handle modern web forms across frameworks.
 
 Your job is to **break it**. Not to confirm it works — to find where it fails.
 

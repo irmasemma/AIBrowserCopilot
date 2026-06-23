@@ -1,10 +1,11 @@
-import { createWriteStream, existsSync, mkdirSync, unlinkSync, renameSync, chmodSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, unlinkSync, renameSync, chmodSync, copyFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { get as httpsGet } from 'node:https';
 import { get as httpGet, type IncomingMessage } from 'node:http';
 import type { PlatformInfo } from '../shared/platform.js';
-import { getAssetName, getDownloadUrl } from '../shared/constants.js';
+import { getAssetName, getDownloadUrl, getHelperAssetName, getHelperDownloadUrl } from '../shared/constants.js';
 import { withRetry } from '../shared/retry.js';
+import { killRunningNativeHost, NATIVE_HOST_PORT } from './process-killer.js';
 
 export interface DownloadProgress {
   bytesReceived: number;
@@ -85,12 +86,91 @@ const downloadOnce = async (
     res.pipe(file);
   });
 
-  // Atomic rename from temp to target
-  renameSync(tempPath, targetPath);
+  // Atomic rename from temp to target — with Windows lock fallback.
+  renameWithLockFallback(tempPath, targetPath, platform.os);
 
   // Set executable permissions on macOS/Linux
   if (platform.os !== 'windows') {
     chmodSync(targetPath, 0o755);
+  }
+};
+
+export interface RenameWithLockFallbackOptions {
+  /** Test seam — override the underlying rename. */
+  renameImpl?: (from: string, to: string) => void;
+  /** Test seam — override the existence check on `targetPath`. */
+  existsImpl?: (path: string) => boolean;
+  /** Test seam — override the timestamp suffix for deterministic asserts. */
+  timestampImpl?: () => number;
+}
+
+/**
+ * Rename `tempPath` over `targetPath` with Windows lock-aside fallback.
+ *
+ * On Windows, if the destination .exe is held open by a running process
+ * (Chrome / Edge re-spawned a helper → bridge during our download window —
+ * see docs/installer-rename-eperm.md for the full race), the rename fails
+ * with EPERM/EBUSY/EACCES. The fallback uses Windows' FILE_SHARE_DELETE
+ * semantics: a running .exe cannot be deleted-content, but its directory
+ * entry can be renamed. We move the locked file out of the way and drop
+ * the new binary into the freed-up name. The next install start sweeps
+ * up the .delete-me-* files (best-effort).
+ *
+ * Non-Windows platforms allow overwriting a running binary in place, so the
+ * fallback is Windows-only.
+ */
+export function renameWithLockFallback(
+  tempPath: string,
+  targetPath: string,
+  os: PlatformInfo['os'],
+  options: RenameWithLockFallbackOptions = {},
+): void {
+  const rename = options.renameImpl ?? renameSync;
+  const exists = options.existsImpl ?? existsSync;
+  const now = options.timestampImpl ?? Date.now;
+  try {
+    rename(tempPath, targetPath);
+    return;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    const isLockError = code === 'EPERM' || code === 'EBUSY' || code === 'EACCES';
+    if (!isLockError || os !== 'windows' || !exists(targetPath)) {
+      throw err;
+    }
+    const sideName = `${targetPath}.delete-me-${now()}`;
+    rename(targetPath, sideName);
+    try {
+      rename(tempPath, targetPath);
+    } catch (retryErr) {
+      // Roll back the side-aside so we don't leave the user with no .exe.
+      try { rename(sideName, targetPath); } catch { /* nothing more we can do */ }
+      throw retryErr;
+    }
+    // The old .exe is still running from the renamed inode; it will exit
+    // when the user closes its driving client, and the leftover file becomes
+    // deletable. We don't block on it.
+  }
+}
+
+/**
+ * Best-effort cleanup of leftover `*.delete-me-<timestamp>` files from a
+ * prior install that hit the rename-aside path. Runs once per install at
+ * the top so we don't accumulate them indefinitely. Files that are still
+ * locked (process still running) silently stay; we'll retry next time.
+ */
+export const cleanupDeleteMeFiles = (installDir: string): void => {
+  if (!existsSync(installDir)) return;
+  try {
+    for (const entry of readdirSync(installDir)) {
+      if (!entry.includes('.delete-me-')) continue;
+      try {
+        unlinkSync(join(installDir, entry));
+      } catch {
+        // File still locked by a running process — leave it for next time.
+      }
+    }
+  } catch {
+    // readdir failure is non-fatal; the installer keeps going.
   }
 };
 
@@ -99,24 +179,52 @@ export const downloadBinary = async (
   installDir: string,
   onProgress?: (progress: DownloadProgress) => void,
   onRetry?: (attempt: number, error: Error, delayMs: number) => void,
+  localSourceDir?: string,
 ): Promise<InstallResult> => {
   const assetName = getAssetName(platform.os, platform.arch);
   const url = getDownloadUrl(platform.os, platform.arch);
   const targetPath = join(installDir, assetName);
   const tempPath = `${targetPath}.tmp`;
 
+  const helperAsset = getHelperAssetName(platform.os, platform.arch);
+  const helperUrl = getHelperDownloadUrl(platform.os, platform.arch);
+  const helperTargetPath = join(installDir, helperAsset);
+  const helperTempPath = `${helperTargetPath}.tmp`;
+
   // Create install directory if needed
   if (!existsSync(installDir)) {
     mkdirSync(installDir, { recursive: true });
   }
 
+  // Sweep up any leftover `.delete-me-*` files from a prior install that
+  // had to use the rename-aside fallback. Files still locked by a running
+  // process are silently skipped and retried on the next install.
+  cleanupDeleteMeFiles(installDir);
+
+  // Stop any running native host so the binary file can be replaced.
+  // On Windows the running .exe holds an exclusive lock; without this step
+  // a "rerun the installer" flow fails with EPERM/EBUSY on rename.
+  // Pass both bridge and helper image names so every instance is killed —
+  // killing only the port owner misses sibling bridges (one per Chrome
+  // profile under multi-profile) and any in-flight helper, and either
+  // sibling can still hold a lock on the .exe we need to overwrite.
+  // Idempotent: with nothing running this is a cheap tasklist/pgrep no-op.
+  if (existsSync(targetPath) || existsSync(helperTargetPath)) {
+    await killRunningNativeHost(platform, NATIVE_HOST_PORT, [assetName, helperAsset]);
+  }
+
+  // --from-local: skip network, copy from local path
+  if (localSourceDir) {
+    return installFromLocal(platform, installDir, localSourceDir);
+  }
+
   let attempts = 0;
 
   try {
+    // Main bridge binary
     await withRetry(
       async () => {
         attempts++;
-        // Clean up any partial temp file from a previous attempt
         cleanupFile(tempPath);
         await downloadOnce(url, targetPath, tempPath, platform, onProgress);
       },
@@ -128,11 +236,31 @@ export const downloadBinary = async (
       },
     );
 
+    // Helper binary — Chrome native-messaging endpoint the extension uses for
+    // diagnostics (service status, MCP registration check, native-host spawn).
+    // Must ship next to the bridge or the side panel reports "Setup incomplete"
+    // even after a successful install.
+    await withRetry(
+      async () => {
+        attempts++;
+        cleanupFile(helperTempPath);
+        await downloadOnce(helperUrl, helperTargetPath, helperTempPath, platform, onProgress);
+      },
+      {
+        maxAttempts: 3,
+        baseDelayMs: 1000,
+        maxDelayMs: 10000,
+        onRetry,
+      },
+    );
+
     return { success: true, binaryPath: targetPath, attempts };
   } catch (err) {
-    // Clean up partial/temp files
+    // Clean up partial/temp files for both binaries
     cleanupFile(tempPath);
-    cleanupFile(targetPath);
+    cleanupFile(helperTempPath);
+    // Don't delete targetPath if main binary already succeeded — keep what
+    // worked so the user can retry the helper download in isolation later.
 
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -156,7 +284,115 @@ const cleanupFile = (path: string): void => {
 
 export const isBinaryInstalled = (installDir: string, platform: PlatformInfo): boolean => {
   const assetName = getAssetName(platform.os, platform.arch);
-  return existsSync(join(installDir, assetName));
+  const helperAsset = getHelperAssetName(platform.os, platform.arch);
+  // Both must be present — extension's diagnostics fail without the helper.
+  return existsSync(join(installDir, assetName)) && existsSync(join(installDir, helperAsset));
+};
+
+export interface LocalBinaryResolution {
+  binaryPath: string;
+  helperPath: string | null;
+  error?: string;
+}
+
+/**
+ * Resolve local binary paths for --from-local. Supports two layouts:
+ *   1. Flat folder: <dir>/<assetName> + <dir>/<helperAssetName>
+ *   2. Project root: <dir>/packages/native-host/bin/<assetName> +
+ *      <dir>/packages/native-host-helper/bin/<helperAssetName>
+ * Helper is optional (returns null if missing — caller decides whether to fail).
+ */
+export const resolveLocalBinaries = (
+  localSourceDir: string,
+  platform: PlatformInfo,
+): LocalBinaryResolution => {
+  const assetName = getAssetName(platform.os, platform.arch);
+  const helperAsset = getHelperAssetName(platform.os, platform.arch);
+
+  const layouts = [
+    {
+      binary: join(localSourceDir, assetName),
+      helper: join(localSourceDir, helperAsset),
+    },
+    {
+      binary: join(localSourceDir, 'packages', 'native-host', 'bin', assetName),
+      helper: join(localSourceDir, 'packages', 'native-host-helper', 'bin', helperAsset),
+    },
+  ];
+
+  for (const layout of layouts) {
+    if (existsSync(layout.binary)) {
+      return {
+        binaryPath: layout.binary,
+        helperPath: existsSync(layout.helper) ? layout.helper : null,
+      };
+    }
+  }
+
+  return {
+    binaryPath: '',
+    helperPath: null,
+    error:
+      `Local binary "${assetName}" not found in "${localSourceDir}". ` +
+      `Looked for it directly in the folder and at packages/native-host/bin/${assetName}.`,
+  };
+};
+
+const installFromLocal = (
+  platform: PlatformInfo,
+  installDir: string,
+  localSourceDir: string,
+): InstallResult => {
+  const assetName = getAssetName(platform.os, platform.arch);
+  const helperAsset = getHelperAssetName(platform.os, platform.arch);
+  const targetPath = join(installDir, assetName);
+  const helperTargetPath = join(installDir, helperAsset);
+
+  const resolved = resolveLocalBinaries(localSourceDir, platform);
+  if (resolved.error) {
+    return { success: false, binaryPath: targetPath, error: resolved.error, attempts: 0 };
+  }
+
+  // Route the local-install path through the same temp-file + rename-aside
+  // fallback the network path uses. Without this, a Windows --from-local
+  // install with Chrome/Edge running hits the same EPERM-on-overwrite race
+  // (copyFileSync over a locked .exe fails identically to rename over a
+  // locked .exe). See docs/installer-rename-eperm.md for the full race.
+  const stageAndPlace = (sourcePath: string, finalPath: string): void => {
+    const tempPath = `${finalPath}.tmp`;
+    if (existsSync(tempPath)) unlinkSync(tempPath);
+    copyFileSync(sourcePath, tempPath);
+    try {
+      renameWithLockFallback(tempPath, finalPath, platform.os);
+    } catch (err) {
+      try { unlinkSync(tempPath); } catch { /* best-effort cleanup */ }
+      throw err;
+    }
+  };
+
+  try {
+    stageAndPlace(resolved.binaryPath, targetPath);
+    if (platform.os !== 'windows') {
+      chmodSync(targetPath, 0o755);
+    }
+
+    if (resolved.helperPath) {
+      stageAndPlace(resolved.helperPath, helperTargetPath);
+      if (platform.os !== 'windows') {
+        chmodSync(helperTargetPath, 0o755);
+      }
+    }
+
+    return { success: true, binaryPath: targetPath, attempts: 1 };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      success: false,
+      binaryPath: targetPath,
+      error: `Local install failed: ${message}`,
+      attempts: 1,
+    };
+  }
 };
 
 export interface BinaryLockCheck {

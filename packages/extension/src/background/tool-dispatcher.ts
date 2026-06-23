@@ -2,8 +2,216 @@ import type { ActivityEntry } from '../shared/types.js';
 import { MAX_ACTIVITY_LOG_SIZE } from '../shared/constants.js';
 import { isBlockedDomain } from '../shared/domain-blocklist.js';
 import { withPlaywrightPage } from './playwright-bridge.js';
+import type { Page } from 'playwright-crx/test';
 import { readFormFields } from '../content/form-reader.js';
 import { detectAndExtractData } from '../content/data-detector.js';
+import { getBrowserInstanceId } from '../shared/browser-instance-id.js';
+import { composeTabId, parseTabId } from '../shared/tab-id.js';
+import { logRecord, logError } from '../shared/logger.js';
+
+/**
+ * Walk the DOM, assign a stable `data-ai-ref="eN"` to every interactive
+ * element, and emit a compact YAML-like list of those elements plus the
+ * page's accessibility snapshot. The refs let the LLM target a specific
+ * element unambiguously via `page.locator('[data-ai-ref="eN"]')`.
+ *
+ * Inspired by BrowserMCP/mcp's snapshot+ref pattern, adapted for our
+ * Playwright 1.58.2 runtime (which lacks `ariaSnapshot({ ref: true })`).
+ */
+const SNAPSHOT_REF_INJECTOR = `(() => {
+  const SELECTOR = [
+    'input:not([type="hidden"])',
+    'select',
+    'textarea',
+    'button',
+    'a[href]',
+    '[role="button"]',
+    '[role="link"]',
+    '[role="checkbox"]',
+    '[role="radio"]',
+    '[role="combobox"]',
+    '[role="textbox"]',
+    '[role="searchbox"]',
+    '[role="switch"]',
+    '[role="tab"]',
+    '[role="menuitem"]',
+    '[role="option"]',
+    '[contenteditable=""]',
+    '[contenteditable="true"]',
+  ].join(',');
+
+  const ROLE_FROM_TAG = (el) => {
+    const explicit = el.getAttribute('role');
+    if (explicit) return explicit;
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'a') return 'link';
+    if (tag === 'button') return 'button';
+    if (tag === 'select') return el.multiple ? 'listbox' : 'combobox';
+    if (tag === 'textarea') return 'textbox';
+    if (tag === 'input') {
+      const t = (el.type || 'text').toLowerCase();
+      if (t === 'checkbox') return 'checkbox';
+      if (t === 'radio') return 'radio';
+      if (t === 'submit' || t === 'button' || t === 'reset') return 'button';
+      if (t === 'file') return 'file';
+      if (t === 'range') return 'slider';
+      return 'textbox';
+    }
+    return tag;
+  };
+
+  const ACC_NAME = (el) => {
+    const aria = el.getAttribute('aria-label');
+    if (aria && aria.trim()) return aria.trim();
+    const labelledBy = el.getAttribute('aria-labelledby');
+    if (labelledBy) {
+      const ids = labelledBy.split(/\\s+/).filter(Boolean);
+      const text = ids
+        .map(id => document.getElementById(id)?.textContent?.trim() || '')
+        .filter(Boolean)
+        .join(' ');
+      if (text) return text;
+    }
+    if (el.id) {
+      const labelEl = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+      const t = labelEl?.textContent?.trim();
+      if (t) return t;
+    }
+    const wrappingLabel = el.closest('label');
+    if (wrappingLabel) {
+      const clone = wrappingLabel.cloneNode(true);
+      clone.querySelectorAll('input,select,textarea').forEach(c => c.remove());
+      const t = clone.textContent?.trim();
+      if (t) return t;
+    }
+    if (el.placeholder) return el.placeholder;
+    if (el.title) return el.title;
+    if (el.tagName === 'BUTTON' || el.tagName === 'A') {
+      const t = el.textContent?.trim();
+      if (t) return t.slice(0, 80);
+    }
+    if (el.value && el.tagName === 'INPUT' && (el.type === 'submit' || el.type === 'button')) {
+      return el.value;
+    }
+    return '';
+  };
+
+  const STATE = (el) => {
+    const parts = [];
+    if (el.disabled) parts.push('disabled');
+    if (el.required) parts.push('required');
+    if (el.readOnly) parts.push('readonly');
+    if (el.checked) parts.push('checked');
+    const aria = (a) => el.getAttribute(a);
+    if (aria('aria-checked') === 'true') parts.push('checked');
+    if (aria('aria-selected') === 'true') parts.push('selected');
+    if (aria('aria-expanded') === 'true') parts.push('expanded');
+    if (aria('aria-invalid') === 'true') parts.push('invalid');
+    if (el.tagName === 'INPUT' && el.value && el.type !== 'password') {
+      const v = String(el.value).slice(0, 40);
+      parts.push('value=' + JSON.stringify(v));
+    }
+    return parts.length ? ' ' + parts.join(' ') : '';
+  };
+
+  const IS_VISIBLE = (el) => {
+    if (!el.isConnected) return false;
+    const cs = getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return false;
+    return true;
+  };
+
+  document.querySelectorAll('[data-ai-ref]').forEach(el => el.removeAttribute('data-ai-ref'));
+
+  const lines = [];
+  let counter = 0;
+  const elements = document.querySelectorAll(SELECTOR);
+  for (const el of elements) {
+    if (!IS_VISIBLE(el)) continue;
+    const ref = 'e' + (++counter);
+    el.setAttribute('data-ai-ref', ref);
+    const role = ROLE_FROM_TAG(el);
+    const name = ACC_NAME(el).replace(/"/g, '\\\\"').slice(0, 80);
+    lines.push('- ' + role + ' "' + name + '" [ref=' + ref + ']' + STATE(el));
+  }
+  return lines.join('\\n');
+})()`;
+
+// Bounded timeout for fill_form field actions (fill/check/select/setInputFiles)
+// so a slow/ambiguous locator fails fast per-field instead of waiting out the
+// Playwright default (~30s) — same "no unbounded locator op" rule as click/press.
+const FIELD_OPTS = { timeout: 8_000 };
+
+// Service-worker-safe binary → base64 (no Node Buffer in MV3). Chunked to
+// avoid blowing the call stack on large (multi-hundred-KB) screenshots.
+const bytesToBase64 = (bytes: Uint8Array): string => {
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+};
+
+const captureSnapshot = async (tabId: number): Promise<string> => {
+  try {
+    return await withPlaywrightPage(tabId, async (page: Page) => {
+      // If a mutating tool (e.g. a navigating click) just changed the page, the
+      // new DOM may not be ready yet — snapshotting immediately yields nothing
+      // (the empty-snapshot-after-navigation gap). Wait, BOUNDED + best-effort,
+      // for the new document so the refs reflect the post-action page. On an
+      // already-loaded page this returns instantly, so non-navigating tools are
+      // not slowed.
+      await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => { /* best-effort */ });
+      const refLines = await page.evaluate(SNAPSHOT_REF_INJECTOR).catch(() => '') as string;
+      let aria = '';
+      try {
+        const body = page.locator('body');
+        if (typeof (body as any).ariaSnapshot === 'function') {
+          aria = await (body as any).ariaSnapshot({ timeout: 5000 }) as string;
+        }
+      } catch { /* aria snapshot best-effort */ }
+
+      const refSection = refLines
+        ? '# Interactive elements (use [ref=eN] in fill_form, click_element, press_key)\n' + refLines
+        : '';
+      const ariaSection = aria
+        ? '\n\n# Page structure\n' + (aria.length > 4000 ? aria.slice(0, 4000) + '\n... (truncated)' : aria)
+        : '';
+      const out = (refSection + ariaSection).trim();
+      return out.length > 6000 ? out.slice(0, 6000) + '\n... (truncated)' : out;
+    });
+  } catch {
+    return '';
+  }
+};
+
+/** Append an ARIA snapshot to a tool result */
+const withSnapshot = async (
+  tabId: number,
+  result: { content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> },
+): Promise<typeof result> => {
+  const snapshot = await captureSnapshot(tabId);
+  if (!snapshot) {
+    // Empty snapshot almost always means the action navigated and the
+    // destination is still loading (its JS context is mid-rebuild, so the ref
+    // injector finds nothing yet). Returning no refs is the SAFE choice — never
+    // emit stale pre-navigation refs. Tell the caller so it fetches the fresh
+    // page next turn instead of assuming the snapshot was simply empty.
+    result.content.push({
+      type: 'text',
+      text: '\n--- Page Snapshot ---\n(unavailable — the page is still loading after this action; call get_page_content or take_screenshot on the next step to see the updated page.)',
+    });
+    return result;
+  }
+  result.content.push({
+    type: 'text',
+    text: `\n--- Page Snapshot ---\n\`\`\`yaml\n${snapshot}\n\`\`\``,
+  });
+  return result;
+};
 
 const logActivity = async (entry: ActivityEntry): Promise<void> => {
   const data = await chrome.storage.local.get('activityLog');
@@ -18,19 +226,38 @@ const logActivity = async (entry: ActivityEntry): Promise<void> => {
   });
 };
 
-const getTab = async (tabId?: number, checkBlocked = true): Promise<chrome.tabs.Tab> => {
-  let tab: chrome.tabs.Tab;
+/**
+ * Resolve a `tab_id` parameter (which may be a raw int from a legacy caller
+ * or a namespaced string like "chrome:abc:622786441") to a `chrome.tabs.Tab`.
+ *
+ * Namespaced ids are produced by `list_tabs` and are how the LLM references
+ * a specific tab across profile/browser boundaries. The bridge routes the
+ * call to the right extension based on the prefix; by the time we reach
+ * here, the rawId is what `chrome.tabs.get()` needs.
+ *
+ * Active-tab fallback was removed: with multiple windows or profiles, the
+ * "current window" semantics silently re-targeted mid-task when the user
+ * switched windows. Callers must now pass an explicit `tab_id`. The side
+ * panel chat captures-and-binds the active tab at message-send time and
+ * passes it explicitly; external MCP clients must call `list_tabs` first.
+ */
+const getTab = async (tabIdParam: unknown, checkBlocked = true): Promise<chrome.tabs.Tab> => {
+  const parsed = parseTabId(tabIdParam);
+  if (!parsed || parsed.rawId === 0) {
+    throw Object.assign(
+      new Error('tab_id is required. Call list_tabs first to get a tab id.'),
+      { code: 'TAB_NOT_FOUND' },
+    );
+  }
 
-  if (tabId) {
-    tab = await chrome.tabs.get(tabId);
-    // Activate the targeted tab inside its window (needed for captureVisibleTab and so
-    // the right tab is showing when the user looks at Chrome). Do NOT focus the window —
-    // that would steal OS focus from whatever app the user is currently in.
-    await chrome.tabs.update(tab.id!, { active: true });
-  } else {
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!activeTab?.id) throw Object.assign(new Error('No active tab found'), { code: 'TAB_NOT_FOUND' });
-    tab = activeTab;
+  let tab: chrome.tabs.Tab;
+  try {
+    tab = await chrome.tabs.get(parsed.rawId);
+  } catch {
+    throw Object.assign(
+      new Error(`Tab ${parsed.rawId} not found — it may have been closed.`),
+      { code: 'TAB_NOT_FOUND' },
+    );
   }
 
   if (checkBlocked && tab.url && isBlockedDomain(tab.url)) {
@@ -40,10 +267,50 @@ const getTab = async (tabId?: number, checkBlocked = true): Promise<chrome.tabs.
 };
 
 const executeContentScript = async <T>(tabId: number, func: () => T): Promise<T> => {
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    func,
-  });
+  let results;
+  try {
+    results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Chrome/Edge emits this exact wording when the user has set per-tab
+    // "Site access: On click" (the default for sideloaded unpacked extensions),
+    // even though the manifest declares <all_urls>. Translate it into an
+    // actionable instruction so MCP clients (VS Code, Claude, etc.) can
+    // surface it to the user.
+    if (/Cannot access contents of the page|Extension manifest must request permission/i.test(message)) {
+      // Surface a UI signal for the side panel banner — but ONLY if the
+      // <all_urls> permission isn't already granted. If it IS granted and
+      // we're STILL hitting this error, it's a per-tab issue (e.g., the
+      // tab's URL doesn't match any granted origin, or Edge's per-extension
+      // runtime "Site access" override is still in "On click" mode for
+      // this specific tab). Setting the banner flag in those cases would
+      // make the banner re-appear after the user already clicked grant,
+      // which is the bug we're fixing.
+      try {
+        const allUrlsGranted = await chrome.permissions
+          .contains({ origins: ['<all_urls>'] })
+          .catch(() => false);
+        if (!allUrlsGranted) {
+          await chrome.storage.local.set({ siteAccessBlocked: true, siteAccessBlockedAt: Date.now() });
+        }
+      } catch {
+        // best-effort; ignore storage errors
+      }
+      throw Object.assign(
+        new Error(
+          'This tab is blocked by the browser\'s per-extension Site Access setting. ' +
+          'Open the AgentHub side panel and click "Grant access to all sites", ' +
+          'or open edge://extensions, click "Details" on AgentHub, and set ' +
+          '"Site access" to "On all sites". Then retry.',
+        ),
+        { code: 'SITE_ACCESS_BLOCKED' },
+      );
+    }
+    throw err;
+  }
   if (!results?.[0]) throw Object.assign(new Error('Content script returned no result'), { code: 'CONTENT_UNAVAILABLE' });
   return results[0].result as T;
 };
@@ -87,7 +354,6 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
     const format = (params.format as string) ?? 'png';
     const quality = (params.quality as number) ?? 80;
 
-    // If tab_id provided, activate it first (captureVisibleTab captures the active tab)
     const tab = await getTab(params.tab_id as number | undefined);
     if (tab.url?.startsWith('chrome://')) {
       throw Object.assign(
@@ -96,32 +362,37 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
       );
     }
 
-    // Use the tab's window ID (more reliable than getCurrent() in service workers)
-    const windowId = tab.windowId ?? (await chrome.windows.getCurrent()).id;
-
+    // ROOT-CAUSE FIX: capture via CDP (Playwright `Page.captureScreenshot`),
+    // NOT `chrome.tabs.captureVisibleTab`. captureVisibleTab only works when
+    // the target WINDOW is focused/visible and HANGS forever — never resolving
+    // OR rejecting — when it isn't (background window, occluded, or a heavy
+    // still-painting tab). That was the actual cause of wedged screenshots
+    // (confirmed via step logging: it never returned from captureVisibleTab).
+    // CDP screenshots are taken from the renderer regardless of window focus,
+    // so there's nothing to activate and nothing to hang on.
     try {
-      const dataUrl = await chrome.tabs.captureVisibleTab(windowId, {
-        format: format as 'png' | 'jpeg',
-        quality,
+      return await withPlaywrightPage(tab.id!, async (page) => {
+        // If the tab just navigated, the renderer hasn't painted the new page
+        // yet and the capture blocks waiting for it. Bounded-wait for load
+        // first (instant on an already-settled tab) so we screenshot a painted
+        // page instead of racing the navigation.
+        await page.waitForLoadState('load', { timeout: 5_000 }).catch(() => { /* best-effort */ });
+        // `animations: 'disabled'` + `caret: 'hide'` stop Playwright from
+        // blocking on render/animation stability and a blinking caret before
+        // capture — that wait is what made screenshots take up to ~13s on pages
+        // with web fonts/animations (measured: attach ~0ms, the screenshot op
+        // itself was the cost). `timeout` caps a genuinely stuck capture so it
+        // fails fast with a clean error instead of hanging to the dispatch cap.
+        const base = { animations: 'disabled' as const, caret: 'hide' as const, timeout: 12_000 };
+        const raw = await page.screenshot(
+          format === 'jpeg' ? { ...base, type: 'jpeg', quality } : { ...base, type: 'png' },
+        );
+        return {
+          content: [{ type: 'image', data: bytesToBase64(new Uint8Array(raw)), mimeType: `image/${format}` }],
+        };
       });
-
-      const base64 = dataUrl.split(',')[1] ?? dataUrl;
-      return { content: [{ type: 'image', data: base64, mimeType: `image/${format}` }] };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      // Provide helpful error messages for common failures
-      if (message.includes('activeTab') || message.includes('permission')) {
-        throw Object.assign(
-          new Error('Cannot capture this page. Try clicking on the page first, or navigate to a different site.'),
-          { code: 'CONTENT_UNAVAILABLE' },
-        );
-      }
-      if (message.includes('readback') || message.includes('capture')) {
-        throw Object.assign(
-          new Error('Screenshot failed — make sure the browser window is visible (not minimized).'),
-          { code: 'CONTENT_UNAVAILABLE' },
-        );
-      }
       throw Object.assign(new Error(`Screenshot failed: ${message}`), { code: 'CONTENT_UNAVAILABLE' });
     }
   },
@@ -137,8 +408,12 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
       );
     }
 
+    // Namespace each tab id with this browser's instance id so the bridge
+    // (which fans out list_tabs across N connected browsers) can route any
+    // subsequent tool call back to the correct profile.
+    const browserId = await getBrowserInstanceId();
     const result = tabs.map(t => ({
-      id: t.id,
+      id: t.id != null ? composeTabId(browserId, t.id) : null,
       title: t.title ?? '',
       url: t.url ?? '',
       active: t.active ?? false,
@@ -215,308 +490,231 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
     await chrome.tabs.update(tabId, { url });
 
     const updated = await loaded;
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, url: updated.url, title: updated.title }) }] };
+    return withSnapshot(tabId, { content: [{ type: 'text', text: JSON.stringify({ success: true, url: updated.url, title: updated.title }) }] });
   },
 
   async fill_form(params) {
     const fields = params.fields as Array<{
+      ref?: string;
       selector?: string;
       label?: string;
       role?: string;
+      name?: string;
       placeholder?: string;
-      value: string;
+      value?: string;
+      values?: string[];
+      checked?: boolean;
       type?: string;
     }>;
     const iframeSelector = params.iframe as string | undefined;
     const tab = await getTab(params.tab_id as number | undefined);
 
-    // Determine if we need playwright-crx (complex operations) or can use simple approach
-    const needsPlaywright = fields.some(f =>
-      f.label || f.role || f.placeholder ||
-      f.type === 'select' || f.type === 'checkbox' || f.type === 'radio' ||
-      f.type === 'file' || f.type === 'date',
-    ) || !!iframeSelector;
+    const results = await withPlaywrightPage(tab.id!, async (page) => {
+      const fieldResults: Array<{ field: string; success: boolean; error?: string }> = [];
 
-    if (needsPlaywright) {
-      // Use playwright-crx for complex form interactions
-      const results = await withPlaywrightPage(tab.id!, async (page) => {
-        const fieldResults: Array<{ field: string; success: boolean; error?: string }> = [];
+      for (const field of fields) {
+        const fieldId = field.ref ? `ref=${field.ref}` :
+          field.label || (field.role && field.name ? `${field.role}:${field.name}` : '') ||
+          field.placeholder || field.selector || 'unknown';
 
-        for (const field of fields) {
-          try {
-            // Determine the base context (page or iframe)
-            const context = iframeSelector
-              ? page.frameLocator(iframeSelector)
-              : page;
-
-            // Determine locator
-            let locator;
+        try {
+          // Build locator with strict preference order: ref > label > role+name >
+          // placeholder > selector. role-only is REJECTED — it silently filled the
+          // first matching element on the page (a real bug, not a feature).
+          let locator;
+          if (field.ref) {
+            // ref locators ignore the iframe parameter — refs are page-wide and
+            // injected only in the top frame today (documented limitation).
+            locator = page.locator(`[data-ai-ref="${field.ref}"]`);
+          } else {
+            const context = iframeSelector ? page.frameLocator(iframeSelector) : page;
             if (field.label) {
               locator = context.getByLabel(field.label);
             } else if (field.role) {
-              locator = context.getByRole(field.role as Parameters<typeof context.getByRole>[0]);
+              if (!field.name) {
+                fieldResults.push({
+                  field: fieldId,
+                  success: false,
+                  error: 'role requires a `name` (e.g., {role: "textbox", name: "Email"}). Use ref from snapshot for unambiguous targeting.',
+                });
+                continue;
+              }
+              locator = context.getByRole(
+                field.role as Parameters<typeof context.getByRole>[0],
+                { name: field.name },
+              );
             } else if (field.placeholder) {
               locator = context.getByPlaceholder(field.placeholder);
             } else if (field.selector) {
               locator = context.locator(field.selector);
             } else {
-              fieldResults.push({ field: JSON.stringify(field), success: false, error: 'No locator provided (need selector, label, role, or placeholder)' });
+              fieldResults.push({ field: fieldId, success: false, error: 'No locator (ref, label, role+name, placeholder, or selector required)' });
               continue;
             }
-
-            const fieldId = field.label || field.role || field.placeholder || field.selector || 'unknown';
-
-            // Perform the appropriate action based on type
-            switch (field.type) {
-              case 'select':
-                await locator.selectOption(field.value);
-                break;
-              case 'checkbox':
-                if (field.value === 'true' || field.value === 'on') {
-                  await locator.check();
-                } else {
-                  await locator.uncheck();
-                }
-                break;
-              case 'radio':
-                await locator.check();
-                break;
-              case 'file':
-                await locator.setInputFiles(field.value);
-                break;
-              case 'date':
-                await locator.fill(field.value);
-                break;
-              default:
-                await locator.fill(field.value);
-                break;
-            }
-
-            fieldResults.push({ field: fieldId, success: true });
-          } catch (err) {
-            const fieldId = field.label || field.role || field.placeholder || field.selector || 'unknown';
-            fieldResults.push({
-              field: fieldId,
-              success: false,
-              error: err instanceof Error ? err.message : String(err),
-            });
           }
+
+          // Auto-detect element type from the DOM. Only used when `field.type`
+          // is not provided. This prevents the bug where omitting `type` for a
+          // <select> caused locator.fill() to throw "element is not an input".
+          let detected: { tag: string; type: string; multiple: boolean; ce: boolean } = { tag: '', type: '', multiple: false, ce: false };
+          if (!field.type) {
+            try {
+              detected = await locator.evaluate((el: Element) => ({
+                tag: (el as HTMLElement).tagName,
+                type: ((el as HTMLInputElement).type || '').toLowerCase(),
+                multiple: !!(el as HTMLSelectElement).multiple,
+                ce: (el as HTMLElement).isContentEditable,
+              })) as { tag: string; type: string; multiple: boolean; ce: boolean };
+            } catch {
+              // Locator didn't resolve — let the action below throw a clearer error
+            }
+          }
+
+          const effectiveType =
+            field.type ??
+            (detected.tag === 'SELECT' ? 'select' :
+             detected.type === 'checkbox' ? 'checkbox' :
+             detected.type === 'radio' ? 'radio' :
+             detected.type === 'file' ? 'file' :
+             'text');
+
+          const valueStr = field.value ?? '';
+
+          switch (effectiveType) {
+            case 'select': {
+              const opts = field.values ?? (valueStr ? [valueStr] : []);
+              if (opts.length === 0) {
+                fieldResults.push({ field: fieldId, success: false, error: 'select requires `value` or `values`' });
+                continue;
+              }
+              await locator.selectOption(detected.multiple ? opts : opts[0], FIELD_OPTS);
+              break;
+            }
+            case 'checkbox': {
+              // Prefer explicit `checked`. Fallback: parse common truthy strings.
+              const truthy = field.checked ?? /^(true|on|yes|1|checked)$/i.test(valueStr);
+              if (truthy) await locator.check(FIELD_OPTS);
+              else await locator.uncheck(FIELD_OPTS);
+              break;
+            }
+            case 'radio': {
+              // Radios cannot be unchecked individually. `checked: false` is a
+              // user error — radios are selected by checking a different one.
+              if (field.checked === false) {
+                fieldResults.push({ field: fieldId, success: false, error: 'radio cannot be unchecked; check a sibling radio instead' });
+                continue;
+              }
+              await locator.check(FIELD_OPTS);
+              break;
+            }
+            case 'file':
+              await locator.setInputFiles(field.values ?? valueStr, FIELD_OPTS);
+              break;
+            default:
+              await locator.fill(valueStr, FIELD_OPTS);
+              break;
+          }
+
+          fieldResults.push({ field: fieldId, success: true });
+        } catch (err) {
+          fieldResults.push({
+            field: fieldId,
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
+      }
 
-        return fieldResults;
-      });
-
-      return { content: [{ type: 'text', text: JSON.stringify(results) }] };
-    }
-
-    // Simple path: use chrome.scripting for basic text fills (no debugger needed)
-    // Uses native value setter to work with React/Vue controlled inputs
-    const simpleFields = fields.map(f => ({ selector: f.selector!, value: f.value }));
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: tab.id! },
-      func: (fieldList: Array<{ selector: string; value: string }>) => {
-        // Shadow DOM traversal fallback
-        function queryShadow(selector: string): Element | null {
-          let el = document.querySelector(selector);
-          if (el) return el;
-          const hosts = document.querySelectorAll('*');
-          for (const host of hosts) {
-            if (host.shadowRoot) {
-              el = host.shadowRoot.querySelector(selector);
-              if (el) return el;
-            }
-          }
-          return null;
-        }
-
-        // Get native setters — React/Vue override .value, so direct assignment doesn't trigger state updates
-        const inputSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-        const textareaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-        const selectSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
-
-        return fieldList.map(({ selector, value }) => {
-          const el = queryShadow(selector) as HTMLElement | null;
-          if (!el) return { selector, success: false, error: 'Element not found' };
-
-          try {
-            // Gap 4: Contenteditable support — must trigger mutation observers and editor listeners
-            if (el.getAttribute('contenteditable') === 'true' || el.getAttribute('contenteditable') === '') {
-              el.focus();
-              // Select all existing content and replace it
-              const selection = window.getSelection();
-              const range = document.createRange();
-              range.selectNodeContents(el);
-              selection?.removeAllRanges();
-              selection?.addRange(range);
-              // execCommand triggers mutation observers, input events, and editor state sync
-              document.execCommand('insertText', false, value);
-              // Fire events for any listeners that execCommand didn't trigger
-              el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-              return { selector, success: true };
-            }
-
-            // Gap 3: ARIA widget interaction (div-based, not native inputs)
-            const role = el.getAttribute('role');
-            if (role === 'slider') {
-              el.setAttribute('aria-valuenow', value);
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              return { selector, success: true };
-            } else if (role === 'switch') {
-              const checked = value === 'true' || value === 'on';
-              el.setAttribute('aria-checked', String(checked));
-              el.click();
-              return { selector, success: true };
-            } else if (role === 'combobox' || role === 'listbox') {
-              const hiddenInput = el.querySelector('input[type="hidden"]') || el.parentElement?.querySelector('input[type="hidden"]');
-              if (hiddenInput) (hiddenInput as HTMLInputElement).value = value;
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-              return { selector, success: true };
-            }
-
-            // Standard input/textarea/select path
-            const inputEl = el as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-
-            // Use the native setter for the right element type
-            if (inputEl instanceof HTMLTextAreaElement && textareaSetter) {
-              textareaSetter.call(inputEl, value);
-            } else if (inputEl instanceof HTMLSelectElement && selectSetter) {
-              selectSetter.call(inputEl, value);
-            } else if (inputSetter) {
-              inputSetter.call(inputEl, value);
-            } else {
-              inputEl.value = value;
-            }
-
-            // Fire events that React/Vue/Angular listen to
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-            // React 17+ also listens for native input events
-            el.dispatchEvent(new Event('blur', { bubbles: true }));
-
-            // Gap 1: Fire keyboard events for autocomplete/typeahead triggers
-            el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'a' }));
-            el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
-            el.dispatchEvent(new KeyboardEvent('keypress', { bubbles: true, key: 'a' }));
-
-            return { selector, success: true };
-          } catch (err) {
-            return { selector, success: false, error: (err as Error).message };
-          }
-        });
-      },
-      args: [simpleFields],
+      return fieldResults;
     });
 
-    return { content: [{ type: 'text', text: JSON.stringify(results?.[0]?.result ?? []) }] };
+    return withSnapshot(tab.id!, { content: [{ type: 'text', text: JSON.stringify(results) }] });
   },
 
   async click_element(params) {
+    const ref = (params.ref as string | undefined) ?? null;
     const selector = (params.selector as string) ?? null;
     const text = (params.text as string) ?? null;
     const index = (params.index as number) ?? 0;
     const tab = await getTab(params.tab_id as number | undefined);
 
-    const result = await chrome.scripting.executeScript({
-      target: { tabId: tab.id! },
-      func: (sel: string | null, txt: string | null, idx: number) => {
-        // AD-21: Auto-scroll element into view before clicking
-        function ensureVisible(el: Element): void {
-          const rect = el.getBoundingClientRect();
-          const inViewport = rect.top >= 0 && rect.bottom <= window.innerHeight && rect.left >= 0 && rect.right <= window.innerWidth;
-          if (!inViewport) {
-            el.scrollIntoView({ block: 'center', behavior: 'instant' });
-          }
-        }
+    const result = await withPlaywrightPage(tab.id!, async (page) => {
+      let locator;
+      if (ref) {
+        locator = page.locator(`[data-ai-ref="${ref}"]`);
+      } else if (text) {
+        locator = page.getByText(text, { exact: false });
+      } else if (selector) {
+        locator = page.locator(selector);
+      } else {
+        throw new Error('Must provide ref, selector, or text');
+      }
 
-        // By CSS selector — return the nth match
-        if (sel) {
-          const matches = Array.from(document.querySelectorAll(sel));
-          const el = matches[idx];
-          if (!el) return null;
-          ensureVisible(el);
-          (el as HTMLElement).click();
-          return {
+      if (index > 0) locator = locator.nth(index);
+
+      // ROOT-CAUSE FIX: every locator op here is BOUNDED. The original bug was
+      // an UNBOUNDED post-click `evaluateHandle` re-resolve that hung ~16-18s on
+      // a detached/re-rendered element and reported a LANDED click as a failure.
+      // Bounding everything — and never re-resolving after the click — makes a
+      // click either succeed fast or fail fast & cleanly, with a fresh snapshot.
+      await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => { /* best-effort */ });
+
+      // Element identity is nice-to-have, NOT essential — the fresh snapshot
+      // below is the source of truth for what happened. Read it best-effort with
+      // a hard 1.5s cap so a slow/ambiguous locator can never hang the tool.
+      const element = await Promise.race([
+        locator
+          .evaluateHandle((el) => ({
             tag: el.tagName,
-            text: el.textContent?.trim().slice(0, 100),
+            text: el.textContent?.trim().slice(0, 100) ?? '',
             href: (el as HTMLAnchorElement).href ?? null,
-            matchCount: matches.length,
-            matchIndex: idx,
-          };
-        }
+          }))
+          .then((h) => h.jsonValue())
+          .catch(() => null),
+        new Promise<null>((res) => setTimeout(() => res(null), 1500)),
+      ]);
 
-        // By visible text — prefer clickable elements, match direct text not inherited
-        if (txt) {
-          const clickable = 'a, button, input[type="submit"], input[type="button"], [role="button"], [onclick], summary';
-          const target = txt.toLowerCase();
+      // Bounded click. The original hang was the UNBOUNDED post-click element
+      // re-resolve (removed above), NOT the click itself — so we let the click
+      // wait for any post-click navigation, but BOUNDED to 8s. This leaves the
+      // page SETTLED for the snapshot below (and for the caller's next tool),
+      // unlike fire-and-forget which left the page mid-navigation. If the click
+      // genuinely can't complete in 8s it throws a clean, fast error. We never
+      // re-resolve the locator afterward — the element may already be gone.
+      await locator.click({ timeout: 8_000 });
 
-          // Pass 1: exact match on clickable elements (direct text only)
-          const clickables = Array.from(document.querySelectorAll(clickable));
-          const exactClickable = clickables.filter(el => {
-            // Get direct text (not from children) or the full text for simple elements
-            const elText = el.textContent?.trim().toLowerCase() ?? '';
-            return elText === target;
-          });
-          if (exactClickable.length > idx) {
-            const el = exactClickable[idx] as HTMLElement;
-            ensureVisible(el);
-            el.click();
-            return {
-              tag: el.tagName,
-              text: el.textContent?.trim().slice(0, 100),
-              href: (el as HTMLAnchorElement).href ?? null,
-              matchCount: exactClickable.length,
-              matchIndex: idx,
-            };
-          }
-
-          // Pass 2: partial/contains match on clickable elements
-          const partialClickable = clickables.filter(el => {
-            const elText = el.textContent?.trim().toLowerCase() ?? '';
-            return elText.includes(target);
-          });
-          if (partialClickable.length > idx) {
-            const el = partialClickable[idx] as HTMLElement;
-            ensureVisible(el);
-            el.click();
-            return {
-              tag: el.tagName,
-              text: el.textContent?.trim().slice(0, 100),
-              href: (el as HTMLAnchorElement).href ?? null,
-              matchCount: partialClickable.length,
-              matchIndex: idx,
-            };
-          }
-
-          // Pass 3: any element with exact text (fallback)
-          const allElements = Array.from(document.querySelectorAll('*'));
-          const anyMatch = allElements.filter(el => {
-            const elText = el.textContent?.trim().toLowerCase() ?? '';
-            return elText === target && el.children.length === 0; // leaf nodes only
-          });
-          if (anyMatch.length > idx) {
-            const el = anyMatch[idx] as HTMLElement;
-            ensureVisible(el);
-            el.click();
-            return {
-              tag: el.tagName,
-              text: el.textContent?.trim().slice(0, 100),
-              href: (el as HTMLAnchorElement).href ?? null,
-              matchCount: anyMatch.length,
-              matchIndex: idx,
-            };
-          }
-        }
-
-        return null;
-      },
-      args: [selector, text, index],
+      return element;
     });
 
-    const clicked = result?.[0]?.result;
-    if (!clicked) throw Object.assign(new Error('Element not found'), { code: 'CONTENT_UNAVAILABLE' });
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, element: clicked }) }] };
+    // Always return a FRESH snapshot (best-effort) so the caller gets current
+    // refs even after a navigation/re-render — no separate re-snapshot round
+    // trip. Refs are render-scoped; this is the contract that makes them usable.
+    return withSnapshot(tab.id!, { content: [{ type: 'text', text: JSON.stringify({ success: true, element: result }) }] });
+  },
+
+  async press_key(params) {
+    const ref = (params.ref as string | undefined) ?? null;
+    const selector = (params.selector as string | undefined) ?? null;
+    const key = params.key as string;
+    if (!key) throw new Error('press_key requires `key` (e.g., "Enter", "Escape", "Tab")');
+    const tab = await getTab(params.tab_id as number | undefined);
+
+    await withPlaywrightPage(tab.id!, async (page) => {
+      // Bounded + noWaitAfter, same as click_element: a key like Enter submits
+      // and navigates; without these a press on a slow/navigating target hangs
+      // up to the default 30s (only the 25s dispatch cap would catch it).
+      const pressOpts = { timeout: 8_000, noWaitAfter: true };
+      if (ref) {
+        await page.locator(`[data-ai-ref="${ref}"]`).press(key, pressOpts);
+      } else if (selector) {
+        await page.locator(selector).press(key, pressOpts);
+      } else {
+        // No target — fire as a global keyboard event on the page.
+        await page.keyboard.press(key);
+      }
+    });
+
+    return withSnapshot(tab.id!, { content: [{ type: 'text', text: JSON.stringify({ success: true, key }) }] });
   },
 
   async extract_table(params) {
@@ -688,7 +886,7 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
       return scrollError ? { ...state, found: false, error: scrollError } : state;
     });
 
-    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    return withSnapshot(tab.id!, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
   },
 
   async go_back(params) {
@@ -700,7 +898,7 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
       return { success: true, url: page.url(), title: await page.title() };
     });
 
-    return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    return withSnapshot(tab.id!, { content: [{ type: 'text', text: JSON.stringify(result) }] });
   },
 
   async go_forward(params) {
@@ -712,7 +910,7 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
       return { success: true, url: page.url(), title: await page.title() };
     });
 
-    return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    return withSnapshot(tab.id!, { content: [{ type: 'text', text: JSON.stringify(result) }] });
   },
 
   async extract_data(params) {
@@ -778,11 +976,66 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
       }],
     };
   },
+
+  async snapshot(params) {
+    const tab = await getTab(params.tab_id as number | undefined);
+    const snap = await captureSnapshot(tab.id!);
+    if (!snap) {
+      throw Object.assign(new Error('Could not capture page snapshot'), { code: 'CONTENT_UNAVAILABLE' });
+    }
+    const url = tab.url ?? '';
+    const title = tab.title ?? '';
+    return {
+      content: [{
+        type: 'text',
+        text: `- Page URL: ${url}\n- Page Title: ${title}\n- Page Snapshot\n\`\`\`yaml\n${snap}\n\`\`\``,
+      }],
+    };
+  },
 };
 
-export const dispatchTool = async (toolName: string, params: Record<string, unknown>): Promise<unknown> => {
+// Hard ceiling for any single tool. Kept under the bridge's tool_request
+// timeout (30s) so the extension reports a clear, tool-specific error FIRST
+// instead of the bridge giving up with a generic timeout while this promise
+// leaks forever. Chrome/Playwright calls (e.g. captureVisibleTab on a wedged
+// or still-loading page) can hang indefinitely with no rejection — without
+// this race, dispatchTool never settles and `ext.tool.dispatch.complete` is
+// never logged.
+export const TOOL_DISPATCH_TIMEOUT_MS = 25_000;
+
+/**
+ * Race a promise against a timeout. If `p` doesn't settle within `ms`, reject
+ * with a TOOL_TIMEOUT error. The underlying Chrome/Playwright call cannot be
+ * cancelled, so it keeps running and its eventual result is ignored — the
+ * point is that the CALLER always settles instead of hanging forever.
+ * Exported for tests.
+ */
+export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(Object.assign(
+        new Error(`Tool '${label}' timed out after ${ms}ms — the page may be unresponsive (still loading or a heavy SPA). Reload the tab and try again.`),
+        { code: 'TOOL_TIMEOUT' },
+      ));
+    }, ms);
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
+export const dispatchTool = async (
+  toolName: string,
+  params: Record<string, unknown>,
+  timeoutMs: number = TOOL_DISPATCH_TIMEOUT_MS,
+): Promise<unknown> => {
   const handler = tools[toolName];
   if (!handler) {
+    void logRecord({
+      event: 'ext.tool.dispatch.unknown',
+      lvl: 'warn',
+      toolName,
+      params,
+    });
     throw Object.assign(new Error(`Unknown tool: ${toolName}`), { code: 'CONTENT_UNAVAILABLE' });
   }
 
@@ -801,18 +1054,36 @@ export const dispatchTool = async (toolName: string, params: Record<string, unkn
   };
 
   await logActivity(entry);
+  void logRecord({
+    event: 'ext.tool.dispatch.start',
+    toolName,
+    activityId: entry.id,
+    targetUrl: targetUrl ?? undefined,
+    params,
+  });
 
   try {
-    const result = await handler(params);
+    const result = await withTimeout(handler(params), timeoutMs, toolName);
     entry.status = 'success';
     entry.duration = Date.now() - startTime;
     await logActivity(entry);
+    void logRecord({
+      event: 'ext.tool.dispatch.complete',
+      toolName,
+      activityId: entry.id,
+      durationMs: entry.duration,
+    });
     return result;
   } catch (error: unknown) {
     entry.status = 'error';
     entry.duration = Date.now() - startTime;
     entry.errorCode = (error as { code?: string })?.code ?? 'CONTENT_UNAVAILABLE';
     await logActivity(entry);
+    void logError('ext.tool.dispatch.error', error, {
+      toolName,
+      activityId: entry.id,
+      durationMs: entry.duration,
+    });
     throw error;
   }
 };

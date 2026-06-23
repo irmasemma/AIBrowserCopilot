@@ -33,7 +33,7 @@ test.beforeAll(async () => {
     const timeout = setTimeout(() => reject(new Error('Native host startup timeout')), 15000);
     nativeHost.stderr?.on('data', (data: Buffer) => {
       const msg = data.toString();
-      const match = msg.match(/listening on 127\.0\.0\.1:(\d+)/);
+      const match = msg.match(/(?:listening on|Server started on) 127\.0\.0\.1:(\d+)/);
       if (match) {
         clearTimeout(timeout);
         resolve(parseInt(match[1], 10));
@@ -229,7 +229,7 @@ test('list_tabs returns real browser tabs via extension', async () => {
   });
 
   expect(tabs.length).toBeGreaterThanOrEqual(2);
-  const testTab = tabs.find((t: { title?: string }) => t.title === 'CoPilot Test Page');
+  const testTab = tabs.find((t: { title?: string }) => t.title === 'AgentHub Test Page');
   expect(testTab).toBeTruthy();
   console.log(`list_tabs: ${tabs.length} tabs, found test page`);
 
@@ -291,7 +291,7 @@ test('get_page_content via chrome.scripting.executeScript', async () => {
   const content = await extPage.evaluate(async () => {
     // Find the test page tab
     const tabs = await chrome.tabs.query({});
-    const testTab = tabs.find(t => t.title === 'CoPilot Test Page');
+    const testTab = tabs.find(t => t.title === 'AgentHub Test Page');
     if (!testTab?.id) return { error: 'Test page tab not found' };
 
     // Execute content script — exactly what get_page_content does
@@ -323,7 +323,7 @@ test('fill_form via chrome.scripting.executeScript', async () => {
 
   const result = await extPage.evaluate(async () => {
     const tabs = await chrome.tabs.query({});
-    const testTab = tabs.find(t => t.title === 'CoPilot Test Page');
+    const testTab = tabs.find(t => t.title === 'AgentHub Test Page');
     if (!testTab?.id) return { error: 'Test page tab not found' };
 
     const fields = [
@@ -374,7 +374,7 @@ test('extract_table via chrome.scripting.executeScript', async () => {
 
   const result = await extPage.evaluate(async () => {
     const tabs = await chrome.tabs.query({});
-    const testTab = tabs.find(t => t.title === 'CoPilot Test Page');
+    const testTab = tabs.find(t => t.title === 'AgentHub Test Page');
     if (!testTab?.id) return null;
 
     const results = await chrome.scripting.executeScript({
@@ -451,7 +451,7 @@ test('extension reconnects after native host restart', async () => {
     const timeout = setTimeout(() => reject(new Error('Restart timeout')), 15000);
     nativeHost.stderr?.on('data', (data: Buffer) => {
       const msg = data.toString();
-      const match = msg.match(/listening on 127\.0\.0\.1:(\d+)/);
+      const match = msg.match(/(?:listening on|Server started on) 127\.0\.0\.1:(\d+)/);
       if (match) {
         clearTimeout(timeout);
         resolve(parseInt(match[1], 10));

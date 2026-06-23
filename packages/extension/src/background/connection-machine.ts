@@ -23,6 +23,7 @@ export function createInitialContext(): ConnectionContext {
     reconnectsThisSession: 0,
     diagnosticReason: null,
     lastVerifiedAt: 0,
+    versionStatus: null,
   };
 }
 
@@ -73,8 +74,13 @@ export function transition(ctx: ConnectionContext, event: ConnectionEvent): Conn
       return ctx;
 
     case 'reconnecting':
-      if (event.type === 'BACKOFF_EXPIRED')
+      if (event.type === 'BACKOFF_EXPIRED' || event.type === 'CONNECT' || event.type === 'AUTO_CONNECT')
         return { ...ctx, state: 'connecting' };
+      // Failsafe: a server_info-driven WS_OPEN can arrive while we're still in
+      // reconnecting (e.g. reconcile() opened a relay without dispatching
+      // BACKOFF_EXPIRED first). Accept the connection rather than getting stuck.
+      if (event.type === 'WS_OPEN')
+        return { ...ctx, state: 'connected', failureCount: 0, missedHeartbeats: 0 };
       if (event.type === 'DISCONNECT')
         return { ...ctx, state: 'disconnected' };
       return ctx;

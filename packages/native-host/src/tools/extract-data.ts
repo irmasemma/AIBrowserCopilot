@@ -11,9 +11,6 @@ export const extractData: ToolPlugin = {
     format: z.enum(['table', 'json']).default('table').describe('Output format (default: table)'),
     max_rows: z.number().default(100).describe('Maximum number of rows to extract (default: 100)'),
     include_links: z.boolean().default(false).describe('Include href URLs in extracted data'),
-    tab_id: z.number().optional().describe('Specific tab ID to target (defaults to active tab). The tab will be activated automatically.'),
-  },
-  async execute() {
-    return { content: [{ type: 'text' as const, text: '[Stub] extract_data: Not connected to browser.' }] };
+    tab_id: z.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.'),
   },
 };

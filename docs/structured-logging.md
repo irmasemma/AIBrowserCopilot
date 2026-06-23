@@ -1,0 +1,190 @@
+# Structured logging
+
+**Audience:** LLMs (Claude, Copilot, GPT) running on a user's Windows machine, asked to debug "why isn't MCP/the bridge working?" without DevTools access.
+
+**Promise:** Every meaningful event in the bridge ↔ extension ↔ helper ↔ MCP client chain is written as a single NDJSON line to a file under `%LOCALAPPDATA%\agenthub\logs\`. `grep -rn '<mcpId>' %LOCALAPPDATA%\agenthub\logs\*.log` reveals the full call chain across all three components.
+
+## File layout
+
+```
+%LOCALAPPDATA%\agenthub\
+  ├─ server.lock                   ← bridge PID/port (existing)
+  ├─ logs-config.json              ← OPTIONAL privacy toggle
+  ├─ bridge.log.legacy             ← migrated pre-0.5.6 log (one-time)
+  └─ logs\
+      ├─ bridge.log                ← current bridge events
+      ├─ bridge.log.1..4           ← rotated (oldest dropped)
+      ├─ extension.log             ← extension events (forwarded via WS)
+      ├─ extension.log.1..4
+      ├─ helper.log                ← native-messaging helper invocations
+      └─ helper.log.1..4
+```
+
+## NDJSON line shape
+
+```json
+{"t":"2026-06-09T14:30:12.345Z","src":"bridge","lvl":"info","pid":16196,"event":"bridge.mcp.tools_call.received","mcpId":1,"clientId":"a1b2","toolName":"take_screenshot"}
+```
+
+Required fields: `t`, `src` (`bridge|ext|helper`), `lvl` (`info|warn|error`), `pid` (`null` for ext), `event` (kebab-case).
+
+## Correlation IDs
+
+| Field | Purpose |
+|---|---|
+| `mcpId` | JSON-RPC message id from the MCP client |
+| `clientId` | Bridge-assigned UUID per MCP client connection |
+| `browserBoundId` | Bridge-assigned `b_<uuid>` per outgoing tool_request (= extension's `requestId`) |
+| `browserId` | Composite `chrome:<uuid>` of the routed extension |
+| `toolName` | E.g. `take_screenshot`, `click`, `list_tabs` |
+| `durationMs` | Set on completion events |
+
+The chain for one tool call:
+
+```
+bridge.log:  bridge.mcp.tools_call.received  (mcpId, clientId, toolName)
+bridge.log:  bridge.tool_request.sent        (mcpId, browserBoundId, browserId, toolName)
+extension.log: ext.tool_request.received     (requestId, tool)
+extension.log: ext.tool.dispatch.start       (toolName, activityId)
+extension.log: ext.tool.dispatch.complete    (toolName, durationMs)
+bridge.log:  bridge.tool_response.received   (mcpId, browserBoundId, durationMs)
+bridge.log:  bridge.mcp.tools_call.replied   (mcpId, clientId, toolName, durationMs, isError)
+```
+
+If any step is missing, that's where the failure is.
+
+## Rotation
+
+- Threshold: **1 MB** per file
+- Keep: **5 generations** (`.log` + `.log.1`..`.log.4`)
+- Strategy: open/write/close per call (no held handle — needed for Windows rename)
+- EPERM/EBUSY on rotate: skip cycle, retry next write
+
+## Redaction (always on)
+
+| Pattern | What it becomes |
+|---|---|
+| Field named `url`, `href`, `targetUrl`, … | `https://example.com/[redacted]` (scheme + host kept) |
+| Field named `value`, `text`, `body`, `content`, `snapshot`, … | `[len=N]` |
+| Field named `cookie`, `token`, `apiKey`, `password`, … | `[REDACTED-SECRET]` (no length leak) |
+| String > 200 chars | `[len=N]` |
+| JWT-shaped string | `[REDACTED-JWT]` |
+| URL inside a longer string (error messages, stack traces) | URL portion replaced; rest preserved |
+
+Errors are normalized: `errorName` + redacted `errorMessage` + 20-line stack with embedded URLs redacted.
+
+The bridge **never** logs full page text, form values, cookies, headers, or user credentials. The "what" (event name + IDs) is preserved; the "what was IN it" is not.
+
+## Privacy toggle
+
+Drop a file at `%LOCALAPPDATA%\agenthub\logs-config.json`:
+
+```json
+{ "enabled": false }
+```
+
+Effect:
+- Bridge: writes nothing to `bridge.log` or `extension.log`
+- Helper: writes nothing to `helper.log`
+- Extension: stops buffering in-memory; existing buffer is wiped
+
+Change requires restarting the bridge for new connections. The default (file absent) is **enabled = true** — the goal of this work is debuggability, so opt-in privacy.
+
+## Remote sink (opt-in)
+
+Beyond the local files, the bridge can **ship records to a remote ingest
+endpoint** (a Vercel function backed by Neon Postgres) so you can troubleshoot a
+user's machine without asking for their log files. It's off by default.
+
+- Implementation: `packages/native-host/src/remote-sink.ts` tees off the same
+  `logRecord()` funnel — so remote records are the SAME already-redacted lines
+  the local files get, and the `enabled:false` master switch disables remote too.
+- It captures `bridge` AND `ext` records (extension logs arrive over WS and pass
+  through the same `logRecord()` in the bridge).
+- Transport: batched, fire-and-forget over `node:https` (no `fetch` dependency),
+  bounded buffer, drops on failure. Never blocks or crashes the bridge.
+- Enable per machine by adding a `remote` block to `logs-config.json` (see below).
+- Server + Neon schema + setup steps: `packages/log-ingest/` (its README).
+
+**Default-on for shipped binaries (build-time injection).** A real packaged
+install (`process.pkg`) ships to Neon **by default** — no per-machine config
+needed. The endpoint + append-only ingest key are injected into the binary at
+**build time** by `scripts/build-bundle.mjs` (esbuild `define`), fed from env:
+
+```
+AGENTHUB_INGEST_ENDPOINT=https://<app>.vercel.app/api/logs \
+AGENTHUB_INGEST_KEY=<INGEST_KEY> \
+  npm run compile:win -w packages/native-host
+```
+
+The secret is **never in source or git** — it only lands in the compiled
+`bin/bundle.cjs` (gitignored) and the distributed binary. A build **without**
+those env vars produces a binary with no default (remote off) — so dev builds
+and the `node dist/index.js` bridge used by tests never ship to production Neon
+unless a `logs-config.json` opts them in. Precedence: master `enabled:false` →
+explicit `remote.enabled:false` → explicit file creds → baked-in default
+(packaged only). Users can always opt out via either kill-switch.
+
+#### Rolling default-on shipping out to all users
+
+It's the bridge **binary** that ships (the extension's logs ride through it),
+delivered to users via the installer downloading a GitHub release. So shipping
+turns on for a client only when ALL of these are done — not from a `git pull`,
+`npm run dev`, or a Chrome Web Store extension update:
+
+1. **Add the two GitHub repo secrets** (one-time):
+   ```
+   gh secret set AGENTHUB_INGEST_ENDPOINT --repo irmasemma/AIBrowserCopilot --body "https://<app>.vercel.app/api/logs"
+   gh secret set AGENTHUB_INGEST_KEY      --repo irmasemma/AIBrowserCopilot --body "<INGEST_KEY>"
+   ```
+   `.github/workflows/release.yml` passes them into the native-host compile.
+   Without them, CI builds remote-OFF binaries.
+2. **Cut a release** — push a `v*` tag → CI builds the keyed binaries and
+   dual-publishes to the releases repos (needs `PAT_RELEASES_PUBLIC`).
+3. **Publish the installer to npm** — `cd packages/installer && npm publish`
+   (otherwise `npx agenthub-setup@latest` serves the old version).
+4. **Users install/update** — `npx agenthub-setup@latest` pulls the new keyed
+   binary. **Existing installs keep their old binary and do NOT ship until
+   updated.** Delivery is best-effort; opt-outs still apply.
+
+⚠️ Do **not** `git commit packages/native-host/bin/agenthub-*.exe` after a keyed
+build — it embeds the key (fine for *distribution*, not for the repo). `bundle.cjs`
+is already gitignored for this reason; consider untracking the `.exe` too.
+
+```json
+{
+  "enabled": true,
+  "remote": {
+    "enabled": true,
+    "endpoint": "https://YOUR-APP.vercel.app/api/logs",
+    "apiKey": "<INGEST_KEY>"
+  }
+}
+```
+
+Records correlate by a per-install `install-id` (a random UUID persisted at
+`<installDir>/install-id` — identifies an install, not a person).
+
+## How a future LLM debugs from logs
+
+1. **"MCP timed out"** — search bridge.log for `bridge.tool_request.timed_out`. Check if `bridge.tool_response.received` ever fired with the same `browserBoundId`. If not: extension dropped it. Look in `extension.log` for `ext.tool_request.received` with that `requestId` — present means SW got it, dispatch failed; absent means SW didn't get it (WS dead or SW evicted).
+
+2. **"Extension shows disconnected but bridge alive"** — search bridge.log for `bridge.browser.disconnected`. Compare against extension.log `ext.ws.close`. If close codes disagree, the SW thinks it's connected but the bridge dropped it (heartbeat path).
+
+3. **"Service won't start"** — helper.log shows `helper.invoke.received action=start_native_host` followed by `.replied ok=false errorMessage=...`. Reason is right there.
+
+4. **"Wrong browser profile got the tool call"** — bridge.log `bridge.mcp.tools_call.received` has `routeSource` (`tab_id_prefix | explicit_browser_param | default`) and `targetBrowserId`. Compare against `bridge.browser.connected` entries to see what was registered when.
+
+5. **"SW was alive but unresponsive"** — extension.log will have an `ext.heartbeat.miss` followed by `ext.heartbeat.dead`. Bridge.log will show `bridge.tool_request.timed_out` around the same time. If only bridge logs and no extension logs at all, SW was completely dead (no chance to flush — see `bridge-architecture.md` for the SW liveness failure modes).
+
+## What's NOT logged
+
+- Page content (intentional — see redaction)
+- Tab focus / window changes (irrelevant to MCP debugging)
+- `server_ping` / `server_pong` heartbeats (would dominate the file)
+- `chrome.runtime.lastError` strings that didn't lead to a real failure
+- SW startup-side errors that fire before the ring buffer becomes available (those still live only in `chrome://extensions/` Errors)
+
+## What `%LOCALAPPDATA%\agenthub\logs\` looks like under load
+
+A typical 5-minute tool-heavy session: ~200 KB of bridge.log, ~150 KB of extension.log, ~20 KB of helper.log. Well under the 1 MB rotation threshold. Heavy users (continuous agent runs over hours) hit rotation; we keep the last 5 MB.

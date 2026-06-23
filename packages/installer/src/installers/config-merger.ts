@@ -179,7 +179,7 @@ export const verifyWrite = (filePath: string): void => {
  * rewrites the file and silently drops our entry. After mergeConfig, callers
  * should verify the specific entry they wrote is still there.
  *
- * Example: verifyEntryAtPath('/.../.claude.json', ['mcpServers', 'ai-browser-copilot'])
+ * Example: verifyEntryAtPath('/.../.claude.json', ['mcpServers', 'agenthub'])
  */
 export const verifyEntryAtPath = (filePath: string, jsonPath: string[]): boolean => {
   if (!existsSync(filePath)) return false;

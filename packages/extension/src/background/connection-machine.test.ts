@@ -166,8 +166,20 @@ describe('reconnecting', () => {
     expect(result.state).toBe('disconnected');
   });
 
+  it('CONNECT / AUTO_CONNECT -> connecting (reconcile/manual retry path)', () => {
+    expect(transition(base, { type: 'CONNECT' }).state).toBe('connecting');
+    expect(transition(base, { type: 'AUTO_CONNECT' }).state).toBe('connecting');
+  });
+
+  it('WS_OPEN -> connected (failsafe when relay opens during reconnecting)', () => {
+    const result = transition(base, { type: 'WS_OPEN' });
+    expect(result.state).toBe('connected');
+    expect(result.failureCount).toBe(0);
+    expect(result.missedHeartbeats).toBe(0);
+  });
+
   it('ignores invalid events', () => {
-    const events: ConnectionEvent['type'][] = ['WS_OPEN', 'HEARTBEAT_OK', 'CONNECT'];
+    const events: ConnectionEvent['type'][] = ['HEARTBEAT_OK', 'WS_ERROR', 'WS_CLOSE'];
     for (const type of events) {
       expect(transition(base, { type } as ConnectionEvent)).toBe(base);
     }

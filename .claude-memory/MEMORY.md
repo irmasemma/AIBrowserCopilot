@@ -1,0 +1,13 @@
+- [User Profile](user_profile.md) — Solo developer, Chrome extension expertise, income-focused
+- [Project: Pilotwave](project_ai_browser_copilot.md) — Connection redesign 15/18 stories done, 435 tests, 4 packages, multi-browser
+- [BMAD Method Setup](reference_bmad_setup.md) — BMM module installed, all agents available
+- [Feedback: Speed & Quality](feedback_speed.md) — Fast iteration, real tests, don't stop mid-fix, switch tools fast
+- [Feedback: Verify Before Done](feedback_verify_before_done.md) — Build, run, and verify working before marking story done
+- [Feedback: Test E2E Before Closing](feedback_test_e2e_before_closing.md) — Unit tests can't catch Chrome API behavior, test real flow
+- [GitHub & CLI](reference_github.md) — irmasemma/AIBrowserCopilot, gh CLI at Program Files
+- [Feedback: Natural MCP Usage](feedback_natural_mcp.md) — Tool descriptions must trigger from natural language, not just technical names
+- [Feedback: Reuse Existing](feedback_reuse_existing.md) — Check existing deps (playwright-crx, etc.) before building custom
+- [Connection Overhaul Plan](project_connection_overhaul.md) — Active: simplify connection, remove circuit breaker, replace 54 mock tests with real integration tests
+- [Chat Tab — Phased Build Plan + Strategic Pivot](project_chat_tab_phases.md) — Chat-first product direction. Phase 1 shipped 2026-04-29 (gpt-4o-mini locked); Phase 1.5 multi-provider deferred; Phase 2 free-tier proxy is next monetization unlock.
+- [browsermcp vs CoPilot Comparison](project_browsermcp_comparison.md) — browsermcp wins first-time setup; CoPilot wins day-2 reliability. Don't compete on MCP UX — pivot to chat-first.
+- [Feedback: Check, Don't Guess](feedback_check_dont_guess.md) — When asked "is X registered?", actually inspect disk/registry/process — don't infer from codebase.

@@ -16,7 +16,7 @@ export const isCommandAvailable = (command: string, platform: PlatformInfo): boo
 };
 
 /**
- * Check if a JSON config file has an existing `ai-browser-copilot` MCP entry.
+ * Check if a JSON config file has an existing `agenthub` MCP entry.
  * Supports both `mcpServers` (Claude) and `mcp.servers` (VS Code/Cursor) formats.
  */
 export const hasExistingMcpEntry = (configPath: string): boolean => {
@@ -26,10 +26,10 @@ export const hasExistingMcpEntry = (configPath: string): boolean => {
     const content = JSON.parse(readFileSync(configPath, 'utf-8'));
 
     // Check Claude format: mcpServers
-    if (content.mcpServers?.['ai-browser-copilot']) return true;
+    if (content.mcpServers?.['agenthub']) return true;
 
     // Check VS Code/Cursor format: mcp.servers
-    if (content.mcp?.servers?.['ai-browser-copilot']) return true;
+    if (content.mcp?.servers?.['agenthub']) return true;
 
     return false;
   } catch {

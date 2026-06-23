@@ -89,7 +89,7 @@ describe('getInstallDir', () => {
 
     const platform = detectPlatform('win32', 'x64', 'C:\\Users\\test');
     const dir = getInstallDir(platform);
-    expect(dir).toBe('C:\\Users\\test\\AppData\\Local\\ai-browser-copilot');
+    expect(dir).toBe('C:\\Users\\test\\AppData\\Local\\agenthub');
 
     if (original !== undefined) {
       process.env['LOCALAPPDATA'] = original;
@@ -99,13 +99,13 @@ describe('getInstallDir', () => {
   it('returns macOS install dir', () => {
     const platform = detectPlatform('darwin', 'arm64', '/Users/test');
     const dir = getInstallDir(platform);
-    expect(dir).toBe(join('/Users/test', 'Library', 'Application Support', 'ai-browser-copilot'));
+    expect(dir).toBe(join('/Users/test', 'Library', 'Application Support', 'agenthub'));
   });
 
   it('returns Linux install dir', () => {
     const platform = detectPlatform('linux', 'x64', '/home/test');
     const dir = getInstallDir(platform);
-    expect(dir).toBe(join('/home/test', '.local', 'share', 'ai-browser-copilot'));
+    expect(dir).toBe(join('/home/test', '.local', 'share', 'agenthub'));
   });
 
   it('throws for unsupported platform', () => {

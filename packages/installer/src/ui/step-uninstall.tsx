@@ -16,7 +16,7 @@ export const StepUninstall: React.FC<Props> = ({ status, result, errorMessage })
       <Text bold>🗑  Uninstall</Text>
 
       {status === 'removing' && (
-        <Text color="yellow">  ⏳ Removing AI Browser CoPilot...</Text>
+        <Text color="yellow">  ⏳ Removing AgentHub...</Text>
       )}
 
       {status === 'complete' && result && (

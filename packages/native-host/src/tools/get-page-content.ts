@@ -6,11 +6,7 @@ export const getPageContent: ToolPlugin = {
   description: 'Read the text or HTML content of the web page the user is currently viewing in their browser. Use this when the user asks about what is on their screen, current tab, or current page.',
   tier: 'free',
   inputSchema: {
-    url: z.string().optional().describe('Target URL (defaults to active tab)'),
     format: z.enum(['text', 'html']).default('text').describe('Output format'),
-    tab_id: z.number().optional().describe('Specific tab ID to target (defaults to active tab). The tab will be activated automatically.'),
-  },
-  async execute() {
-    return { content: [{ type: 'text' as const, text: '[Stub] get_page_content: Not connected to browser. Browser bridge will be added in Story 1.3.' }] };
+    tab_id: z.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.'),
   },
 };

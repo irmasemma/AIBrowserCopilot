@@ -52,7 +52,7 @@ export const claudeDesktopDetector: ToolDetector = {
     const configPath = getConfigPath(platform);
     return mergeConfig(configPath, {
       mcpServers: {
-        'ai-browser-copilot': {
+        'agenthub': {
           command: binaryPath,
           args: [],
         },
@@ -61,6 +61,6 @@ export const claudeDesktopDetector: ToolDetector = {
   },
 
   async verifyConfig(platform: PlatformInfo): Promise<boolean> {
-    return verifyEntryAtPath(getConfigPath(platform), ['mcpServers', 'ai-browser-copilot']);
+    return verifyEntryAtPath(getConfigPath(platform), ['mcpServers', 'agenthub']);
   },
 };

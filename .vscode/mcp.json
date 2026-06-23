@@ -1,10 +1,12 @@
 {
   "mcpServers": {
-    "ai-browser-copilot": {
-      "command": "node",
-      "args": [
-        "C:/Dev/1M/ai-browser-copilot/packages/native-host/dist/index.js"
-      ]
+    "agenthub": {
+      "command": "${env:LOCALAPPDATA}/agenthub/agenthub-win-x64.exe",
+      "args": []
+    },
+    "browsermcp": {
+      "command": "npx",
+      "args": ["@browsermcp/mcp@latest"]
     }
   }
 }

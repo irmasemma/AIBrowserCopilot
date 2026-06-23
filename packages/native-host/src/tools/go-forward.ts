@@ -7,9 +7,6 @@ export const goForward: ToolPlugin = {
   tier: 'pro',
   inputSchema: {
     wait_until: z.enum(['load', 'domcontentloaded']).optional().default('domcontentloaded').describe('When to consider navigation complete. Default: "domcontentloaded".'),
-    tab_id: z.number().optional().describe('Specific tab ID (defaults to active tab)'),
-  },
-  async execute() {
-    return { content: [{ type: 'text' as const, text: '[Stub] go_forward: Not connected to browser.' }] };
+    tab_id: z.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.'),
   },
 };

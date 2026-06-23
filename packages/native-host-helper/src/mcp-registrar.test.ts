@@ -2,15 +2,19 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { writeFileSync, readFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { checkClaudeCodeRegistration, repairClaudeCodeRegistration } from './mcp-registrar.js';
+// The static import below is intentionally absent: every test uses
+// `await import('./mcp-registrar.js')` AFTER vi.resetModules() in
+// beforeEach, so each test sees a fresh module instance with env-derived
+// paths captured at import time. A static import would pin the wrong
+// paths and never re-resolve.
 
 const fakeHome = join(tmpdir(), `mcp-registrar-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-const fakeInstallDir = join(fakeHome, 'AppData', 'Local', 'ai-browser-copilot');
+const fakeInstallDir = join(fakeHome, 'AppData', 'Local', 'agenthub');
 const fakeBinaryName = process.platform === 'win32'
-  ? `ai-browser-copilot-win-${process.arch === 'arm64' ? 'arm64' : 'x64'}.exe`
+  ? `agenthub-win-${process.arch === 'arm64' ? 'arm64' : 'x64'}.exe`
   : process.platform === 'darwin'
-    ? `ai-browser-copilot-macos-${process.arch === 'arm64' ? 'arm64' : 'x64'}`
-    : `ai-browser-copilot-linux-${process.arch === 'arm64' ? 'arm64' : 'x64'}`;
+    ? `agenthub-macos-${process.arch === 'arm64' ? 'arm64' : 'x64'}`
+    : `agenthub-linux-${process.arch === 'arm64' ? 'arm64' : 'x64'}`;
 const fakeBinaryPath = join(fakeInstallDir, fakeBinaryName);
 const configPath = join(fakeHome, '.claude.json');
 
@@ -45,7 +49,7 @@ describe('mcp-registrar', () => {
   });
 
   it('reports unregistered when ~/.claude.json does not exist', async () => {
-    const { checkClaudeCodeRegistration: check } = await import('./mcp-registrar.js?fresh1');
+    const { checkClaudeCodeRegistration: check } = await import('./mcp-registrar.js');
     const result = check();
     expect(result.configExists).toBe(false);
     expect(result.registered).toBe(false);
@@ -55,9 +59,9 @@ describe('mcp-registrar', () => {
   it('detects user-scope registration', async () => {
     writeFileSync(
       configPath,
-      JSON.stringify({ mcpServers: { 'ai-browser-copilot': { command: '/path/to/exe', args: [] } } }),
+      JSON.stringify({ mcpServers: { 'agenthub': { command: '/path/to/exe', args: [] } } }),
     );
-    const { checkClaudeCodeRegistration: check } = await import('./mcp-registrar.js?fresh2');
+    const { checkClaudeCodeRegistration: check } = await import('./mcp-registrar.js');
     const result = check();
     expect(result.registered).toBe(true);
     expect(result.scope).toBe('user');
@@ -70,19 +74,19 @@ describe('mcp-registrar', () => {
         mcpServers: {},
         projects: {
           '/some/project': {
-            mcpServers: { 'ai-browser-copilot': { command: '/path/to/exe', args: [] } },
+            mcpServers: { 'agenthub': { command: '/path/to/exe', args: [] } },
           },
         },
       }),
     );
-    const { checkClaudeCodeRegistration: check } = await import('./mcp-registrar.js?fresh3');
+    const { checkClaudeCodeRegistration: check } = await import('./mcp-registrar.js');
     const result = check();
     expect(result.registered).toBe(true);
     expect(result.scope).toBe('project');
   });
 
   it('repair fails with helpful error when binary is missing', async () => {
-    const { repairClaudeCodeRegistration: repair } = await import('./mcp-registrar.js?fresh4');
+    const { repairClaudeCodeRegistration: repair } = await import('./mcp-registrar.js');
     const result = repair();
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/Native host binary not found/);
@@ -92,7 +96,7 @@ describe('mcp-registrar', () => {
     writeFileSync(fakeBinaryPath, ''); // create the fake binary
     writeFileSync(configPath, JSON.stringify({ otherKey: 'preserved', mcpServers: { existing: { command: 'foo' } } }, null, 2) + '\n');
 
-    const { repairClaudeCodeRegistration: repair } = await import('./mcp-registrar.js?fresh5');
+    const { repairClaudeCodeRegistration: repair } = await import('./mcp-registrar.js');
     const result = repair();
 
     expect(result.success).toBe(true);
@@ -104,14 +108,14 @@ describe('mcp-registrar', () => {
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
     expect(written.otherKey).toBe('preserved'); // sibling keys untouched
     expect(written.mcpServers.existing).toBeDefined(); // sibling mcp entries untouched
-    expect(written.mcpServers['ai-browser-copilot'].command).toBe(fakeBinaryPath);
-    expect(written.mcpServers['ai-browser-copilot'].args).toEqual([]);
+    expect(written.mcpServers['agenthub'].command).toBe(fakeBinaryPath);
+    expect(written.mcpServers['agenthub'].args).toEqual([]);
   });
 
   it('repair refuses to overwrite malformed JSON', async () => {
     writeFileSync(fakeBinaryPath, '');
     writeFileSync(configPath, '{not valid json');
-    const { repairClaudeCodeRegistration: repair } = await import('./mcp-registrar.js?fresh6');
+    const { repairClaudeCodeRegistration: repair } = await import('./mcp-registrar.js');
     const result = repair();
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/not valid JSON/i);
@@ -119,11 +123,11 @@ describe('mcp-registrar', () => {
 
   it('repair creates the file when ~/.claude.json does not yet exist', async () => {
     writeFileSync(fakeBinaryPath, '');
-    const { repairClaudeCodeRegistration: repair } = await import('./mcp-registrar.js?fresh7');
+    const { repairClaudeCodeRegistration: repair } = await import('./mcp-registrar.js');
     const result = repair();
     expect(result.success).toBe(true);
     expect(existsSync(configPath)).toBe(true);
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(written.mcpServers['ai-browser-copilot'].command).toBe(fakeBinaryPath);
+    expect(written.mcpServers['agenthub'].command).toBe(fakeBinaryPath);
   });
 });

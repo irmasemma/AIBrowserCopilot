@@ -21,21 +21,28 @@ const main = (): void => {
   const cli = meow(
     `
     Usage
-      $ ai-browser-copilot-setup
+      $ agenthub-setup
 
     Options
       --yes          Skip confirmation prompts
       --tools        Comma-separated list of AI tools to configure
       --update       Update existing installation
       --uninstall    Remove installation and configs
-      --extension-id Chrome extension ID (for development)
+      --extension-id Chrome extension ID. If omitted, the installer tries to
+                     auto-detect it from your installed browsers; with --yes and
+                     exactly one match it is used automatically, otherwise the
+                     detected ID is suggested for you to confirm.
+      --from-local   Install from a local folder instead of GitHub releases.
+                     Accepts either a folder containing the binaries directly
+                     or the project root (looks in packages/*/bin/).
 
     Examples
-      $ ai-browser-copilot-setup
-      $ ai-browser-copilot-setup --yes
-      $ ai-browser-copilot-setup --tools vscode,cursor
-      $ ai-browser-copilot-setup --update
-      $ ai-browser-copilot-setup --uninstall
+      $ agenthub-setup
+      $ agenthub-setup --yes
+      $ agenthub-setup --tools vscode,cursor
+      $ agenthub-setup --update
+      $ agenthub-setup --uninstall
+      $ agenthub-setup --from-local . --extension-id <id>
   `,
     {
       importMeta: import.meta,
@@ -45,6 +52,7 @@ const main = (): void => {
         update: { type: 'boolean', default: false },
         uninstall: { type: 'boolean', default: false },
         extensionId: { type: 'string' },
+        fromLocal: { type: 'string' },
       },
     },
   );

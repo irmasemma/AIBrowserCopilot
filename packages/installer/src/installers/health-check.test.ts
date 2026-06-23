@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { checkBinaryHealth } from './health-check.js';
 import { detectPlatform } from '../shared/platform.js';
 
-const TEST_DIR = join(tmpdir(), `copilot-health-test-${Date.now()}`);
+const TEST_DIR = join(tmpdir(), `agenthub-health-test-${Date.now()}`);
 
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });
@@ -18,11 +18,11 @@ afterEach(() => {
 describe('checkBinaryHealth', () => {
   it('returns healthy when binary exists and is readable', () => {
     const platform = detectPlatform('win32', 'x64', 'C:\\Users\\test');
-    writeFileSync(join(TEST_DIR, 'ai-browser-copilot-win-x64.exe'), 'fake-binary');
+    writeFileSync(join(TEST_DIR, 'agenthub-win-x64.exe'), 'fake-binary');
 
     const result = checkBinaryHealth(TEST_DIR, platform);
     expect(result.healthy).toBe(true);
-    expect(result.binaryPath).toContain('ai-browser-copilot-win-x64.exe');
+    expect(result.binaryPath).toContain('agenthub-win-x64.exe');
     expect(result.error).toBeUndefined();
   });
 
@@ -44,20 +44,20 @@ describe('checkBinaryHealth', () => {
 
   it('returns correct binary path for macOS arm64', () => {
     const platform = detectPlatform('darwin', 'arm64', '/Users/test');
-    writeFileSync(join(TEST_DIR, 'ai-browser-copilot-macos-arm64'), 'fake-binary');
+    writeFileSync(join(TEST_DIR, 'agenthub-macos-arm64'), 'fake-binary');
 
     const result = checkBinaryHealth(TEST_DIR, platform);
     expect(result.healthy).toBe(true);
-    expect(result.binaryPath).toContain('ai-browser-copilot-macos-arm64');
+    expect(result.binaryPath).toContain('agenthub-macos-arm64');
   });
 
   it('returns correct binary path for Linux x64', () => {
     const platform = detectPlatform('linux', 'x64', '/home/test');
-    writeFileSync(join(TEST_DIR, 'ai-browser-copilot-linux-x64'), 'fake-binary');
+    writeFileSync(join(TEST_DIR, 'agenthub-linux-x64'), 'fake-binary');
 
     const result = checkBinaryHealth(TEST_DIR, platform);
     expect(result.healthy).toBe(true);
-    expect(result.binaryPath).toContain('ai-browser-copilot-linux-x64');
+    expect(result.binaryPath).toContain('agenthub-linux-x64');
   });
 
   it('includes binary path in unhealthy result', () => {
@@ -65,6 +65,6 @@ describe('checkBinaryHealth', () => {
 
     const result = checkBinaryHealth(TEST_DIR, platform);
     expect(result.healthy).toBe(false);
-    expect(result.binaryPath).toContain('ai-browser-copilot-win-x64.exe');
+    expect(result.binaryPath).toContain('agenthub-win-x64.exe');
   });
 });

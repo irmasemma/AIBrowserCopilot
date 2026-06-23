@@ -11,7 +11,7 @@ import {
   removeConfigEntry,
 } from './config-merger.js';
 
-const TEST_DIR = join(tmpdir(), `copilot-merger-test-${Date.now()}`);
+const TEST_DIR = join(tmpdir(), `agenthub-merger-test-${Date.now()}`);
 
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });
@@ -88,14 +88,14 @@ describe('deepMerge', () => {
     };
     const source = {
       mcpServers: {
-        'ai-browser-copilot': { command: 'new-binary' },
+        'agenthub': { command: 'new-binary' },
       },
     };
     const result = deepMerge(target, source);
     expect(result).toEqual({
       mcpServers: {
         existingTool: { command: 'existing' },
-        'ai-browser-copilot': { command: 'new-binary' },
+        'agenthub': { command: 'new-binary' },
       },
     });
   });
@@ -147,7 +147,7 @@ describe('mergeConfig', () => {
     const filePath = join(TEST_DIR, 'existing.json');
     writeFileSync(filePath, JSON.stringify({ existing: true, mcpServers: { tool1: {} } }, null, 2) + '\n');
 
-    const result = mergeConfig(filePath, { mcpServers: { 'ai-browser-copilot': { command: 'test' } } });
+    const result = mergeConfig(filePath, { mcpServers: { 'agenthub': { command: 'test' } } });
 
     expect(result.success).toBe(true);
     expect(result.action).toBe('merged');
@@ -156,7 +156,7 @@ describe('mergeConfig', () => {
     const written = JSON.parse(readFileSync(filePath, 'utf-8'));
     expect(written.existing).toBe(true);
     expect(written.mcpServers.tool1).toEqual({});
-    expect(written.mcpServers['ai-browser-copilot']).toEqual({ command: 'test' });
+    expect(written.mcpServers['agenthub']).toEqual({ command: 'test' });
   });
 
   it('creates backup before merging', () => {
@@ -269,7 +269,7 @@ describe('integration: full merge flow', () => {
 
     const result = mergeConfig(filePath, {
       mcpServers: {
-        'ai-browser-copilot': { command: 'C:\\path\\to\\binary.exe', args: [] },
+        'agenthub': { command: 'C:\\path\\to\\binary.exe', args: [] },
       },
     });
 
@@ -277,9 +277,9 @@ describe('integration: full merge flow', () => {
     expect(result.action).toBe('merged');
 
     const written = JSON.parse(readFileSync(filePath, 'utf-8'));
-    expect(Object.keys(written.mcpServers)).toEqual(['filesystem', 'github', 'ai-browser-copilot']);
+    expect(Object.keys(written.mcpServers)).toEqual(['filesystem', 'github', 'agenthub']);
     expect(written.mcpServers.filesystem.command).toBe('npx');
-    expect(written.mcpServers['ai-browser-copilot'].command).toBe('C:\\path\\to\\binary.exe');
+    expect(written.mcpServers['agenthub'].command).toBe('C:\\path\\to\\binary.exe');
   });
 
   it('merge then remove roundtrip', () => {
@@ -289,16 +289,16 @@ describe('integration: full merge flow', () => {
     }, null, 2) + '\n');
 
     // Merge
-    mergeConfig(filePath, { mcpServers: { 'ai-browser-copilot': { command: '/binary' } } });
+    mergeConfig(filePath, { mcpServers: { 'agenthub': { command: '/binary' } } });
     let content = JSON.parse(readFileSync(filePath, 'utf-8'));
-    expect(content.mcpServers['ai-browser-copilot']).toBeDefined();
+    expect(content.mcpServers['agenthub']).toBeDefined();
     expect(content.mcpServers.existing).toBeDefined();
 
     // Remove
-    const result = removeConfigEntry(filePath, 'ai-browser-copilot');
+    const result = removeConfigEntry(filePath, 'agenthub');
     expect(result.success).toBe(true);
     content = JSON.parse(readFileSync(filePath, 'utf-8'));
-    expect(content.mcpServers['ai-browser-copilot']).toBeUndefined();
+    expect(content.mcpServers['agenthub']).toBeUndefined();
     expect(content.mcpServers.existing.command).toBe('test');
   });
 
@@ -320,7 +320,7 @@ describe('integration: full merge flow', () => {
     const result = mergeConfig(filePath, {
       mcp: {
         servers: {
-          'ai-browser-copilot': { command: '/path/to/binary', args: [] },
+          'agenthub': { command: '/path/to/binary', args: [] },
         },
       },
     });
@@ -330,7 +330,7 @@ describe('integration: full merge flow', () => {
     expect(written['editor.fontSize']).toBe(14);
     expect(written['workbench.colorTheme']).toBe('One Dark Pro');
     expect(Object.keys(written).length).toBe(Object.keys(existingSettings).length + 1); // +1 for mcp
-    expect(written.mcp.servers['ai-browser-copilot'].command).toBe('/path/to/binary');
+    expect(written.mcp.servers['agenthub'].command).toBe('/path/to/binary');
 
     // Verify 4-space indent preserved
     const content = readFileSync(filePath, 'utf-8');
@@ -344,17 +344,17 @@ describe('removeConfigEntry', () => {
     writeFileSync(filePath, JSON.stringify({
       theme: 'dark',
       mcpServers: {
-        'ai-browser-copilot': { command: '/binary', args: [] },
+        'agenthub': { command: '/binary', args: [] },
         filesystem: { command: 'npx' },
       },
     }, null, 2) + '\n');
 
-    const result = removeConfigEntry(filePath, 'ai-browser-copilot');
+    const result = removeConfigEntry(filePath, 'agenthub');
     expect(result.success).toBe(true);
     expect(result.backupPath).toBeDefined();
 
     const content = JSON.parse(readFileSync(filePath, 'utf-8'));
-    expect(content.mcpServers['ai-browser-copilot']).toBeUndefined();
+    expect(content.mcpServers['agenthub']).toBeUndefined();
     expect(content.mcpServers.filesystem).toBeDefined();
     expect(content.theme).toBe('dark');
   });
@@ -365,23 +365,23 @@ describe('removeConfigEntry', () => {
       'editor.fontSize': 14,
       mcp: {
         servers: {
-          'ai-browser-copilot': { command: '/binary' },
+          'agenthub': { command: '/binary' },
           'other-tool': { command: 'other' },
         },
       },
     }, null, 2) + '\n');
 
-    const result = removeConfigEntry(filePath, 'ai-browser-copilot');
+    const result = removeConfigEntry(filePath, 'agenthub');
     expect(result.success).toBe(true);
 
     const content = JSON.parse(readFileSync(filePath, 'utf-8'));
-    expect(content.mcp.servers['ai-browser-copilot']).toBeUndefined();
+    expect(content.mcp.servers['agenthub']).toBeUndefined();
     expect(content.mcp.servers['other-tool']).toBeDefined();
     expect(content['editor.fontSize']).toBe(14);
   });
 
   it('succeeds when file does not exist', () => {
-    const result = removeConfigEntry(join(TEST_DIR, 'nonexistent.json'), 'ai-browser-copilot');
+    const result = removeConfigEntry(join(TEST_DIR, 'nonexistent.json'), 'agenthub');
     expect(result.success).toBe(true);
     expect(result.backupPath).toBeUndefined();
   });
@@ -390,7 +390,7 @@ describe('removeConfigEntry', () => {
     const filePath = join(TEST_DIR, 'no-entry.json');
     writeFileSync(filePath, JSON.stringify({ mcpServers: { other: {} } }, null, 2));
 
-    const result = removeConfigEntry(filePath, 'ai-browser-copilot');
+    const result = removeConfigEntry(filePath, 'agenthub');
     expect(result.success).toBe(true);
     expect(result.backupPath).toBeUndefined(); // No backup needed
   });
@@ -399,17 +399,17 @@ describe('removeConfigEntry', () => {
     const filePath = join(TEST_DIR, 'malformed-remove.json');
     writeFileSync(filePath, '{ broken json !!!');
 
-    const result = removeConfigEntry(filePath, 'ai-browser-copilot');
+    const result = removeConfigEntry(filePath, 'agenthub');
     expect(result.success).toBe(false);
     expect(result.error).toContain('malformed JSON');
   });
 
   it('creates backup before modifying', () => {
     const filePath = join(TEST_DIR, 'backup-remove.json');
-    const original = JSON.stringify({ mcpServers: { 'ai-browser-copilot': {} } }, null, 2) + '\n';
+    const original = JSON.stringify({ mcpServers: { 'agenthub': {} } }, null, 2) + '\n';
     writeFileSync(filePath, original);
 
-    const result = removeConfigEntry(filePath, 'ai-browser-copilot');
+    const result = removeConfigEntry(filePath, 'agenthub');
     expect(result.backupPath).toBeDefined();
     expect(existsSync(result.backupPath!)).toBe(true);
     expect(readFileSync(result.backupPath!, 'utf-8')).toBe(original);
@@ -417,9 +417,9 @@ describe('removeConfigEntry', () => {
 
   it('preserves indentation style', () => {
     const filePath = join(TEST_DIR, 'indent-remove.json');
-    writeFileSync(filePath, '{\n    "mcpServers": {\n        "ai-browser-copilot": {},\n        "other": {}\n    }\n}\n');
+    writeFileSync(filePath, '{\n    "mcpServers": {\n        "agenthub": {},\n        "other": {}\n    }\n}\n');
 
-    removeConfigEntry(filePath, 'ai-browser-copilot');
+    removeConfigEntry(filePath, 'agenthub');
 
     const content = readFileSync(filePath, 'utf-8');
     expect(content).toContain('    "mcpServers"');
@@ -428,24 +428,24 @@ describe('removeConfigEntry', () => {
 
   it('preserves trailing newline', () => {
     const filePath = join(TEST_DIR, 'newline-remove.json');
-    writeFileSync(filePath, JSON.stringify({ mcpServers: { 'ai-browser-copilot': {} } }) + '\n');
+    writeFileSync(filePath, JSON.stringify({ mcpServers: { 'agenthub': {} } }) + '\n');
 
-    removeConfigEntry(filePath, 'ai-browser-copilot');
+    removeConfigEntry(filePath, 'agenthub');
     expect(readFileSync(filePath, 'utf-8').endsWith('\n')).toBe(true);
   });
 
   it('removes from both formats if present in both', () => {
     const filePath = join(TEST_DIR, 'dual-format.json');
     writeFileSync(filePath, JSON.stringify({
-      mcpServers: { 'ai-browser-copilot': { command: 'a' } },
-      mcp: { servers: { 'ai-browser-copilot': { command: 'b' } } },
+      mcpServers: { 'agenthub': { command: 'a' } },
+      mcp: { servers: { 'agenthub': { command: 'b' } } },
     }, null, 2) + '\n');
 
-    const result = removeConfigEntry(filePath, 'ai-browser-copilot');
+    const result = removeConfigEntry(filePath, 'agenthub');
     expect(result.success).toBe(true);
 
     const content = JSON.parse(readFileSync(filePath, 'utf-8'));
-    expect(content.mcpServers['ai-browser-copilot']).toBeUndefined();
-    expect(content.mcp.servers['ai-browser-copilot']).toBeUndefined();
+    expect(content.mcpServers['agenthub']).toBeUndefined();
+    expect(content.mcp.servers['agenthub']).toBeUndefined();
   });
 });

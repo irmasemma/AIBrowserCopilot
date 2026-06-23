@@ -19,8 +19,8 @@ export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete 
 
   const extId = chrome.runtime?.id ?? '';
   const installCommand = extId
-    ? `npx ai-browser-copilot-setup --extension-id ${extId}`
-    : 'npx ai-browser-copilot-setup';
+    ? `npx agenthub-setup@latest --extension-id ${extId}`
+    : 'npx agenthub-setup@latest';
 
   useEffect(() => {
     trackSetupEvent('setup_started');
@@ -73,7 +73,7 @@ export const SetupWizard: FunctionalComponent<SetupWizardProps> = ({ onComplete 
   return (
     <div class="py-4">
       <div class="px-3 mb-4">
-        <h2 class="text-lg font-semibold text-neutral-900">Welcome to AI Browser CoPilot</h2>
+        <h2 class="text-lg font-semibold text-neutral-900">Welcome to AgentHub</h2>
         <p class="text-xs text-neutral-500 mt-1">Let your AI read pages, fill forms, and interact with your browser</p>
       </div>
 

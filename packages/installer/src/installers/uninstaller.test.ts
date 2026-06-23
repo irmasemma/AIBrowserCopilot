@@ -6,7 +6,7 @@ import { detectPlatform } from '../shared/platform.js';
 import { getAssetName, NATIVE_HOST_NAME } from '../shared/constants.js';
 import { uninstall } from './uninstaller.js';
 
-const TEST_DIR = join(tmpdir(), `copilot-uninstall-test-${Date.now()}`);
+const TEST_DIR = join(tmpdir(), `agenthub-uninstall-test-${Date.now()}`);
 
 const testPlatform = (os: 'win32' | 'darwin' | 'linux' = 'linux') =>
   detectPlatform(os, 'x64', TEST_DIR);
@@ -19,7 +19,7 @@ const setupFullInstall = (platform = testPlatform('linux')) => {
   const assetName = getAssetName(platform.os, platform.arch);
 
   // Binary
-  const installDir = join(TEST_DIR, '.local', 'share', 'ai-browser-copilot');
+  const installDir = join(TEST_DIR, '.local', 'share', 'agenthub');
   mkdirSync(installDir, { recursive: true });
   const binaryPath = join(installDir, assetName);
   writeFileSync(binaryPath, 'fake-binary');
@@ -40,7 +40,7 @@ const setupFullInstall = (platform = testPlatform('linux')) => {
     JSON.stringify({
       theme: 'dark',
       mcpServers: {
-        'ai-browser-copilot': { command: binaryPath, args: [] },
+        'agenthub': { command: binaryPath, args: [] },
         filesystem: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem'] },
       },
     }, null, 2) + '\n',
@@ -87,7 +87,7 @@ describe('uninstall', () => {
     expect(existsSync(manifestPath)).toBe(false);
   });
 
-  it('removes ai-browser-copilot from Claude Desktop config', async () => {
+  it('removes agenthub from Claude Desktop config', async () => {
     const platform = testPlatform('linux');
     const { claudeDir } = setupFullInstall(platform);
     const configPath = join(claudeDir, 'claude_desktop_config.json');
@@ -99,9 +99,9 @@ describe('uninstall', () => {
     expect(claudeResult?.removed).toBe(true);
     expect(claudeResult?.backupPath).toBeDefined();
 
-    // Config should still exist but without ai-browser-copilot
+    // Config should still exist but without agenthub
     const updated = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(updated.mcpServers['ai-browser-copilot']).toBeUndefined();
+    expect(updated.mcpServers['agenthub']).toBeUndefined();
   });
 
   it('preserves other MCP entries in config', async () => {
@@ -129,7 +129,7 @@ describe('uninstall', () => {
   it('succeeds when only binary exists (no configs)', async () => {
     const platform = testPlatform('linux');
     const assetName = getAssetName(platform.os, platform.arch);
-    const installDir = join(TEST_DIR, '.local', 'share', 'ai-browser-copilot');
+    const installDir = join(TEST_DIR, '.local', 'share', 'agenthub');
     mkdirSync(installDir, { recursive: true });
     writeFileSync(join(installDir, assetName), 'binary');
 
@@ -138,11 +138,11 @@ describe('uninstall', () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  it('removes MCP entry from VS Code settings (mcp.servers format)', async () => {
+  it('removes MCP entry from VS Code legacy settings.json (mcp.servers format)', async () => {
     const platform = testPlatform('linux');
     setupFullInstall(platform);
 
-    // Also set up VS Code with MCP entry
+    // Also set up VS Code with legacy MCP entry
     const vscodeDir = join(TEST_DIR, '.config', 'Code', 'User');
     mkdirSync(vscodeDir, { recursive: true });
     writeFileSync(
@@ -151,7 +151,7 @@ describe('uninstall', () => {
         'editor.fontSize': 14,
         mcp: {
           servers: {
-            'ai-browser-copilot': { command: '/path' },
+            'agenthub': { command: '/path' },
             'other-server': { command: 'other' },
           },
         },
@@ -164,8 +164,61 @@ describe('uninstall', () => {
     expect(vscodeResult?.removed).toBe(true);
 
     const updated = JSON.parse(readFileSync(join(vscodeDir, 'settings.json'), 'utf-8'));
-    expect(updated.mcp.servers['ai-browser-copilot']).toBeUndefined();
+    expect(updated.mcp.servers['agenthub']).toBeUndefined();
     expect(updated.mcp.servers['other-server']).toBeDefined();
+    expect(updated['editor.fontSize']).toBe(14);
+  });
+
+  it('removes MCP entry from VS Code dedicated mcp.json', async () => {
+    const platform = testPlatform('linux');
+    setupFullInstall(platform);
+
+    const vscodeDir = join(TEST_DIR, '.config', 'Code', 'User');
+    mkdirSync(vscodeDir, { recursive: true });
+    writeFileSync(
+      join(vscodeDir, 'mcp.json'),
+      JSON.stringify({
+        servers: {
+          'agenthub': { command: '/path', args: [], type: 'stdio' },
+          'other-server': { command: 'other' },
+        },
+        inputs: [],
+      }, null, 2) + '\n',
+    );
+
+    const result = await uninstall(platform);
+
+    const vscodeResult = result.configsRemoved.find((c) => c.tool === 'VS Code');
+    expect(vscodeResult?.removed).toBe(true);
+
+    const updated = JSON.parse(readFileSync(join(vscodeDir, 'mcp.json'), 'utf-8'));
+    expect(updated.servers['agenthub']).toBeUndefined();
+    expect(updated.servers['other-server']).toBeDefined();
+  });
+
+  it('prunes empty mcp block in settings.json even when our entry is already gone', async () => {
+    // This is the exact case the user hit: previous installer wrote
+    // `mcp.servers.agenthub`, then something migrated the entry
+    // to mcp.json, leaving `{ "mcp": { "servers": {} } }` in settings.json.
+    // VS Code shows a deprecation notification for that empty block until
+    // it's fully pruned.
+    const platform = testPlatform('linux');
+    setupFullInstall(platform);
+
+    const vscodeDir = join(TEST_DIR, '.config', 'Code', 'User');
+    mkdirSync(vscodeDir, { recursive: true });
+    writeFileSync(
+      join(vscodeDir, 'settings.json'),
+      JSON.stringify({
+        'editor.fontSize': 14,
+        mcp: { servers: {} },
+      }, null, 2) + '\n',
+    );
+
+    await uninstall(platform);
+
+    const updated = JSON.parse(readFileSync(join(vscodeDir, 'settings.json'), 'utf-8'));
+    expect(updated.mcp).toBeUndefined();
     expect(updated['editor.fontSize']).toBe(14);
   });
 
@@ -199,7 +252,7 @@ describe('uninstall', () => {
     const assetName = getAssetName(platform.os, platform.arch);
 
     // Set up macOS-style paths
-    const installDir = join(TEST_DIR, 'Library', 'Application Support', 'ai-browser-copilot');
+    const installDir = join(TEST_DIR, 'Library', 'Application Support', 'agenthub');
     mkdirSync(installDir, { recursive: true });
     writeFileSync(join(installDir, assetName), 'binary');
 

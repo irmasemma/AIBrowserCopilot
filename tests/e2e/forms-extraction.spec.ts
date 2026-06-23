@@ -412,7 +412,7 @@ test.describe('Tool: fill_form', () => {
     expect(await page.isDisabled('#submit-btn')).toBe(true);
 
     // Fill required fields using Playwright (fires proper input events)
-    await page.fill('#product-name', 'AI Browser CoPilot');
+    await page.fill('#product-name', 'AgentHub');
     await page.fill('#tagline', 'Your AI assistant in the browser');
     await page.selectOption('#category', 'ai');
     await page.fill('#description', 'A powerful Chrome extension that connects your AI to the browser');
@@ -436,7 +436,7 @@ test.describe('Tool: fill_form', () => {
     // Click submit and verify output
     await page.click('#submit-btn');
     const output = await page.textContent('#form-output');
-    expect(output).toContain('AI Browser CoPilot');
+    expect(output).toContain('AgentHub');
     expect(output).toContain('ai'); // category
     expect(output).toContain('true'); // agree-terms
 
@@ -965,7 +965,7 @@ test.describe('CRITICAL: Product Hunt form fill', () => {
     // Fill product name
     const nameInput = page.locator('input[name="name"], input[placeholder*="name" i]').first();
     if (await nameInput.isVisible({ timeout: 5000 })) {
-      await nameInput.fill('AI Browser CoPilot Test');
+      await nameInput.fill('AgentHub Test');
     }
 
     // Fill tagline
@@ -977,13 +977,13 @@ test.describe('CRITICAL: Product Hunt form fill', () => {
     // Fill URL
     const urlInput = page.locator('input[name="url"], input[type="url"], input[placeholder*="url" i]').first();
     if (await urlInput.isVisible({ timeout: 3000 })) {
-      await urlInput.fill('https://github.com/example/ai-browser-copilot');
+      await urlInput.fill('https://github.com/example/agenthub');
     }
 
     // Fill description/comment
     const descriptionInput = page.locator('textarea, [contenteditable="true"]').first();
     if (await descriptionInput.isVisible({ timeout: 3000 })) {
-      await descriptionInput.fill('AI Browser CoPilot connects Claude, ChatGPT, and other AI models to your browser via MCP.');
+      await descriptionInput.fill('AgentHub connects Claude, ChatGPT, and other AI models to your browser via MCP.');
     }
 
     // Select a category/topic if available
@@ -1001,7 +1001,7 @@ test.describe('CRITICAL: Product Hunt form fill', () => {
     // Verify fields are filled (read back values)
     const productName = await nameInput.inputValue().catch(() => '');
     console.log(`Product name filled: "${productName}"`);
-    expect(productName).toBe('AI Browser CoPilot Test');
+    expect(productName).toBe('AgentHub Test');
 
     // DO NOT submit — we're just testing that fill works
     console.log('PASS: Product Hunt form filled (not submitted)');

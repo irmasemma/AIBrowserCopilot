@@ -1,0 +1,127 @@
+Your AI, your browser. AgentHub lets your favorite AI assistant actually use your tabs, sessions, and logins — not a sandboxed demo, your real Chrome.
+
+AgentHub is two things in one extension:
+
+1. A chat sidebar in Chrome where you talk to OpenAI, Anthropic Claude, or Google Gemini directly — using your own API keys, all stored locally, never sent to our servers.
+
+2. An MCP bridge that exposes your browser as a tool source for Claude Code, Cursor, Claude Desktop, and any other MCP-compatible AI client.
+
+Either way, your AI can read pages, list and switch tabs, take screenshots, fill forms, click elements, extract tables, and pull structured data — all from inside the browser you already use.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+WHAT YOU CAN DO WITH IT
+
+Research, faster. "Summarize this 60-page docs site." "Pull every job title from this LinkedIn profile into a table." "What's the pricing across all three competitor tabs I have open?"
+
+Forms, without copy-paste. "Fill this Salesforce lead with Jane's info from the tab next to me." "Apply to this job using my resume in tab 2." "Submit this contact form with the values from my CSV."
+
+Cross-tab orchestration. Your AI can list every tab you have open, switch between them, read the content of each, and combine results. "Find Jane's email in tab 1, her company's last funding round in tab 2, and fill them into the notes in tab 3."
+
+Extract anything. Tables, lists, contacts, prices, reviews, articles — into JSON, markdown, or whatever format you ask for.
+
+Drive your IDE from the browser, and vice versa. With MCP enabled, the AI agent running in your terminal can ask the browser questions ("what's on the user's screen?") and act on the answers ("open this URL", "fill this form").
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+SUPPORTED AI TOOLS
+
+Chat sidebar (bring your own API key, stored locally):
+• OpenAI — GPT-4.1, GPT-5, o3, o4-mini
+• Anthropic — Claude Opus, Sonnet, Haiku
+• Google Gemini — Gemini 2.5 Pro, Flash, Flash-Lite
+• Custom model IDs via the "Custom…" option
+
+MCP bridge: Claude Code, Cursor, and Claude Desktop are tested and documented out of the box. Any other MCP-compatible AI client works too — we register through the standard Model Context Protocol, so new clients work without changes to the extension. Full list of tested clients on GitHub: github.com/irmasemma/AIBrowserCopilot
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+BROWSER TOOLS YOUR AI GETS
+
+• Read text from any page
+• Capture screenshots of what you see
+• See every tab open across windows
+• Get page metadata (title, description, OG tags)
+• Open or move to a URL
+• Auto-fill form fields (React, Vue, Lit, plain HTML, shadow DOM)
+• Click buttons, links, controls — by text, selector, or index
+• Submit forms or trigger keyboard shortcuts
+• Pull HTML tables as structured rows
+• Inventory every input on a form
+• Detect structured data on a page
+
+Every tool can be toggled on or off. Sensitive domains (banking, email) are blocked by default.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+WHY AGENTHUB
+
+Your real browser, your real data. Other "AI browsers" run inside a fresh Chromium with no cookies, no logins, no extensions. AgentHub uses your actual Chrome profile — your Gmail is logged in, your Slack is there, your saved passwords work.
+
+One bridge, every tool. AgentHub is one bridge that any MCP-compatible AI can use. Add a new AI to your stack tomorrow without reinstalling anything in the browser.
+
+Your keys, your machine. API keys for the chat sidebar live in chrome.storage.local. They never leave your device. There is no backend, no telemetry, no account.
+
+Free and open source. No pro tier, no waitlist, no upsell. Source at github.com/irmasemma/AIBrowserCopilot
+
+Privacy-first defaults. Banking and email domains blocked out of the box. Real-time activity log shows every tool call your AI makes, with which URL, with which result. Per-tool permission toggles.
+
+Works with multiple Chrome profiles at once. Each profile gets its own namespaced tab IDs so an AI driving two profiles never confuses them.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+HOW TO INSTALL
+
+1. Install AgentHub from this page.
+2. Run the one-command setup in any terminal:
+   npx agenthub-setup@latest --extension-id <YOUR_ID_FROM_THE_SIDE_PANEL>
+3. The installer auto-detects your AI tools and registers AgentHub with each.
+4. Open your AI tool and ask it about the page you're on. Or open the AgentHub sidebar and chat directly.
+
+That's it. No account. No waitlist.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+PRIVACY & SECURITY
+
+• No backend. Everything runs locally between your browser and your AI tool. There are no AgentHub servers.
+• No telemetry. We don't collect usage data. The activity log lives in your browser only.
+• Local API keys. Chat-sidebar keys go to chrome.storage.local. They never touch our servers because there are no servers.
+• Activity log. Every tool call your AI makes is logged — what tool, on which URL, when, success or failure, with what duration. Visible in the side panel.
+• Per-tool toggles. Disable any tool any time. If you turn off form-filling, no AI can fill forms — even if it asks.
+• Domain blocking. Default-deny on banking and email domains. Configurable.
+• Native messaging. Browser-to-AI communication uses Chrome's native messaging API (the same mechanism password managers and YubiKey use) — no open ports, no network sockets.
+• Open source. Read the code, audit the manifest, build it yourself.
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+REQUIREMENTS
+
+• Chrome 120+ or Edge 120+
+• Node.js 18+ for one-time install via npx agenthub-setup (the bridge itself is a compiled binary after that)
+• An MCP-compatible AI tool, or an API key for OpenAI / Anthropic / Gemini for the in-extension chat
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+FAQ
+
+Is this free?
+Yes, fully. No pro tier, no trial, no upsell. The setup installer and the bridge binary are open source on GitHub.
+
+Does my data go anywhere?
+No. There is no AgentHub server. Browser-to-AI communication is 100% local via native messaging. API keys for the chat sidebar are stored in chrome.storage.local and never leave your machine.
+
+Do I need an API key?
+For the in-extension chat sidebar: yes, you bring your own key for OpenAI, Anthropic, or Gemini. For the MCP bridge to external AI tools: no, those tools handle their own auth — AgentHub just exposes the browser as a tool source for them.
+
+Is this safe to install?
+The extension code is open source. The native bridge is a small audited binary that only talks to your local browser over Chrome's native messaging API — no network sockets, no open ports. Sensitive domains are blocked by default. Every tool can be disabled with a toggle. Every AI action is logged.
+
+Does it work with multiple Chrome profiles?
+Yes. Each profile gets a namespaced browser ID so an AI driving two profiles at once never confuses them.
+
+What about Edge, Brave, Arc, Vivaldi?
+Edge: yes, same package works and the installer auto-detects it. Brave, Arc, Vivaldi: the bridge installs registry entries for them too. Side-load builds work on Chromium-based browsers.
+
+Where do I report a bug or request a feature?
+GitHub issues: github.com/irmasemma/AIBrowserCopilot/issues

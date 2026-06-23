@@ -7,9 +7,6 @@ export const navigate: ToolPlugin = {
   tier: 'pro',
   inputSchema: {
     url: z.string().describe('Target URL to navigate to'),
-    tab_id: z.number().optional().describe('Specific tab ID (defaults to active tab)'),
-  },
-  async execute() {
-    return { content: [{ type: 'text' as const, text: '[Stub] navigate: Not connected to browser.' }] };
+    tab_id: z.string().describe('Required. Tab ID returned by `list_tabs` (format: "<brand>:<uuid>:<rawId>"). Call `list_tabs` first if you do not have one.'),
   },
 };

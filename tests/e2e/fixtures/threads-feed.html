@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>tech.mom_us (@tech.mom_us) • Threads</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+           background: #fafafa; color: #101010; }
+    header.profile { max-width: 620px; margin: 0 auto; padding: 32px 16px 12px; }
+    header.profile h1 { font-size: 22px; margin: 0; }
+    header.profile .handle { color: #777; }
+    main { max-width: 620px; margin: 0 auto; padding: 0 16px 600px; }
+    article.post { border-bottom: 1px solid #e3e3e3; padding: 20px 0; }
+    .post-author { font-weight: 600; }
+    .post-time { color: #999; font-weight: 400; margin-left: 8px; font-size: 13px; }
+    .post-text { margin: 8px 0 12px; line-height: 1.4; white-space: pre-wrap; }
+    .post-actions { display: flex; gap: 24px; color: #555; font-size: 14px; }
+    .post-actions span b { color: #101010; }
+  </style>
+</head>
+<body>
+  <header class="profile">
+    <h1>tech.mom_us</h1>
+    <div class="handle">@tech.mom_us · 12.4k followers</div>
+  </header>
+
+  <!-- A semantic, extraction-friendly mock of a Threads profile feed. Each
+       post is a real <article> with author / text / likes / reposts so the
+       extension's extract + get_page_content tools have clean structure to
+       pull. Served over http://127.0.0.1 so the extension's host_permission
+       (http://127.0.0.1/*) lets content scripts read it without <all_urls>. -->
+  <main id="feed"></main>
+
+  <script>
+    const POSTS = [
+      { id: 1,  text: "Shipping a Chrome extension that lets Claude drive your real browser. MV3 was a journey 🧵", likes: 412, reposts: 38,  replies: 21 },
+      { id: 2,  text: "Tip: native messaging on Windows needs a .cmd shim — Chrome won't exec a .cjs directly.", likes: 256, reposts: 12,  replies: 7  },
+      { id: 3,  text: "Multi-profile fan-out finally works. One bridge, every Chrome profile, namespaced tab ids.", likes: 689, reposts: 91,  replies: 44 },
+      { id: 4,  text: "Service workers get evicted constantly. A 20s server-ping keepalive fixed our 'tool timed out' bug.", likes: 178, reposts: 9,   replies: 5  },
+      { id: 5,  text: "Screenshots via CDP, not captureVisibleTab — the latter hangs forever off-screen. Learned the hard way.", likes: 322, reposts: 27,  replies: 14 },
+      { id: 6,  text: "Origin-based auth > token params. The WS server checks the chrome-extension:// origin before the handshake.", likes: 145, reposts: 6,   replies: 3  },
+      { id: 7,  text: "Diagnostics dashboard on localhost:7483 — every tool call traced with kid-friendly cause hints.", likes: 503, reposts: 55,  replies: 31 },
+      { id: 8,  text: "We e2e-test against a real browser + a real Claude CLI session. The whole chain, no mocks.", likes: 731, reposts: 120, replies: 58 },
+    ];
+
+    function render(list) {
+      const feed = document.getElementById('feed');
+      for (const p of list) {
+        const el = document.createElement('article');
+        el.className = 'post';
+        el.dataset.postId = String(p.id);
+        el.innerHTML =
+          '<div class="post-head"><span class="post-author">tech.mom_us</span>' +
+          '<span class="post-time">' + p.id + 'd</span></div>' +
+          '<div class="post-text">' + p.text + '</div>' +
+          '<div class="post-actions">' +
+            '<span class="likes">❤ <b>' + p.likes + '</b></span>' +
+            '<span class="replies">💬 <b>' + p.replies + '</b></span>' +
+            '<span class="reposts">🔁 <b>' + p.reposts + '</b></span>' +
+          '</div>';
+        feed.appendChild(el);
+      }
+    }
+
+    // Render the first 4 immediately, lazy-append the rest as the user scrolls
+    // near the bottom — so the agent genuinely has to SCROLL to load all posts,
+    // exercising the scroll tool (not just a single static read).
+    render(POSTS.slice(0, 4));
+    let loadedMore = false;
+    window.addEventListener('scroll', () => {
+      if (loadedMore) return;
+      if (window.scrollY + window.innerHeight > document.body.scrollHeight - 800) {
+        loadedMore = true;
+        render(POSTS.slice(4));
+        document.body.dataset.allLoaded = 'true';
+      }
+    }, { passive: true });
+  </script>
+</body>
+</html>

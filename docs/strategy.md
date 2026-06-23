@@ -2,14 +2,14 @@
 
 Captured 2026-04-30. Distilled from a deep architectural comparison with
 [github.com/browsermcp/mcp](https://github.com/browsermcp/mcp) and a strategic conversation
-about where CoPilot competes and where it doesn't.
+about where AgentHub competes and where it doesn't.
 
 ## TL;DR
 
 1. **Pivot to chat-first.** The headline product is the in-extension chat tab, not the
-   MCP server. CoPilot can't beat browsermcp on MCP setup UX without becoming them.
+   MCP server. AgentHub can't beat browsermcp on MCP setup UX without becoming them.
 2. **The chat tab doesn't compete with browsermcp.** browsermcp users still need a paid
-   Claude Code/Cursor subscription to drive their browser. CoPilot's chat is the
+   Claude Code/Cursor subscription to drive their browser. AgentHub's chat is the
    alternative to that subscription.
 3. **Stop investing in the MCP installer UX.** Replace auto-detection + config-writing
    with a single "Copy MCP config snippet" button. The 5% of users who care will paste;
@@ -33,19 +33,19 @@ browsermcp's setup UX is fundamentally simpler:
 - ARIA snapshot tool model (adapted from Microsoft's Playwright MCP) is genuinely
   better for LLM agents than CSS-selector-first.
 
-CoPilot picked the opposite tradeoffs — native-host binary, native messaging registry +
+AgentHub picked the opposite tradeoffs — native-host binary, native messaging registry +
 manifests, lock file + auth token, auto-pairing via service discovery, multi-tool
 installer wizard with detectors. Each had a reason (security, no manual click,
 multi-tool config writing) but cumulatively the setup is brittle.
 
-This isn't fixable by polishing the installer. browsermcp avoided every CoPilot setup
+This isn't fixable by polishing the installer. browsermcp avoided every AgentHub setup
 problem by **not having an installer at all**.
 
-## Where CoPilot still wins
+## Where AgentHub still wins
 
 These are real, not theoretical:
 
-| Capability | browsermcp | CoPilot |
+| Capability | browsermcp | AgentHub |
 |---|---|---|
 | One agent driving multiple tabs | ❌ (single Connect tab) | ✅ (`tab_id` on every tool, `list_tabs`) |
 | Day-2 reliability after Chrome / AI-tool restart | ❌ (manual Connect) | ✅ (lock file + service discovery + reconnect) |
@@ -54,21 +54,21 @@ These are real, not theoretical:
 | Heuristic structured data extraction (`extract_data`) | ❌ | ✅ |
 
 browsermcp's gaps on form features aren't because Playwright can't do them — they
-chose a minimal tool set. CoPilot exposed more.
+chose a minimal tool set. AgentHub exposed more.
 
 ## Connection lifecycle comparison
 
-| Scenario | browsermcp | CoPilot |
+| Scenario | browsermcp | AgentHub |
 |---|---|---|
 | New chat, same Claude Code session | works | works |
 | Restart Claude Code | requires manual Connect click | auto-reconnects via lock file |
 | Two AI tools running simultaneously | second `killProcessOnPort`'s the first | lock file singleton — last writer wins |
 | Chrome restart | requires Connect click | auto-reconnects on SW startup |
 
-This is the one area where CoPilot's complexity actually pays off. **browsermcp wins
-first-time setup; CoPilot wins day-2 reliability.** Most products live or die on
+This is the one area where AgentHub's complexity actually pays off. **browsermcp wins
+first-time setup; AgentHub wins day-2 reliability.** Most products live or die on
 first-time setup, which is why browsermcp's UX feels better — but for power users who
-restart their AI tool more than once a day, CoPilot's self-healing is a real advantage.
+restart their AI tool more than once a day, AgentHub's self-healing is a real advantage.
 
 ## Strategic decision: chat-first
 
@@ -80,7 +80,7 @@ Reasoning:
   dispatcher. We didn't rebuild the tool layer.
 - Monetization path is clearer: free-tier proxy on our key, then Stripe credits. Both
   in [chat-tab-plan.md](./chat-tab-plan.md).
-- browsermcp users still need a Claude Code or Cursor subscription. CoPilot's chat
+- browsermcp users still need a Claude Code or Cursor subscription. AgentHub's chat
   is what they'd switch to if they didn't want that.
 
 ## Concrete next steps (not started, in priority order)
@@ -108,7 +108,7 @@ Reasoning:
 ## What we explicitly chose NOT to do
 
 - **Don't refactor away from native messaging right now.** Despite browsermcp's
-  simpler transport, CoPilot's existing transport actually wins on day-2 reliability.
+  simpler transport, AgentHub's existing transport actually wins on day-2 reliability.
   Premature to rewrite for users we don't yet have.
 - **Don't try to get listed in claude.ai's Connectors panel.** That's the browsermcp
   lane. Their relay-based architecture (cloud server with persistent WS to the
@@ -130,13 +130,13 @@ Reasoning:
 
 ## Case study (2026-05-05): the registration that vanished
 
-A working installation went silent. `chrome://extensions` showed CoPilot enabled,
+A working installation went silent. `chrome://extensions` showed AgentHub enabled,
 the side panel said "Not Connected", and `claude mcp list` did not list
-`ai-browser-copilot`. The user's reasonable belief was "it worked yesterday."
+`agenthub`. The user's reasonable belief was "it worked yesterday."
 
 **Root cause:** the registration *did* exist. A backup at
 `~/.claude.json.backup-20260330-230259` proved that `~/.claude.json` had
-`projects."C:/Dev/1M".mcpServers.ai-browser-copilot` pointing at
+`projects."C:/Dev/1M".mcpServers.agenthub` pointing at
 `node .../packages/native-host/dist/index.js`. On 2026-05-05 at 16:05, the file
 was modified and shrunk by 5,297 bytes — the entry was removed. We don't know
 *who* removed it (a `claude mcp` command, a manual edit, an auto-prune), but
@@ -164,7 +164,7 @@ in the native-host helper's self-heal action.
    `mcpServers` (Claude Code, Claude Desktop, Continue, JetBrains) or top-level
    `mcp.servers` (Cursor, VS Code, Windsurf, Zed). Project-scope is a non-goal
    unless the user explicitly opts in.
-2. **Use the production `.exe` path in `%LOCALAPPDATA%/ai-browser-copilot/`,
+2. **Use the production `.exe` path in `%LOCALAPPDATA%/agenthub/`,
    never a dev `node .../dist/index.js`.** The dev path is fragile (requires
    PATH, requires a build) and routinely breaks for real users. The native-host
    helper now derives the correct binary path from its own install dir at
@@ -181,7 +181,7 @@ Lives in `packages/native-host-helper/src/mcp-registrar.ts` and is exposed to
 the extension via two new native-messaging actions:
 
 - `check_mcp_registration` — reads `~/.claude.json`, returns whether
-  `ai-browser-copilot` is registered, at what scope (`user` | `project` | null),
+  `agenthub` is registered, at what scope (`user` | `project` | null),
   whether the production binary exists.
 - `repair_mcp_registration` — writes the entry to **user scope** with the
   production `.exe` path, backs up the existing config first, then verifies the

@@ -41,7 +41,7 @@ export const getManifestDir = (platform: PlatformInfo): string => {
       // On Windows, manifest goes in the same install directory as the binary
       return join(
         process.env['LOCALAPPDATA'] ?? join(platform.homeDir, 'AppData', 'Local'),
-        'ai-browser-copilot',
+        'agenthub',
       );
     case 'macos':
       return join(

@@ -1,21 +1,81 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import React from 'react';
 import { render } from 'ink-testing-library';
+import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { App } from './app.js';
-import type { PlatformInfo } from '../shared/platform.js';
+import { getInstallDir, type PlatformInfo } from '../shared/platform.js';
 import type { CliFlags } from './app.js';
 import type { DownloadProgress, InstallResult } from '../installers/binary-installer.js';
 import type { RegistrationResult } from '../installers/host-registrar.js';
+import { ALLOWED_IDS_FILENAME } from '../installers/allowed-ids-writer.js';
 
 // Mock browser-registrar to avoid reg query calls in tests
 vi.mock('../installers/browser-registrar.js', () => ({
   registerAllBrowsers: vi.fn(() => []),
 }));
 
+// These tests run the REAL registration path, which calls writeAllowedExtensionIds
+// against the REAL install dir (getInstallDir reads process.env.LOCALAPPDATA on
+// Windows, not the mocked platform). That's intentional — but it MUST roll back
+// so the suite never clobbers a developer's live `extension-ids.json` (which the
+// bridge uses as its origin allowlist — a stale value silently 401-rejects the
+// real extension). Snapshot before, restore after.
+//
+// CRITICAL — must be CRASH-SAFE: afterAll alone is not enough. Ctrl-C, SIGTERM,
+// uncaught exception, or a non-zero process exit between the snapshot and the
+// restore would leak the test fixture into the developer's real file. So we
+// register the restore on every termination path AND in afterAll, with an
+// idempotency guard so it only runs once. (This was missed once and dropped
+// `["myext123"]` into a developer's live allowlist for weeks — see git history.)
+const ALLOWLIST_PATH = join(getInstallDir({ os: 'windows', arch: 'x64', homeDir: '', isSupported: true } as PlatformInfo), ALLOWED_IDS_FILENAME);
+let allowlistBackup: { existed: boolean; content?: string };
+let allowlistRestored = false;
+function restoreAllowlist(): void {
+  if (allowlistRestored) return;
+  allowlistRestored = true;
+  try {
+    if (allowlistBackup?.existed) writeFileSync(ALLOWLIST_PATH, allowlistBackup.content ?? '', 'utf-8');
+    else if (existsSync(ALLOWLIST_PATH)) rmSync(ALLOWLIST_PATH);
+  } catch { /* best-effort restore — better to log nothing than to throw from an exit hook */ }
+}
+beforeAll(() => {
+  allowlistBackup = existsSync(ALLOWLIST_PATH)
+    ? { existed: true, content: readFileSync(ALLOWLIST_PATH, 'utf-8') }
+    : { existed: false };
+  allowlistRestored = false;
+  // Crash-safe guards. `exit` fires on every normal termination; the signal
+  // handlers also re-emit the signal so the process actually dies (otherwise
+  // Ctrl-C in a watch session would be swallowed).
+  process.once('exit', restoreAllowlist);
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK'] as const) {
+    process.once(sig, () => {
+      restoreAllowlist();
+      process.kill(process.pid, sig);
+    });
+  }
+  process.once('uncaughtException', (err) => {
+    restoreAllowlist();
+    throw err;
+  });
+  process.once('unhandledRejection', (reason) => {
+    restoreAllowlist();
+    throw reason;
+  });
+});
+afterAll(() => {
+  restoreAllowlist();
+});
+
 const defaultFlags: CliFlags = {
   yes: false,
   update: false,
   uninstall: false,
+  // Real installs always carry an extension ID (the side-panel wizard supplies
+  // it). Tests that exercise the registration path need one too, otherwise the
+  // installer short-circuits to the "extension ID required" guidance instead of
+  // calling registerFn. The no-ID path has its own dedicated test below.
+  extensionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 };
 
 const noopDownload = async () => ({ success: true, binaryPath: 'test' });
@@ -46,7 +106,7 @@ describe('App', () => {
     const { lastFrame } = render(
       <App platform={makePlatform()} flags={defaultFlags} {...allMocks} />,
     );
-    expect(lastFrame()).toContain('AI Browser CoPilot');
+    expect(lastFrame()).toContain('AgentHub');
     expect(lastFrame()).toContain('Setup');
   });
 
@@ -283,8 +343,32 @@ describe('App - registration integration', () => {
     expect(lastFrame()).toContain('EPERM');
   });
 
+  it('asks for the extension ID (and does not register) when none provided or detected', async () => {
+    // macOS platform with a bogus home dir → auto-detection finds nothing.
+    const mockRegister = vi.fn(async () => ({ success: true, manifestPath: 'x' }));
+
+    const { lastFrame } = render(
+      <App
+        platform={makePlatform({ os: 'macos', homeDir: '/nonexistent-ah-test-home-xyz' })}
+        flags={{ ...defaultFlags, extensionId: undefined }}
+        {...allMocks}
+        registerFn={mockRegister}
+      />,
+    );
+
+    await delay(150);
+    expect(mockRegister).not.toHaveBeenCalled();
+    expect(lastFrame()).toContain('extension ID');
+  });
+
   it('passes extensionId flag to register function', async () => {
-    const flagsWithId: CliFlags = { ...defaultFlags, extensionId: 'myext123' };
+    // Use the same obvious-fake-but-valid-shape sentinel as defaultFlags. The
+    // previous value `'myext123'` was 8 chars (invalid Chrome ID shape) but
+    // the bridge's origin parser accepts any string — so if the crash-safe
+    // restore EVER fails, that placeholder silently 401-rejects the real
+    // extension. Using the same 32-char 'a' sentinel as defaultFlags makes
+    // leakage harmless: it can't accidentally look like a real ID.
+    const flagsWithId: CliFlags = { ...defaultFlags, extensionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab' };
     const mockRegister = vi.fn(async () => ({
       success: true,
       manifestPath: 'test',
@@ -298,7 +382,7 @@ describe('App - registration integration', () => {
     expect(mockRegister).toHaveBeenCalledWith(
       expect.any(Object),
       expect.any(String),
-      'myext123',
+      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab',
     );
   });
 });

@@ -116,15 +116,15 @@ function resolveKeyPath(obj: unknown, keys: string[]): unknown {
   return current;
 }
 
-function hasCopilotEntry(mcpValue: unknown): boolean {
+function hasAgentHubEntry(mcpValue: unknown): boolean {
   if (mcpValue === null || mcpValue === undefined) return false;
   if (Array.isArray(mcpValue)) {
     return mcpValue.some(
-      (item) => typeof item === 'object' && item !== null && ('ai-browser-copilot' in item || (item as Record<string, unknown>).name === 'ai-browser-copilot'),
+      (item) => typeof item === 'object' && item !== null && ('agenthub' in item || (item as Record<string, unknown>).name === 'agenthub'),
     );
   }
   if (typeof mcpValue === 'object') {
-    return 'ai-browser-copilot' in (mcpValue as Record<string, unknown>);
+    return 'agenthub' in (mcpValue as Record<string, unknown>);
   }
   return false;
 }
@@ -139,7 +139,7 @@ function scanDetector(detector: ToolDetector): ToolScanResult {
       const content = readFileSync(configPath, 'utf-8');
       const parsed = JSON.parse(content);
       const mcpValue = resolveKeyPath(parsed, detector.getMcpKeyPath());
-      const configured = hasCopilotEntry(mcpValue);
+      const configured = hasAgentHubEntry(mcpValue);
       return { tool: detector.name, slug: detector.slug, installed: true, configured, configPath };
     } catch {
       return { tool: detector.name, slug: detector.slug, installed: true, configured: false, configPath };

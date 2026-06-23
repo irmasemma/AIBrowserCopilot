@@ -8,9 +8,14 @@ import type { ToolDetectionSummary } from '../detectors/types.js';
 import { downloadBinary, isBinaryInstalled } from '../installers/binary-installer.js';
 import { registerHost } from '../installers/host-registrar.js';
 import { registerAllBrowsers } from '../installers/browser-registrar.js';
+import { detectExtensionIds } from '../installers/extension-id-detector.js';
+import { writeAllowedExtensionIds, ALLOWED_IDS_FILENAME } from '../installers/allowed-ids-writer.js';
 import { checkBinaryHealth } from '../installers/health-check.js';
 import { getHelperAssetName } from '../shared/constants.js';
 import { uninstall, type UninstallResult } from '../installers/uninstaller.js';
+import { registerAutostart, unregisterAutostart } from '../installers/autostart-registrar.js';
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { getInstallDir } from '../shared/platform.js';
 import { getAssetName } from '../shared/constants.js';
 import { join } from 'node:path';
@@ -35,6 +40,7 @@ export interface CliFlags {
   update: boolean;
   uninstall: boolean;
   extensionId?: string;
+  fromLocal?: string;
 }
 
 export interface AppProps {
@@ -172,6 +178,8 @@ export const App: React.FC<AppProps> = ({
           (p: DownloadProgress) => {
             if (!cancelled) setProgress(p);
           },
+          undefined,
+          flags.fromLocal,
         );
 
         if (cancelled) return;
@@ -197,7 +205,7 @@ export const App: React.FC<AppProps> = ({
 
     run();
     return () => { cancelled = true; };
-  }, [platform, phase, downloadFn, exit]);
+  }, [platform, phase, downloadFn, flags.fromLocal, exit]);
 
   // Phase 3: Register
   React.useEffect(() => {
@@ -208,10 +216,38 @@ export const App: React.FC<AppProps> = ({
       try {
         setRegisterStatus('registering');
         const binPath = binaryPath ?? existingBinaryPath ?? '';
+
+        // Resolve the Chrome extension ID. Prefer the explicit --extension-id
+        // flag; otherwise best-effort auto-detect from installed Chromium
+        // profiles. We only auto-USE a detected ID under --yes when EXACTLY ONE
+        // is found; otherwise we SUGGEST it and ask the user to confirm by
+        // re-running with --extension-id — never silently register an
+        // unconfirmed ID (an empty allowed_origins manifest is useless and a
+        // wrong ID would make Chrome reject every connection).
+        let effectiveExtId = flags.extensionId;
+        if (!effectiveExtId) {
+          let detected: string[] = [];
+          try { detected = detectExtensionIds(platform); } catch { detected = []; }
+          if (detected.length === 1 && flags.yes) {
+            effectiveExtId = detected[0];
+          } else {
+            if (cancelled) return;
+            const hint = detected.length === 1
+              ? `Detected a likely extension ID: ${detected[0]}\n  Re-run to confirm:  npx agenthub-setup --extension-id ${detected[0]}`
+              : detected.length > 1
+                ? `Found multiple AgentHub extensions: ${detected.join(', ')}\n  Pick yours and re-run:  npx agenthub-setup --extension-id <id>`
+                : `Open chrome://extensions (enable Developer mode), copy AgentHub's ID, then re-run:\n  npx agenthub-setup --extension-id <id>`;
+            setRegisterError(`Chrome extension ID required — the binary is installed, but Chrome can't be authorized to talk to it without your extension's ID.\n${hint}`);
+            setRegisterStatus('error');
+            setPhase('health');
+            return;
+          }
+        }
+
         const regResult: RegistrationResult = await registerFn(
           platform,
           binPath,
-          flags.extensionId,
+          effectiveExtId,
         );
 
         if (cancelled) return;
@@ -219,15 +255,55 @@ export const App: React.FC<AppProps> = ({
         // Also register helper for all detected browsers (best-effort — main host registration is the critical path)
         try {
           const helperBinPath = join(getInstallDir(platform), getHelperAssetName(platform.os, platform.arch));
-          const extensionIds = flags.extensionId ? [flags.extensionId] : [];
+          const extensionIds = effectiveExtId ? [effectiveExtId] : [];
           registerAllBrowsers(platform, binPath, helperBinPath, extensionIds);
         } catch {
           // Helper registration is best-effort — extension falls back to default port if helper unavailable
         }
 
+        // Write the bridge's Origin allowlist config from the resolved
+        // extension ID. The bridge reads this at startup; without it the WS
+        // server accepts any chrome-extension:// origin (defense-in-depth
+        // back-compat). With it, only the listed IDs can drive the bridge.
+        // Best-effort: a failure here logs nothing but the bridge keeps
+        // running in back-compat mode, so install does not fail.
+        if (effectiveExtId) {
+          try {
+            writeAllowedExtensionIds(
+              join(getInstallDir(platform), ALLOWED_IDS_FILENAME),
+              [effectiveExtId],
+            );
+          } catch {
+            // Fall through — bridge stays in back-compat mode.
+          }
+        }
+
         if (regResult.success) {
           setManifestPath(regResult.manifestPath);
           setRegisterStatus('complete');
+
+          // Register Windows autostart so the bridge runs from login onward.
+          // Failures are non-fatal (corp policy may block HKCU writes).
+          try {
+            registerAutostart(binPath, platform);
+          } catch {
+            // Best effort — fall back to on-demand spawn via the helper.
+          }
+
+          // Spawn the bridge immediately so the user doesn't have to log out/in
+          // to get a running bridge. Detached so it survives the installer exit.
+          if (binPath && existsSync(binPath)) {
+            try {
+              const child = spawn(binPath, ['--service'], {
+                detached: true,
+                stdio: 'ignore',
+                windowsHide: true,
+              });
+              child.unref();
+            } catch {
+              // Best effort — bridge will start at next login or on-demand.
+            }
+          }
         } else {
           setRegisterError(regResult.error);
           setRegisterStatus('error');
@@ -451,7 +527,7 @@ export const App: React.FC<AppProps> = ({
 
 const Header: React.FC = () => (
   <Box marginBottom={1}>
-    <Text bold color="blue">AI Browser CoPilot</Text>
+    <Text bold color="blue">AgentHub</Text>
     <Text> — </Text>
     <Text>Setup</Text>
   </Box>

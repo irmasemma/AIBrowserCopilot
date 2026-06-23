@@ -1,10 +1,10 @@
 {
-  "name": "ai-browser-copilot-setup",
-  "version": "0.1.2",
-  "description": "One-command setup for AI Browser CoPilot — installs the native host and configures your AI tools",
+  "name": "agenthub-setup",
+  "version": "0.5.15",
+  "description": "One-command setup for AgentHub — installs the native host and configures your AI tools (Claude Code, Cursor, VS Code, Windsurf, Continue, JetBrains, Zed)",
   "type": "module",
   "bin": {
-    "ai-browser-copilot-setup": "./dist/index.js"
+    "agenthub-setup": "./dist/index.js"
   },
   "files": [
     "dist"
@@ -31,5 +31,18 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "keywords": [
+    "agenthub",
+    "mcp",
+    "browser",
+    "automation",
+    "claude",
+    "cursor",
+    "ai-agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/irmasemma/AIBrowserCopilot.git"
   }
 }

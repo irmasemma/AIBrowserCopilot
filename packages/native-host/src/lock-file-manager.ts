@@ -1,13 +1,15 @@
 import { readFileSync, writeFileSync, unlinkSync, mkdirSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { homedir, platform } from 'node:os';
+import { join } from 'node:path';
+import { platform } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { WebSocket } from 'ws';
+import { resolveInstallDir } from './shared/install-dir.js';
 
 export interface LockFileData {
   pid: number;
   port: number;
   token: string;
+  ipcPath: string;
   startedAt: string;
   version: string;
   startedBy: string;
@@ -16,22 +18,18 @@ export interface LockFileData {
 export type InstanceCheck = 'none' | 'alive' | 'orphaned';
 
 function getLockDir(): string {
-  switch (platform()) {
-    case 'win32':
-      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'ai-browser-copilot');
-    case 'darwin':
-      return join(homedir(), 'Library', 'Application Support', 'ai-browser-copilot');
-    default:
-      return join(homedir(), '.local', 'share', 'ai-browser-copilot');
-  }
+  return resolveInstallDir();
 }
 
 export function getLockFilePath(): string {
   return join(getLockDir(), 'server.lock');
 }
 
-export function getWakeFilePath(): string {
-  return join(getLockDir(), 'server.wake');
+export function getIpcPath(): string {
+  if (platform() === 'win32') {
+    return `\\\\.\\pipe\\agenthub-${process.pid}`;
+  }
+  return join(getLockDir(), `service-${process.pid}.sock`);
 }
 
 export function generateToken(): string {
@@ -63,28 +61,6 @@ export function deleteLockFile(lockPath?: string): void {
     unlinkSync(filePath);
   } catch {
     // Lock file already gone — that's fine
-  }
-}
-
-// AD-18: Wake file signals extension that a new native host is available
-export function writeWakeFile(port: number): void {
-  const wakePath = getWakeFilePath();
-  const dir = dirname(wakePath);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-  writeFileSync(wakePath, JSON.stringify({
-    pid: process.pid,
-    port,
-    timestamp: Date.now(),
-  }), 'utf-8');
-}
-
-export function deleteWakeFile(): void {
-  try {
-    unlinkSync(getWakeFilePath());
-  } catch {
-    // Wake file already gone — fine
   }
 }
 
@@ -125,30 +101,6 @@ function probeWebSocket(port: number, expectedPid: number, timeoutMs: number = 3
       resolve(false);
     };
   });
-}
-
-export function killProcess(pid: number): boolean {
-  try {
-    process.kill(pid, 'SIGTERM');
-    return true;
-  } catch {
-    return false; // Process already dead
-  }
-}
-
-export async function waitForProcessExit(pid: number, timeoutMs: number = 3000): Promise<boolean> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (!isProcessAlive(pid)) return true;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  // Last resort: force kill
-  try {
-    process.kill(pid, 'SIGKILL');
-  } catch {
-    // Already dead
-  }
-  return !isProcessAlive(pid);
 }
 
 export async function checkExistingInstance(lockPath?: string): Promise<InstanceCheck> {

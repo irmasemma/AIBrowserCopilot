@@ -1,0 +1,35 @@
+{
+  "status": "ENDED",
+  "cyclesCompleted": 61,
+  "durationMin": 600,
+  "intervalMin": 10,
+  "browsers": [
+    {
+      "label": "A-fixture",
+      "browserId": "chrome:8e8b9412-c120-4144-a8b6-6d794999f8b6"
+    },
+    {
+      "label": "B-second",
+      "browserId": "chrome:5dad08da-e99f-412a-8627-3404ea8b4f07"
+    }
+  ],
+  "drops": 0,
+  "dropCycles": [],
+  "fixtureMin": 0,
+  "fixtureMax": 153,
+  "fixtureShortCycles": [
+    38
+  ],
+  "secondConstant15": true,
+  "secondMin": 15,
+  "secondMax": 15,
+  "claudeNonZeroExit": [],
+  "firstCycleTs": "2026-06-23T03:14:24.118Z",
+  "lastCycleTs": "2026-06-23T13:16:36.268Z",
+  "endEvent": {
+    "event": "end",
+    "cycles": 61,
+    "drops": 0,
+    "fixtureShort": 1
+  }
+}

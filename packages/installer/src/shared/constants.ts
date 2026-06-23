@@ -1,14 +1,19 @@
 import type { OsType, ArchType } from './platform.js';
 
-export const GITHUB_REPO = 'irmasemma/AIBrowserCopilot';
+// Public release-assets repo. Source lives in the private `irmasemma/AIBrowserCopilot`
+// monorepo, but compiled binaries are mirrored here so the installer can
+// download them anonymously via `/releases/latest/download/`. GitHub returns
+// 404 for anonymous downloads from private-repo release assets; publishing
+// to a separate public repo solves that without exposing source.
+export const GITHUB_REPO = 'irmasemma/agenthub-releases';
 export const GITHUB_RELEASES_BASE = `https://github.com/${GITHUB_REPO}/releases/latest/download`;
 
-export const NATIVE_HOST_NAME = 'com.copilot.native_host';
-export const NATIVE_HOST_DESCRIPTION = 'AI Browser CoPilot Native Messaging Host';
-export const HELPER_HOST_NAME = 'com.copilot.native_host_helper';
-export const HELPER_DESCRIPTION = 'AI Browser CoPilot Discovery Helper';
-export const BINARY_PREFIX = 'ai-browser-copilot';
-export const HELPER_PREFIX = 'ai-browser-copilot-helper';
+export const NATIVE_HOST_NAME = 'com.agenthub.native_host';
+export const NATIVE_HOST_DESCRIPTION = 'AgentHub Native Messaging Host';
+export const HELPER_HOST_NAME = 'com.agenthub.native_host_helper';
+export const HELPER_DESCRIPTION = 'AgentHub Discovery Helper';
+export const BINARY_PREFIX = 'agenthub';
+export const HELPER_PREFIX = 'agenthub-helper';
 // No default — must be provided via --extension-id flag
 export const DEFAULT_EXTENSION_ID = '';
 

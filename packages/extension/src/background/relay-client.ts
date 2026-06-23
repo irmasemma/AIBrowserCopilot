@@ -37,19 +37,41 @@ export function createRelay(callbacks: RelayCallbacks): Relay {
             pid: data.pid,
             port: data.port,
             version: data.version,
+            buildId: data.buildId,
             startedBy: data.startedBy,
             capabilities: data.capabilities,
             uptime: data.uptime,
+            connectedBrowsers: data.connectedBrowsers,
+            connectedStubs: data.connectedStubs,
           });
           break;
         case 'pong':
           callbacks.onPong(data.timestamp);
+          break;
+        case 'server_ping':
+          // Bridge-initiated keepalive. The fact that this onmessage handler
+          // ran means the SW just woke up — that alone is the goal. Reply
+          // with server_pong so the bridge can monitor liveness if it wants.
+          safeSend({ type: 'server_pong', timestamp: data.timestamp });
           break;
         case 'tool_request':
           callbacks.onToolRequest(data.id, data.tool, data.params ?? {});
           break;
         case 'tool_scan':
           callbacks.onToolScan(data.tools ?? []);
+          break;
+        case 'reload':
+          // Bridge-initiated reload (from the diagnostics UI). Triggers a
+          // full extension reload — kills the SW, restarts it, reopens
+          // the WS. Short delay so the user can see the toast and so this
+          // handler returns cleanly first.
+          try {
+            setTimeout(() => {
+              try {
+                chrome.runtime.reload();
+              } catch { /* dev contexts without chrome.runtime */ }
+            }, 250);
+          } catch { /* ignore */ }
           break;
         default:
           break;

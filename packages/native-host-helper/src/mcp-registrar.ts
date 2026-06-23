@@ -1,4 +1,4 @@
-// Self-heal: check whether `ai-browser-copilot` is registered in Claude Code's config,
+// Self-heal: check whether `agenthub` is registered in Claude Code's config,
 // and repair the registration if it's missing. Mirrors the installer's writeConfig
 // logic, but kept tiny because it ships inside the native messaging helper bundle.
 //
@@ -8,8 +8,9 @@
 // actions is the cheapest way to give the extension a "Re-add" button.
 
 import { readFileSync, writeFileSync, copyFileSync, existsSync, renameSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 import { homedir, platform as osPlatform, arch as osArch } from 'node:os';
+import { resolveInstallDir } from './install-dir.js';
 
 interface MaybeMcpEntry {
   command?: unknown;
@@ -36,28 +37,22 @@ export interface RepairMcpResult {
 
 const getClaudeCodeConfigPath = (): string => join(homedir(), '.claude.json');
 
-// Where the installer drops the production binaries. Same convention as
-// lock-file-reader.ts so we don't drift.
-const getInstallDir = (): string => {
-  switch (osPlatform()) {
-    case 'win32':
-      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'ai-browser-copilot');
-    case 'darwin':
-      return join(homedir(), 'Library', 'Application Support', 'ai-browser-copilot');
-    default:
-      return join(homedir(), '.local', 'share', 'ai-browser-copilot');
-  }
-};
+// Where the installer drops the production binaries. Delegates to the
+// shared resolver (honors AGENTHUB_INSTALL_DIR for test isolation, then
+// the platform-correct default). Must agree with lock-file-reader.ts /
+// service-status.ts / logger.ts so the helper doesn't drift across
+// modules.
+const getInstallDir = (): string => resolveInstallDir();
 
 const getNativeHostBinaryName = (): string => {
   const arch = osArch();
   switch (osPlatform()) {
     case 'win32':
-      return `ai-browser-copilot-win-${arch === 'arm64' ? 'arm64' : 'x64'}.exe`;
+      return `agenthub-win-${arch === 'arm64' ? 'arm64' : 'x64'}.exe`;
     case 'darwin':
-      return `ai-browser-copilot-macos-${arch === 'arm64' ? 'arm64' : 'x64'}`;
+      return `agenthub-macos-${arch === 'arm64' ? 'arm64' : 'x64'}`;
     default:
-      return `ai-browser-copilot-linux-${arch === 'arm64' ? 'arm64' : 'x64'}`;
+      return `agenthub-linux-${arch === 'arm64' ? 'arm64' : 'x64'}`;
   }
 };
 
@@ -77,7 +72,7 @@ const detectIndent = (content: string): string => {
 
 const hasEntry = (mcpServers: unknown): boolean => {
   if (!isPlainObject(mcpServers)) return false;
-  const entry = (mcpServers as Record<string, MaybeMcpEntry>)['ai-browser-copilot'];
+  const entry = (mcpServers as Record<string, MaybeMcpEntry>)['agenthub'];
   return isPlainObject(entry) && typeof (entry as MaybeMcpEntry).command === 'string';
 };
 
@@ -198,7 +193,7 @@ export const repairClaudeCodeRegistration = (): RepairMcpResult => {
   const mcpServers = isPlainObject(existing.mcpServers)
     ? { ...(existing.mcpServers as Record<string, unknown>) }
     : {};
-  mcpServers['ai-browser-copilot'] = newEntry;
+  mcpServers['agenthub'] = newEntry;
   const merged = { ...existing, mcpServers };
 
   let output = JSON.stringify(merged, null, indentStr);
