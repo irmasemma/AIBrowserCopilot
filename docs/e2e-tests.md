@@ -38,6 +38,53 @@ specs should follow the same pattern.
 | Asserts | Claude exits clean, ≥1 agenthub MCP tool was called, and **≥5 posts exported with non-empty text** (got 8). Content values not checked. |
 | Substitutions | Bundled Chromium (Chrome Dev 151 won't load unpacked — verified); fixture feed (live `@tech.mom_us` is login-walled); no `npx` installer (uses :7483 fallback). |
 
+## Soak: `threads-soak-two-browser.spec.ts`
+
+Long-running stability soak: two browsers on one bridge (A = local fixture feed,
+B = a live public site, default `stackoverflow.com/questions`), each driven by a
+real Claude CLI session that re-runs an export every `SOAK_INTERVAL_MIN`. Hard
+gate: every cycle both browsers stayed `live` (zero connection drops). Per-cycle
+data → `test-results/soak-timeline.ndjson`; exported items → `test-results/exports/`.
+
+```bash
+# 10h @ 10-min cadence. On a headless Linux box wrap with xvfb-run (headed Chromium).
+SOAK_DURATION_MIN=600 SOAK_INTERVAL_MIN=10 \
+  xvfb-run -a npx playwright test tests/e2e/threads-soak-two-browser.spec.ts --project=chromium-extension
+# Quick smoke: SOAK_DURATION_MIN=2 SOAK_INTERVAL_MIN=1
+```
+
+Last full run (2026-06-23): 10.1h, 61 cycles, **0 drops** — see `docs/soak-2026-06-23/`.
+
+### Remote log shipping → Neon (opt-in)
+
+`SOAK_REMOTE_LOGS=1` makes the soak write `<installDir>/logs-config.json` so the
+bridge ships bridge+ext records to the Neon-backed ingest endpoint
+(`packages/log-ingest/`). Secrets come from env — never committed. At startup it
+runs a **ship-probe** (sentinel POST to `/api/logs`) that **fails the run fast**
+unless `HTTP 200 / inserted>=1`, and prints the run's `install_id`.
+
+```bash
+SOAK_REMOTE_LOGS=1 \
+SOAK_LOG_ENDPOINT="https://<log-ingest>.vercel.app/api/logs" \
+SOAK_LOG_KEY="<INGEST_KEY>" \
+SOAK_DURATION_MIN=600 SOAK_INTERVAL_MIN=10 \
+  xvfb-run -a npx playwright test tests/e2e/threads-soak-two-browser.spec.ts --project=chromium-extension
+```
+
+Verify rows landed (Neon SQL editor), using the `install_id` the run prints:
+
+```sql
+select count(*), min(received_at), max(received_at)
+from logs where install_id = '<INSTALL_ID>';
+
+select received_at, src, lvl, event
+from logs where install_id = '<INSTALL_ID>' order by received_at desc limit 50;
+```
+
+Note: remote shipping is **opt-in per machine** — the installer does NOT enable it,
+so end-user installs ship locally only unless a `logs-config.json` with a `remote`
+block is present.
+
 ## Full catalog
 
 | Tests | Spec | Browser | Covers |
@@ -57,6 +104,7 @@ specs should follow the same pattern.
 | 6 | `install-and-chat.spec.ts` | Real install | Side-panel chat + no-bridge resilience + recovery to Connected |
 | 6 | `threads-export-bundled.spec.ts` | Chromium | **(new)** real Claude exports a feed via MCP — see table above |
 | 8 | `test-infra-regressions.spec.ts` | None (logic) | **(new)** regression guards: lock-file readiness signal, Chrome-Dev-151 load-extension block, AGENTHUB_TEST_ env-var docs |
+| 1 | `threads-soak-two-browser.spec.ts` | Chromium ×2 | **(new)** long soak — see section below |
 | 5 | `site-access-banner.spec.ts` | Chromium | Site-access permission banner behavior |
 | 5 | `connection-resilience.spec.ts` | Chromium | Reconnect / backoff after drops |
 | 5 | `chaos-connection.spec.ts` | Chromium | Connection under injected chaos/faults |
