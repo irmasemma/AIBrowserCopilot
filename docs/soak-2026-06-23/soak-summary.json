@@ -1,6 +1,6 @@
 {
-  "status": "running",
-  "cyclesCompleted": 52,
+  "status": "ENDED",
+  "cyclesCompleted": 61,
   "durationMin": 600,
   "intervalMin": 10,
   "browsers": [
@@ -25,5 +25,11 @@
   "secondMax": 15,
   "claudeNonZeroExit": [],
   "firstCycleTs": "2026-06-23T03:14:24.118Z",
-  "lastCycleTs": "2026-06-23T11:45:28.950Z"
+  "lastCycleTs": "2026-06-23T13:16:36.268Z",
+  "endEvent": {
+    "event": "end",
+    "cycles": 61,
+    "drops": 0,
+    "fixtureShort": 1
+  }
 }
