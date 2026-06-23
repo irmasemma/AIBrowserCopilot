@@ -39,6 +39,24 @@ interface BrowserSpec {
   isStableLoadExtensionBlocked: (exe: string) => boolean;
 }
 
+/**
+ * True when a real browser binary silently ignores --load-extension (so an
+ * unpacked extension will never load).
+ *
+ * Google Chrome blocks it on stable since channel 138, and has SINCE extended
+ * the block to its other channels — verified empirically: Chrome Dev 151
+ * ignores the flag too. So treat EVERY Google Chrome channel (stable / Dev /
+ * Beta / Canary-SxS) as blocked. Microsoft Edge still honours --load-extension.
+ *
+ * Bundled Chromium (Playwright) is launched without a real exe path and is not
+ * subject to this — it still loads unpacked extensions.
+ */
+export const isLoadExtensionBlocked = (exe: string): boolean => {
+  const p = exe.toLowerCase();
+  if (p.includes('msedge') || p.includes('edge\\application')) return false;
+  return true; // any Google Chrome channel now blocks unpacked --load-extension
+};
+
 const CHROME_SPEC: BrowserSpec = {
   imageName: 'chrome.exe',
   exeCandidates: [
@@ -53,10 +71,7 @@ const CHROME_SPEC: BrowserSpec = {
   defaultUserDataDir: path.join(process.env.LOCALAPPDATA ?? '', 'Google', 'Chrome', 'User Data'),
   defaultProfile: 'Profile 1',
   extensionsUrl: 'chrome://extensions/',
-  isStableLoadExtensionBlocked: (exe) => {
-    const dir = exe.toLowerCase();
-    return !dir.includes('chrome dev') && !dir.includes('chrome beta') && !dir.includes('chrome sxs');
-  },
+  isStableLoadExtensionBlocked: (exe) => isLoadExtensionBlocked(exe),
 };
 
 const EDGE_SPEC: BrowserSpec = {
@@ -385,13 +400,13 @@ export const launchRealChrome = async (opts: LaunchOpts = {}): Promise<LaunchedC
   }
   if (opts.extensionDist && SPEC.isStableLoadExtensionBlocked(chromeExe)) {
     throw new Error(
-      `Refusing to launch Chrome stable (${chromeExe}) with --load-extension.\n` +
-        'Google Chrome stable silently ignores --load-extension since channel 138+, so the\n' +
+      `Refusing to launch Google Chrome (${chromeExe}) with --load-extension.\n` +
+        'Every Google Chrome channel now silently ignores --load-extension (stable since\n' +
+        'channel 138, and Dev/Beta/Canary since ~151 — verified on Chrome Dev 151), so the\n' +
         'unpacked extension will never load and this test will hang on the side-panel\n' +
-        'connection step. Install Chrome Dev (https://www.google.com/chrome/dev/), set\n' +
-        'AGENTHUB_TEST_CHROME_EXE to a Chromium / Canary / Beta binary that still honours\n' +
-        '--load-extension, or run the test against Edge by setting AGENTHUB_TEST_BROWSER=edge.\n' +
-        'See docs/test-findings.md (#4) for context.',
+        'connection step. Run the test against Edge (AGENTHUB_TEST_BROWSER=edge), or set\n' +
+        'AGENTHUB_TEST_EDGE_EXE / AGENTHUB_TEST_CHROME_EXE to a binary that still honours\n' +
+        '--load-extension. See docs/test-findings.md (#4) and docs/e2e-tests.md for context.',
     );
   }
 

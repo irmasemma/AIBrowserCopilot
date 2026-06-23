@@ -104,20 +104,33 @@ test.beforeAll(async () => {
   const tempInstallParent = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-e2e-installdir-'));
   // Bridge looks at LOCALAPPDATA/agenthub/extension-ids.json on Windows.
   const tempInstallDir = path.join(tempInstallParent, 'agenthub');
+  const lockFile = path.join(tempInstallDir, 'server.lock');
   fs.mkdirSync(tempInstallDir, { recursive: true });
   nativeHost = spawn('node', [nativeHostDist], {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, CLAUDECODE: '1', LOCALAPPDATA: tempInstallParent },
   });
 
+  // Readiness signal: startServer writes %LOCALAPPDATA%/agenthub/server.lock
+  // from its 'listening' handler — that's the ONLY reliable "bridge is up"
+  // signal. (It never prints a "Server started" line; the previous stderr
+  // regex here could never match — see docs/e2e-tests.md.) A missing lock
+  // also means the port was already held → index.js flipped to client-proxy
+  // mode and we failed to commandeer 7483.
+  let bridgeExited: number | null = null;
+  nativeHost.on('exit', (code) => { bridgeExited = code ?? -1; });
   nativeHostPort = await new Promise<number>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error('bridge startup timeout')), 15_000);
-    nativeHost.stderr?.on('data', (data: Buffer) => {
-      // Bridge logs "Server started on 127.0.0.1:<port> (pid=...)"
-      const m = data.toString().match(/Server started on 127\.0\.0\.1:(\d+)/);
-      if (m) { clearTimeout(t); resolve(parseInt(m[1], 10)); }
-    });
-    nativeHost.on('exit', (code) => { clearTimeout(t); reject(new Error(`bridge exited: ${code}`)); });
+    const deadline = Date.now() + 15_000;
+    const poll = () => {
+      if (bridgeExited !== null) return reject(new Error(`bridge exited: ${bridgeExited}`));
+      try {
+        const lock = JSON.parse(fs.readFileSync(lockFile, 'utf8')) as { port?: number; pid?: number };
+        if (lock.port && lock.pid === nativeHost.pid) return resolve(lock.port);
+      } catch { /* not written yet */ }
+      if (Date.now() > deadline) return reject(new Error('bridge never claimed its port (no lock file)'));
+      setTimeout(poll, 250);
+    };
+    poll();
   });
 
   // 2. Launch primary chromium context.

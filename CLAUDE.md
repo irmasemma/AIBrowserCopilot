@@ -172,8 +172,8 @@ After every CI release, the new `agenthub-setup` installer must be published to 
 `tests/e2e/install-and-connect.spec.ts` exercises the full install → connect → MCP path with the user's real browser profile. Default-on against Edge (because of the Chrome stable block above):
 
 ```
-COPILOT_TEST_KILL_CHROME=1 COPILOT_TEST_BROWSER=edge \
+AGENTHUB_TEST_KILL_CHROME=1 AGENTHUB_TEST_BROWSER=edge \
   npx playwright test tests/e2e/install-and-connect.spec.ts
 ```
 
-`COPILOT_TEST_KILL_CHROME=1` is required (it'll close the user's browser session). Test calls `claude -p` for the chat assertions, so `claude` must be on PATH and logged in. Full details + env-var reference + every gotcha hit while building this: `docs/test-findings.md`.
+`AGENTHUB_TEST_KILL_CHROME=1` is required (it'll close the user's browser session). Test calls `claude -p` for the chat assertions, so `claude` must be on PATH and logged in. Full details + env-var reference + every gotcha hit while building this: `docs/test-findings.md`.

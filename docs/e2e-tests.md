@@ -1,0 +1,47 @@
+# E2E test catalog
+
+All e2e specs live in `tests/e2e/`. **25 spec files, ~344 test cases.**
+
+Browser legend: **Chromium** = Playwright's bundled Chromium (unpacked extension, throwaway profile); **Real Edge (CDP)** = attaches over CDP to an Edge you start yourself; **Real install** = installs into / hijacks a real browser profile (kills the running browser); **Live bridge** = talks to an already-connected real browser.
+
+## New: `threads-export-bundled.spec.ts`
+
+| Field | Value |
+| --- | --- |
+| File | `tests/e2e/threads-export-bundled.spec.ts` (+ fixture `fixtures/threads-feed.html`) |
+| Tests | 1 |
+| Browser | Chromium (headed) |
+| Chain | real `claude` CLI → `agenthub` MCP → test bridge (:7483) → extension → feed fixture on `http://127.0.0.1` |
+| What it does | Loads the unpacked extension in headed Chromium, serves a Threads-style feed (8 posts) on 127.0.0.1, then starts a real Claude (haiku) session and asks it to export the posts. Claude drives MCP itself: `list_tabs` → `take_screenshot` → `scroll_page` → `get_page_content`. |
+| Asserts | Claude exits clean, ≥1 agenthub MCP tool was called, and **≥5 posts exported with non-empty text** (got 8). Content values not checked. |
+| Substitutions | Bundled Chromium (Chrome Dev 151 won't load unpacked — verified); fixture feed (live `@tech.mom_us` is login-walled); no `npx` installer (uses :7483 fallback). |
+
+## Full catalog
+
+| Tests | Spec | Browser | Covers |
+| --- | --- | --- | --- |
+| 132 | `form-stress.spec.ts` | Chromium | Form filling across 20 framework fixtures (React/Vue/Angular/Svelte/Lit/shadow-DOM/iframes/…) |
+| 43 | `form-filling.spec.ts` | Chromium | Core fill_form behavior on common form shapes |
+| 26 | `forms-extraction.spec.ts` | Chromium | read_form / extract from forms |
+| 25 | `tools.spec.ts` | Chromium | Tool dispatcher surface (navigate, click, content, etc.) |
+| 14 | `click-and-form.spec.ts` | Chromium | Click + form interaction flows |
+| 11 | `multi-profile-fanout.spec.ts` | Chromium | Tab namespacing, conditional activation, SW keepalive, MCP envelope translation |
+| 10 | `connection-e2e.spec.ts` | Chromium | Discovery → WS connect → server_info handshake |
+| 9 | `install-lifecycle.spec.ts` | Chromium | Install/uninstall lifecycle states |
+| 9 | `extension.spec.ts` | Chromium | Extension load + side panel basics |
+| 8 | `tool-path-real.spec.ts` | Live bridge | Full tool round-trip through an already-connected real browser |
+| 6 | `multi-client-routing.spec.ts` | Chromium ×2 | Two profiles on one bridge: distinct registration, fan-out aggregation, prefix routing, cross-browser isolation, survivor |
+| 6 | `install-flow.spec.ts` | Chromium | Installer steps / registration writes |
+| 6 | `install-and-chat.spec.ts` | Real install | Side-panel chat + no-bridge resilience + recovery to Connected |
+| 6 | `threads-export-bundled.spec.ts` | Chromium | **(new)** real Claude exports a feed via MCP — see table above |
+| 8 | `test-infra-regressions.spec.ts` | None (logic) | **(new)** regression guards: lock-file readiness signal, Chrome-Dev-151 load-extension block, AGENTHUB_TEST_ env-var docs |
+| 5 | `site-access-banner.spec.ts` | Chromium | Site-access permission banner behavior |
+| 5 | `connection-resilience.spec.ts` | Chromium | Reconnect / backoff after drops |
+| 5 | `chaos-connection.spec.ts` | Chromium | Connection under injected chaos/faults |
+| 2 | `real-edge-via-cdp-mcp.spec.ts` | Real Edge (CDP) | MCP tool calls against real Edge |
+| 2 | `real-edge-via-cdp-forms.spec.ts` | Real Edge (CDP) | Form filling against real Edge |
+| 2 | `install-and-connect.spec.ts` | Real install | Clean + stale reinstall → Connected → claude -p round-trips |
+| 1 | `real-edge-via-cdp-sidepanel.spec.ts` | Real Edge (CDP) | Side panel against real Edge |
+| 1 | `real-edge-cdp.spec.ts` | Real Edge (CDP) | Baseline CDP attach to real Edge |
+| 1 | `real-edge-grant.spec.ts` | Chromium | Permission-grant flow (bundled Chromium despite name) |
+| 1 | `edge-diag.spec.ts` | Chromium | Diagnostics smoke (bundled Chromium despite name) |
