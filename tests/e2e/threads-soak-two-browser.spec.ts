@@ -31,6 +31,7 @@
 import { test, expect, chromium, type BrowserContext } from '@playwright/test';
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
 import http from 'node:http';
+import https from 'node:https';
 import { readFileSync, appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'path';
 import fs from 'node:fs';
@@ -118,6 +119,51 @@ const fetchState = async (port: number): Promise<Record<string, string>> => {
   return out;
 };
 
+/**
+ * Verify the remote-log pipeline end-to-end by POSTing one sentinel record to
+ * the ingest endpoint with this run's install_id. The remote-sink is silent
+ * (fire-and-forget, no log events), so this direct probe is the only way to
+ * confirm endpoint + key + Neon insert actually work. A 200 with inserted>=1
+ * means the real (same-endpoint/key) sink will land rows too. The probe row
+ * shares the install_id, so it shows up in the same verify query.
+ */
+const probeRemoteIngest = (
+  endpoint: string,
+  apiKey: string,
+  installId: string,
+): Promise<{ ok: boolean; status: number; inserted?: number; error?: string }> =>
+  new Promise((resolve) => {
+    let u: URL;
+    try { u = new URL(endpoint); } catch { return resolve({ ok: false, status: 0, error: 'bad_url' }); }
+    const body = JSON.stringify({
+      installId,
+      records: [{
+        t: new Date().toISOString(), src: 'bridge', lvl: 'info',
+        event: 'soak.ship-probe', version: 'soak',
+        note: 'two-browser soak remote-log connectivity probe',
+      }],
+    });
+    const payload = Buffer.from(body, 'utf-8');
+    const lib = u.protocol === 'http:' ? http : https;
+    const req = lib.request({
+      method: 'POST', hostname: u.hostname, port: u.port || undefined,
+      path: u.pathname + u.search,
+      headers: { 'content-type': 'application/json', 'content-length': payload.length, 'x-ingest-key': apiKey },
+      timeout: 10_000,
+    }, (res) => {
+      let d = ''; res.on('data', (c) => (d += c));
+      res.on('end', () => {
+        let inserted: number | undefined;
+        try { inserted = (JSON.parse(d) as { inserted?: number }).inserted; } catch { /* non-json */ }
+        const status = res.statusCode ?? 0;
+        resolve({ ok: status === 200, status, inserted, error: status === 200 ? undefined : d.slice(0, 160) });
+      });
+    });
+    req.on('error', (e) => resolve({ ok: false, status: 0, error: e.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, status: 0, error: 'timeout' }); });
+    req.write(payload); req.end();
+  });
+
 interface ExportResult { tools: string[]; posts: number; items: unknown[]; exitCode: number }
 
 /** One real Claude CLI session operating the tab whose url contains `match`. */
@@ -176,11 +222,29 @@ test.describe('two-browser soak (fixture + live public site)', () => {
     await sleep(500);
 
     const installParent = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-soak-'));
-    const lockFile = path.join(installParent, 'agenthub', 'server.lock');
-    fs.mkdirSync(path.join(installParent, 'agenthub'), { recursive: true });
+    const installDir = path.join(installParent, 'agenthub');
+    const lockFile = path.join(installDir, 'server.lock');
+    fs.mkdirSync(installDir, { recursive: true });
+
+    // Opt-in: ship bridge + extension log records to the Neon-backed ingest
+    // endpoint. Enabled only when SOAK_REMOTE_LOGS=1 AND both secrets are
+    // provided via env (we never hard-code endpoint/key). The bridge reads
+    // <installDir>/logs-config.json at startup (initRemoteSink).
+    if (process.env.SOAK_REMOTE_LOGS === '1') {
+      const endpoint = process.env.SOAK_LOG_ENDPOINT;
+      const apiKey = process.env.SOAK_LOG_KEY;
+      if (!endpoint || !apiKey) {
+        throw new Error('SOAK_REMOTE_LOGS=1 requires SOAK_LOG_ENDPOINT and SOAK_LOG_KEY');
+      }
+      writeFileSync(
+        path.join(installDir, 'logs-config.json'),
+        JSON.stringify({ enabled: true, remote: { enabled: true, endpoint, apiKey } }, null, 2),
+      );
+    }
+
     bridge = spawn('node', [nativeHostDist], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, CLAUDECODE: '1', LOCALAPPDATA: installParent, AGENTHUB_INSTALL_DIR: path.join(installParent, 'agenthub') },
+      env: { ...process.env, CLAUDECODE: '1', LOCALAPPDATA: installParent, AGENTHUB_INSTALL_DIR: installDir },
     });
     let exited: number | null = null;
     bridge.on('exit', (c) => { exited = c ?? -1; });
@@ -216,7 +280,22 @@ test.describe('two-browser soak (fixture + live public site)', () => {
     expect(clients[0].uuid).not.toBe(clients[1].uuid);
 
     mkdirSync(path.dirname(TIMELINE), { recursive: true });
-    appendFileSync(TIMELINE, JSON.stringify({ event: 'start', durationMin: DURATION_MIN, intervalMin: INTERVAL_MIN, browsers: clients.map((c) => ({ label: c.label, browserId: c.browserId })) }) + '\n');
+    // install-id is what correlates this run's rows in Neon (logs.install_id).
+    // The bridge writes it on first remote-sink init; surface it so you can
+    // query exactly this run.
+    let installId = '';
+    try { installId = readFileSync(path.join(installDir, 'install-id'), 'utf8').trim(); } catch { /* remote off */ }
+    const remoteOn = process.env.SOAK_REMOTE_LOGS === '1';
+    let shipProbe: { ok: boolean; status: number; inserted?: number; error?: string } | null = null;
+    if (remoteOn) {
+      shipProbe = await probeRemoteIngest(process.env.SOAK_LOG_ENDPOINT!, process.env.SOAK_LOG_KEY!, installId);
+      console.log(`[soak] remote logs ON → endpoint=${process.env.SOAK_LOG_ENDPOINT} install_id=${installId || '(none)'}`);
+      console.log(`[soak] ship probe: ${shipProbe.ok ? `OK (HTTP ${shipProbe.status}, inserted=${shipProbe.inserted})` : `FAILED (status=${shipProbe.status} ${shipProbe.error ?? ''})`}`);
+      // Fail fast: if you asked for remote logs but the pipeline rejects us,
+      // surface it now rather than discovering empty Neon hours later.
+      expect(shipProbe.ok, `remote-log ship probe failed: ${JSON.stringify(shipProbe)}`).toBe(true);
+    }
+    appendFileSync(TIMELINE, JSON.stringify({ event: 'start', durationMin: DURATION_MIN, intervalMin: INTERVAL_MIN, remoteLogs: remoteOn, installId, shipProbe, browsers: clients.map((c) => ({ label: c.label, browserId: c.browserId })) }) + '\n');
   });
 
   test.afterAll(async () => {
