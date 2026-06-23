@@ -164,6 +164,36 @@ const probeRemoteIngest = (
     req.write(payload); req.end();
   });
 
+/**
+ * Resolve the remote-log endpoint + key. Remote is **ON by default** — set
+ * SOAK_REMOTE_LOGS=0 to force it off. Creds come from env first
+ * (SOAK_LOG_ENDPOINT / SOAK_LOG_KEY), else are auto-loaded from this machine's
+ * local files (never hard-coded, never committed):
+ *   - key      → packages/log-ingest/.env.production.local (`INGEST_KEY`)
+ *   - endpoint → %LOCALAPPDATA%/agenthub/logs-config.json (`remote.endpoint`)
+ * Returns null only when explicitly disabled or creds can't be found.
+ */
+function resolveRemote(): { endpoint: string; apiKey: string } | null {
+  if (process.env.SOAK_REMOTE_LOGS === '0') return null;
+  let endpoint = process.env.SOAK_LOG_ENDPOINT ?? '';
+  let apiKey = process.env.SOAK_LOG_KEY ?? '';
+  if (!apiKey) {
+    try {
+      const env = readFileSync(path.resolve(REPO_ROOT, 'packages/log-ingest/.env.production.local'), 'utf8');
+      const m = env.match(/^\s*INGEST_KEY\s*=\s*(.+?)\s*$/m);
+      if (m) apiKey = m[1].trim().replace(/^["']|["']$/g, '');
+    } catch { /* no local key file */ }
+  }
+  if (!endpoint) {
+    try {
+      const lcPath = path.join(process.env.LOCALAPPDATA ?? '', 'agenthub', 'logs-config.json');
+      const lc = JSON.parse(readFileSync(lcPath, 'utf8')) as { remote?: { endpoint?: string } };
+      endpoint = lc.remote?.endpoint ?? '';
+    } catch { /* no local logs-config */ }
+  }
+  return endpoint && apiKey ? { endpoint, apiKey } : null;
+}
+
 interface ExportResult { tools: string[]; posts: number; items: unknown[]; exitCode: number }
 
 /** One real Claude CLI session operating the tab whose url contains `match`. */
@@ -226,20 +256,18 @@ test.describe('two-browser soak (fixture + live public site)', () => {
     const lockFile = path.join(installDir, 'server.lock');
     fs.mkdirSync(installDir, { recursive: true });
 
-    // Opt-in: ship bridge + extension log records to the Neon-backed ingest
-    // endpoint. Enabled only when SOAK_REMOTE_LOGS=1 AND both secrets are
-    // provided via env (we never hard-code endpoint/key). The bridge reads
-    // <installDir>/logs-config.json at startup (initRemoteSink).
-    if (process.env.SOAK_REMOTE_LOGS === '1') {
-      const endpoint = process.env.SOAK_LOG_ENDPOINT;
-      const apiKey = process.env.SOAK_LOG_KEY;
-      if (!endpoint || !apiKey) {
-        throw new Error('SOAK_REMOTE_LOGS=1 requires SOAK_LOG_ENDPOINT and SOAK_LOG_KEY');
-      }
+    // Ship bridge + extension log records to the Neon-backed ingest endpoint.
+    // ON by default (SOAK_REMOTE_LOGS=0 to disable); creds resolved from env or
+    // local files. The bridge reads <installDir>/logs-config.json at startup
+    // (initRemoteSink).
+    const remote = resolveRemote();
+    if (remote) {
       writeFileSync(
         path.join(installDir, 'logs-config.json'),
-        JSON.stringify({ enabled: true, remote: { enabled: true, endpoint, apiKey } }, null, 2),
+        JSON.stringify({ enabled: true, remote: { enabled: true, endpoint: remote.endpoint, apiKey: remote.apiKey } }, null, 2),
       );
+    } else if (process.env.SOAK_REMOTE_LOGS !== '0') {
+      console.warn('[soak] remote logs ON by default but endpoint/key not resolvable — running WITHOUT remote');
     }
 
     bridge = spawn('node', [nativeHostDist], {
@@ -285,11 +313,11 @@ test.describe('two-browser soak (fixture + live public site)', () => {
     // query exactly this run.
     let installId = '';
     try { installId = readFileSync(path.join(installDir, 'install-id'), 'utf8').trim(); } catch { /* remote off */ }
-    const remoteOn = process.env.SOAK_REMOTE_LOGS === '1';
+    const remoteOn = Boolean(remote);
     let shipProbe: { ok: boolean; status: number; inserted?: number; error?: string } | null = null;
-    if (remoteOn) {
-      shipProbe = await probeRemoteIngest(process.env.SOAK_LOG_ENDPOINT!, process.env.SOAK_LOG_KEY!, installId);
-      console.log(`[soak] remote logs ON → endpoint=${process.env.SOAK_LOG_ENDPOINT} install_id=${installId || '(none)'}`);
+    if (remote) {
+      shipProbe = await probeRemoteIngest(remote.endpoint, remote.apiKey, installId);
+      console.log(`[soak] remote logs ON → endpoint=${remote.endpoint} install_id=${installId || '(none)'}`);
       console.log(`[soak] ship probe: ${shipProbe.ok ? `OK (HTTP ${shipProbe.status}, inserted=${shipProbe.inserted})` : `FAILED (status=${shipProbe.status} ${shipProbe.error ?? ''})`}`);
       // Fail fast: if you asked for remote logs but the pipeline rejects us,
       // surface it now rather than discovering empty Neon hours later.
