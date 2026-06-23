@@ -79,7 +79,14 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - run: npm ci
+      # Inject the remote-log ingest endpoint + append-only key into the bridge
+      # binary at build time (esbuild `define` in scripts/build-bundle.mjs). Set
+      # these as GitHub repo secrets so released binaries ship logs to Neon by
+      # default. If unset, the binary builds with NO default (remote stays off).
       - run: npm run ${{ matrix.compile-script }} -w packages/native-host
+        env:
+          AGENTHUB_INGEST_ENDPOINT: ${{ secrets.AGENTHUB_INGEST_ENDPOINT }}
+          AGENTHUB_INGEST_KEY: ${{ secrets.AGENTHUB_INGEST_KEY }}
       # Helper binary — extension uses this for native messaging diagnostics
       # (service status, MCP registration check, native-host spawn). Must ship
       # alongside the main bridge binary or the side panel reports "Setup
