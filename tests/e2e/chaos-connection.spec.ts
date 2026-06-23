@@ -22,11 +22,32 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { WebSocket, type RawData } from 'ws';
 import { mkdtempSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:net';
 import path from 'node:path';
 
 const harness = path.resolve(__dirname, 'helpers/start-bridge.mjs');
 
-function freePort(): number { return 41000 + Math.floor(Math.random() * 20000); }
+function freePort(): Promise<number> {
+  // OS-assigned ephemeral port (listen on 0). The previous random-range
+  // approach collided occasionally on Windows ('bridge never came up'
+  // because the picked port was already in use). The close→reuse race
+  // here is far smaller than random collisions in a 20k-port range.
+  return new Promise((resolve, reject) => {
+    const s = createServer();
+    s.unref();
+    s.on('error', reject);
+    s.listen(0, '127.0.0.1', () => {
+      const addr = s.address();
+      if (addr && typeof addr === 'object' && typeof addr.port === 'number') {
+        const port = addr.port;
+        s.close(() => resolve(port));
+      } else {
+        s.close();
+        reject(new Error('failed to claim ephemeral port'));
+      }
+    });
+  });
+}
 function makeLocalAppData(): string {
   const root = mkdtempSync(path.join(tmpdir(), 'ah-chaos-'));
   mkdirSync(path.join(root, 'agenthub'), { recursive: true });
@@ -133,7 +154,7 @@ class Mcp {
 
 test.describe('connection chaos (real bridge, real protocol, injected faults)', () => {
   test('CHAOS reconnect-collision: a fresh canonical relay supersedes a still-ponging one (no 4002 loop)', async () => {
-    const lad = makeLocalAppData(); const port = freePort();
+    const lad = makeLocalAppData(); const port = await freePort();
     const bridge = spawnBridge(port, lad);
     try {
       await waitForBridge(port);
@@ -151,7 +172,7 @@ test.describe('connection chaos (real bridge, real protocol, injected faults)', 
   });
 
   test('CHAOS duplicate-vs-live: a non-canonical duplicate cannot kill the live relay (4002, relay survives)', async () => {
-    const lad = makeLocalAppData(); const port = freePort();
+    const lad = makeLocalAppData(); const port = await freePort();
     const bridge = spawnBridge(port, lad);
     try {
       await waitForBridge(port);
@@ -169,7 +190,7 @@ test.describe('connection chaos (real bridge, real protocol, injected faults)', 
   });
 
   test('CHAOS SW-eviction: abrupt relay death + reconnect → a tool routes to the NEW socket', async () => {
-    const lad = makeLocalAppData(); const port = freePort();
+    const lad = makeLocalAppData(); const port = await freePort();
     const bridge = spawnBridge(port, lad);
     try {
       await waitForBridge(port);
@@ -199,7 +220,7 @@ test.describe('connection chaos (real bridge, real protocol, injected faults)', 
     // The green-but-zero-tabs failure class: a socket that answers pings (looks
     // healthy) but never replies to tool_request. The call MUST return (not hang)
     // and MUST be flagged isError — never a silent empty "success".
-    const lad = makeLocalAppData(); const port = freePort();
+    const lad = makeLocalAppData(); const port = await freePort();
     const bridge = spawnBridge(port, lad);
     try {
       await waitForBridge(port);
@@ -215,7 +236,7 @@ test.describe('connection chaos (real bridge, real protocol, injected faults)', 
   });
 
   test('CHAOS bind-race: a second bridge on the same port never clobbers the winner’s lock', async () => {
-    const lad = makeLocalAppData(); const port = freePort();
+    const lad = makeLocalAppData(); const port = await freePort();
     const winner = spawnBridge(port, lad);
     let loser: ChildProcess | undefined;
     try {

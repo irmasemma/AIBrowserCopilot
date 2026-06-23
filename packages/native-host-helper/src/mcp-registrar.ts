@@ -8,7 +8,7 @@
 // actions is the cheapest way to give the extension a "Re-add" button.
 
 import { readFileSync, writeFileSync, copyFileSync, existsSync, renameSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 import { homedir, platform as osPlatform, arch as osArch } from 'node:os';
 import { resolveInstallDir } from './install-dir.js';
 

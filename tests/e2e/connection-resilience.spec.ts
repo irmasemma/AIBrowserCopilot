@@ -24,14 +24,32 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { WebSocket } from 'ws';
 import { mkdtempSync, mkdirSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:net';
 import path from 'node:path';
 
 const harness = path.resolve(__dirname, 'helpers/start-bridge.mjs');
 
-function freePort(): number {
-  // High ephemeral range; collisions across tests are astronomically unlikely
-  // and a clash just fails that one test loudly rather than silently passing.
-  return 21000 + Math.floor(Math.random() * 20000);
+function freePort(): Promise<number> {
+  // Ask the OS for an ephemeral port (listen on 0 → kernel-assigned). The
+  // random-from-a-range approach we used before collided about once per
+  // ~50 runs on Windows; this can theoretically race the close→reuse gap,
+  // but the OS ephemeral pool is >16k ports with round-robin allocation,
+  // so a real collision is far less likely than the old approach.
+  return new Promise((resolve, reject) => {
+    const s = createServer();
+    s.unref();
+    s.on('error', reject);
+    s.listen(0, '127.0.0.1', () => {
+      const addr = s.address();
+      if (addr && typeof addr === 'object' && typeof addr.port === 'number') {
+        const port = addr.port;
+        s.close(() => resolve(port));
+      } else {
+        s.close();
+        reject(new Error('failed to claim ephemeral port'));
+      }
+    });
+  });
 }
 
 function makeLocalAppData(): string {
@@ -88,7 +106,7 @@ function onceServerInfo(ws: WebSocket): Promise<void> {
 test.describe('connection resilience (real bridge process)', () => {
   test('writes server.lock only after binding the port', async () => {
     const lad = makeLocalAppData();
-    const port = freePort();
+    const port = await freePort();
     const child = spawnBridge(port, lad);
     try {
       const info = await waitForServerInfo(port);
@@ -115,7 +133,7 @@ test.describe('connection resilience (real bridge process)', () => {
     // makes the loser exit instead of lingering as a zombie. We assert BOTH the
     // lock integrity (the core guarantee) and that the loser bows out.
     const lad = makeLocalAppData();
-    const port = freePort();
+    const port = await freePort();
     const winner = spawnBridge(port, lad);
     let loser: ChildProcess | undefined;
     try {
@@ -151,7 +169,7 @@ test.describe('connection resilience (real bridge process)', () => {
 
   test('bug #1: a duplicate socket does NOT kill a LIVE relay (rejected with 4002)', async () => {
     const lad = makeLocalAppData();
-    const port = freePort();
+    const port = await freePort();
     const bridge = spawnBridge(port, lad);
     try {
       await waitForServerInfo(port);
@@ -185,7 +203,7 @@ test.describe('connection resilience (real bridge process)', () => {
     // The real client reconnecting (new SW life, role=relay) while a stale
     // socket still pongs must be ACCEPTED — not 4002-looped. Identity wins.
     const lad = makeLocalAppData();
-    const port = freePort();
+    const port = await freePort();
     const bridge = spawnBridge(port, lad);
     try {
       await waitForServerInfo(port);
@@ -219,7 +237,7 @@ test.describe('connection resilience (real bridge process)', () => {
 
   test('bug #1: a DEAD/orphaned relay IS replaced by a reconnect', async () => {
     const lad = makeLocalAppData();
-    const port = freePort();
+    const port = await freePort();
     const bridge = spawnBridge(port, lad);
     try {
       await waitForServerInfo(port);

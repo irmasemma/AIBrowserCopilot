@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { scanAITools, type ToolScanResult } from './tool-scanner.js';
+import { scanAITools } from './tool-scanner.js';
 
 describe('tool-scanner', () => {
   describe('scanAITools', () => {
