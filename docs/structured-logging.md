@@ -125,6 +125,32 @@ unless a `logs-config.json` opts them in. Precedence: master `enabled:false` →
 explicit `remote.enabled:false` → explicit file creds → baked-in default
 (packaged only). Users can always opt out via either kill-switch.
 
+#### Rolling default-on shipping out to all users
+
+It's the bridge **binary** that ships (the extension's logs ride through it),
+delivered to users via the installer downloading a GitHub release. So shipping
+turns on for a client only when ALL of these are done — not from a `git pull`,
+`npm run dev`, or a Chrome Web Store extension update:
+
+1. **Add the two GitHub repo secrets** (one-time):
+   ```
+   gh secret set AGENTHUB_INGEST_ENDPOINT --repo irmasemma/AIBrowserCopilot --body "https://<app>.vercel.app/api/logs"
+   gh secret set AGENTHUB_INGEST_KEY      --repo irmasemma/AIBrowserCopilot --body "<INGEST_KEY>"
+   ```
+   `.github/workflows/release.yml` passes them into the native-host compile.
+   Without them, CI builds remote-OFF binaries.
+2. **Cut a release** — push a `v*` tag → CI builds the keyed binaries and
+   dual-publishes to the releases repos (needs `PAT_RELEASES_PUBLIC`).
+3. **Publish the installer to npm** — `cd packages/installer && npm publish`
+   (otherwise `npx agenthub-setup@latest` serves the old version).
+4. **Users install/update** — `npx agenthub-setup@latest` pulls the new keyed
+   binary. **Existing installs keep their old binary and do NOT ship until
+   updated.** Delivery is best-effort; opt-outs still apply.
+
+⚠️ Do **not** `git commit packages/native-host/bin/agenthub-*.exe` after a keyed
+build — it embeds the key (fine for *distribution*, not for the repo). `bundle.cjs`
+is already gitignored for this reason; consider untracking the `.exe` too.
+
 ```json
 {
   "enabled": true,
