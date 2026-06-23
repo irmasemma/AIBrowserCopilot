@@ -4,6 +4,28 @@ All e2e specs live in `tests/e2e/`. **25 spec files, ~344 test cases.**
 
 Browser legend: **Chromium** = Playwright's bundled Chromium (unpacked extension, throwaway profile); **Real Edge (CDP)** = attaches over CDP to an Edge you start yourself; **Real install** = installs into / hijacks a real browser profile (kills the running browser); **Live bridge** = talks to an already-connected real browser.
 
+## Test isolation — `AGENTHUB_INSTALL_DIR`
+
+Every spec that spawns its own bridge sets `AGENTHUB_INSTALL_DIR=<tempdir>/agenthub`
+(alongside the legacy `LOCALAPPDATA=<tempdir>` for Windows back-compat) so the
+bridge writes its lock file + logs into the test's temp directory instead of the
+developer's real install dir. This works on **Windows, macOS, and Linux**
+identically — the bridge's resolver
+(`packages/native-host/src/shared/install-dir.ts`) honors the env var first on
+every platform, then falls back to the OS default. The helper has a paired
+copy (`packages/native-host-helper/src/install-dir.ts`) with mirror unit tests
+asserting identical behavior. Set the var yourself if writing a new
+bridge-spawning spec; do **not** rely on `LOCALAPPDATA` alone, it only worked
+on Windows. Background: `docs/rca-2026-06-23-allowlist-leak-and-install-dir.md`.
+
+## Free-port allocation
+
+Bridge-only specs (`chaos-connection`, `connection-resilience`) ask the OS for
+an ephemeral port via `net.createServer().listen(0)` instead of picking from a
+20k-port range randomly. The kernel-assigned approach effectively eliminates
+the "bridge never came up" flakes caused by port collisions on Windows. New
+specs should follow the same pattern.
+
 ## New: `threads-export-bundled.spec.ts`
 
 | Field | Value |
