@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "bundle": "esbuild src/index.ts --bundle --platform=node --target=node18 --format=cjs --outfile=bin/bundle.cjs",
+    "bundle": "node scripts/build-bundle.mjs",
     "compile:win": "npm run bundle && pkg bin/bundle.cjs --targets node18-win-x64 --output bin/agenthub-win-x64.exe",
     "compile:mac": "npm run bundle && pkg bin/bundle.cjs --targets node18-macos-x64 --output bin/agenthub-macos-x64",
     "compile:mac-arm": "npm run bundle && pkg bin/bundle.cjs --targets node18-macos-arm64 --output bin/agenthub-macos-arm64",

@@ -106,6 +106,25 @@ user's machine without asking for their log files. It's off by default.
 - Enable per machine by adding a `remote` block to `logs-config.json` (see below).
 - Server + Neon schema + setup steps: `packages/log-ingest/` (its README).
 
+**Default-on for shipped binaries (build-time injection).** A real packaged
+install (`process.pkg`) ships to Neon **by default** — no per-machine config
+needed. The endpoint + append-only ingest key are injected into the binary at
+**build time** by `scripts/build-bundle.mjs` (esbuild `define`), fed from env:
+
+```
+AGENTHUB_INGEST_ENDPOINT=https://<app>.vercel.app/api/logs \
+AGENTHUB_INGEST_KEY=<INGEST_KEY> \
+  npm run compile:win -w packages/native-host
+```
+
+The secret is **never in source or git** — it only lands in the compiled
+`bin/bundle.cjs` (gitignored) and the distributed binary. A build **without**
+those env vars produces a binary with no default (remote off) — so dev builds
+and the `node dist/index.js` bridge used by tests never ship to production Neon
+unless a `logs-config.json` opts them in. Precedence: master `enabled:false` →
+explicit `remote.enabled:false` → explicit file creds → baked-in default
+(packaged only). Users can always opt out via either kill-switch.
+
 ```json
 {
   "enabled": true,

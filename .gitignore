@@ -19,3 +19,4 @@ _bmad-output/
 
 # CWS upload artifacts (rebuilt per release — never commit)
 packages/extension/dist/*.zip
+packages/native-host/bin/bundle.cjs
