@@ -28,7 +28,7 @@
  * (the real install provides it; it proxies to whoever owns :7483 = this test
  * bridge). Headed. Browsers/claude are NOT torn down between cycles.
  */
-import { test, expect, chromium, type BrowserContext } from '@playwright/test';
+import { test, expect, chromium, type BrowserContext, type Page } from '@playwright/test';
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
 import http from 'node:http';
 import https from 'node:https';
@@ -51,7 +51,7 @@ const SECOND_MATCH = process.env.SOAK_SECOND_MATCH ?? 'stackoverflow.com';
 const TIMELINE = path.resolve(REPO_ROOT, 'test-results/soak-timeline.ndjson');
 const EXPORT_DIR = path.resolve(REPO_ROOT, 'test-results/exports');
 
-interface Client { label: string; context: BrowserContext; uuid: string; browserId: string }
+interface Client { label: string; context: BrowserContext; uuid: string; browserId: string; page: Page }
 
 let bridge: ChildProcess;
 let bridgePort: number;
@@ -69,8 +69,53 @@ const launch = (udd: string): Promise<BrowserContext> =>
       `--load-extension=${extensionPath}`,
       '--no-first-run',
       '--disable-default-apps',
+      // Auto-accept chrome.permissions.request so we can grant <all_urls>
+      // (needed for get_page_content/extract_data on live sites like SO).
+      '--enable-features=ExtensionsApiTestAutoApprove',
     ],
   });
+
+/**
+ * Grant the extension `<all_urls>` host access (an optional permission, off by
+ * default → "site access: on click"). Without it, content-script reads
+ * (get_page_content / extract_data) are blocked on real sites. Triggered from a
+ * real button-click gesture (chrome.permissions.request needs one); the launch
+ * flag auto-approves the prompt.
+ */
+const grantAllUrls = async (ctx: BrowserContext, extId: string): Promise<boolean> => {
+  // If the request surfaces a prompt page/bubble, click its allow button.
+  const onPage = async (p: Page) => {
+    try {
+      await p.waitForLoadState('domcontentloaded', { timeout: 1500 });
+      const btn = p.locator('button').filter({ hasText: /allow|add|grant/i }).first();
+      if (await btn.count()) await btn.click({ timeout: 1500 });
+    } catch { /* ignore */ }
+  };
+  ctx.on('page', onPage);
+  const page = await ctx.newPage();
+  try {
+    await page.goto(`chrome-extension://${extId}/sidepanel.html`);
+    await page.evaluate(() => {
+      const b = document.createElement('button');
+      b.id = '__grant_all_urls';
+      // Fire-and-forget — do NOT block on the promise (it can hang on a prompt).
+      b.addEventListener('click', () => { void chrome.permissions.request({ origins: ['<all_urls>'] }).catch(() => {}); });
+      document.body.appendChild(b);
+    });
+    await page.click('#__grant_all_urls', { timeout: 3000 }); // real user gesture
+    await sleep(1500);
+    // Time-bounded check so a stuck prompt can never hang beforeAll.
+    return await Promise.race([
+      page.evaluate(() => chrome.permissions.contains({ origins: ['<all_urls>'] })),
+      new Promise<boolean>((r) => setTimeout(() => r(false), 3000)),
+    ]);
+  } catch {
+    return false;
+  } finally {
+    ctx.off('page', onPage);
+    await page.close().catch(() => {});
+  }
+};
 
 const findExtId = async (ctx: BrowserContext): Promise<string> => {
   await sleep(2500);
@@ -194,38 +239,40 @@ function resolveRemote(): { endpoint: string; apiKey: string } | null {
   return endpoint && apiKey ? { endpoint, apiKey } : null;
 }
 
-interface ExportResult { tools: string[]; posts: number; items: unknown[]; exitCode: number }
+interface ExportResult { tools: string[]; posts: number; items: unknown[]; screenshot: string; exitCode: number }
 
-/** One real Claude CLI session operating the tab whose url contains `match`. */
-const runExport = async (match: string): Promise<ExportResult> => {
-  const prompt = [
-    'You have agenthub MCP tools connected to real browsers.',
-    `Operate ONLY on the browser tab whose URL contains "${match}".`,
-    'Steps: (1) mcp__agenthub__list_tabs to find that tab and its id;',
-    '(2) mcp__agenthub__take_screenshot on it; (3) scroll down twice with',
-    'mcp__agenthub__scroll_page; (4) read every post / list item (e.g. each',
-    'question on a Stack Overflow list) with mcp__agenthub__get_page_content',
-    'or mcp__agenthub__extract_data.',
-    'Output ONLY a JSON array of items {"text"} in a ```json block.',
-  ].join(' ');
+/**
+ * One real Claude CLI session running `prompt` against the connected browsers.
+ * Captures: the agenthub MCP tools used, the JSON array the LLM exported, and
+ * the screenshot image (base64) returned by take_screenshot.
+ */
+const runExport = async (prompt: string, model = 'haiku'): Promise<ExportResult> => {
   const child = spawn('claude',
     ['--print', '--input-format', 'text', '--output-format', 'stream-json', '--verbose',
-      '--model', 'haiku', '--dangerously-skip-permissions'],
+      '--model', model, '--dangerously-skip-permissions'],
     { stdio: ['pipe', 'pipe', 'pipe'], shell: true, windowsHide: true });
   child.stdin.end(prompt);
 
   const tools: string[] = [];
-  let text = ''; let raw = '';
+  let text = ''; let raw = ''; let screenshot = '';
   child.stdout.on('data', (d: Buffer) => {
     raw += d.toString(); let nl: number;
     while ((nl = raw.indexOf('\n')) !== -1) {
       const line = raw.slice(0, nl); raw = raw.slice(nl + 1);
       if (!line.trim()) continue;
-      let m: { type?: string; message?: { content?: Array<{ type: string; name?: string; text?: string }> }; result?: string };
+      let m: { type?: string; message?: { content?: unknown[] }; result?: string };
       try { m = JSON.parse(line); } catch { continue; }
-      if (m.type === 'assistant') for (const b of m.message?.content ?? []) {
+      if (m.type === 'assistant') for (const b of (m.message?.content ?? []) as Array<{ type?: string; name?: string; text?: string }>) {
         if (b.type === 'tool_use' && b.name) tools.push(b.name);
         if (b.type === 'text' && b.text) text += '\n' + b.text;
+      }
+      // tool_result for take_screenshot carries the PNG as a base64 image block.
+      if (m.type === 'user') for (const b of (m.message?.content ?? []) as Array<{ type?: string; content?: unknown }>) {
+        if (b.type !== 'tool_result' || !Array.isArray(b.content)) continue;
+        for (const c of b.content as Array<{ type?: string; data?: string; source?: { data?: string } }>) {
+          const data = c?.source?.data ?? (c?.type === 'image' ? c?.data : undefined);
+          if (c?.type === 'image' && data && !screenshot) screenshot = data;
+        }
       }
       if (m.type === 'result' && m.result) text += '\n' + m.result;
     }
@@ -238,12 +285,45 @@ const runExport = async (match: string): Promise<ExportResult> => {
   let items: unknown[] = [];
   const j = text.match(/```json\s*([\s\S]*?)```/i)?.[1] ?? text.match(/\[\s*\{[\s\S]*?\}\s*\]/)?.[0] ?? '';
   try { const p = JSON.parse(j.trim()); if (Array.isArray(p)) items = p; } catch { /* [] */ }
-  return { tools: [...new Set(tools.filter((t) => t.startsWith('mcp__agenthub__')))], posts: items.length, items, exitCode };
+  return { tools: [...new Set(tools.filter((t) => t.startsWith('mcp__agenthub__')))], posts: items.length, items, screenshot, exitCode };
 };
+
+/** Prompt for the local fixture feed (browser A). */
+const fixturePrompt = (match: string): string => [
+  'You have agenthub MCP tools connected to a real Chrome.',
+  `Operate ONLY on the tab whose URL contains "${match}".`,
+  '1) mcp__agenthub__list_tabs to find the tab id; 2) mcp__agenthub__take_screenshot of it;',
+  '3) scroll down twice with mcp__agenthub__scroll_page; 4) read every post with',
+  'mcp__agenthub__get_page_content or mcp__agenthub__extract_data.',
+  'Output ONLY a JSON array of {"text"} in a ```json block. No prose.',
+].join(' ');
+
+/** Prompt for the live Stack Overflow questions list (browser B). */
+const stackOverflowPrompt = (match: string): string => [
+  'You are operating a real Chrome browser through the agenthub MCP tools. One tab',
+  `is showing a Stack Overflow "Questions" list (its URL contains "${match}").`,
+  'Your job: export the questions from that page. Work entirely through the MCP tools',
+  '— do not assume anything; look at the page and react to what is actually there.',
+  '',
+  'Do this:',
+  '1. Find the right tab (list the tabs and pick the Stack Overflow one).',
+  '2. Look at the page (a snapshot or its content). If anything is covering the',
+  '   questions — a cookie/consent banner, a dialog, a "got it" notice — dismiss it',
+  '   by clicking the appropriate button so the question list is fully visible.',
+  '3. Take a screenshot of the page with mcp__agenthub__take_screenshot. This is',
+  '   REQUIRED on every run — always call it, even if you also read the content.',
+  '4. Scroll down repeatedly to load more questions until at least 20 are present.',
+  '5. Read the questions and, for each, capture: its title, the number of votes, the',
+  '   number of answers, and the number of views.',
+  '',
+  'Finally output ONLY a JSON array (at least 20 items) of',
+  '{"title": string, "votes": number, "answers": number, "views": number}',
+  'inside a ```json code block. No prose before or after it.',
+].join(' ');
 
 test.describe('two-browser soak (fixture + live public site)', () => {
   test.beforeAll(async () => {
-    test.setTimeout(120_000);
+    test.setTimeout(240_000);
     if (process.platform === 'win32') {
       try { execSync('taskkill /F /IM agenthub-win-x64.exe', { stdio: 'ignore' }); } catch { /* none */ }
     } else {
@@ -300,10 +380,13 @@ test.describe('two-browser soak (fixture + live public site)', () => {
       const ctx = await launch(fs.mkdtempSync(path.join(os.tmpdir(), `copilot-soak-${label}-`)));
       const extId = await findExtId(ctx);
       const uuid = await waitConnectedUuid(ctx, extId);
+      const granted = await grantAllUrls(ctx, extId);
+      // eslint-disable-next-line no-console
+      console.log(`[soak] ${label}: <all_urls> granted=${granted}`);
       const page = await ctx.newPage();
       await page.goto(url, { waitUntil: 'domcontentloaded' }).catch(() => { /* live site may be slow */ });
       await sleep(1500);
-      clients.push({ label, context: ctx, uuid, browserId: `chrome:${uuid}` });
+      clients.push({ label, context: ctx, uuid, browserId: `chrome:${uuid}`, page });
     }
     expect(clients[0].uuid).not.toBe(clients[1].uuid);
 
@@ -336,14 +419,17 @@ test.describe('two-browser soak (fixture + live public site)', () => {
     test.setTimeout((DURATION_MIN + 12) * 60_000);
     const fixture = clients[0]; const real = clients[1];
     const endAt = Date.now() + DURATION_MIN * 60_000;
-    const drops: string[] = []; const fixtureShort: string[] = []; let cycle = 0;
+    const drops: string[] = []; const fixtureShort: string[] = [];
+    const secondShort: string[] = []; const secondNoShot: string[] = []; let cycle = 0;
 
     while (Date.now() < endAt) {
       cycle += 1;
       const cycleStart = Date.now();
       const before = await fetchState(bridgePort);
-      const resA = await runExport('127.0.0.1');
-      const resB = await runExport(SECOND_MATCH);
+      const resA = await runExport(fixturePrompt('127.0.0.1'));
+      // SO needs >=20 structured questions (votes/answers/views) off a live
+      // page — use a stronger model for reliable structured extraction.
+      const resB = await runExport(stackOverflowPrompt(SECOND_MATCH), process.env.SOAK_SECOND_MODEL ?? 'sonnet');
       const after = await fetchState(bridgePort);
 
       const healthy = (st: Record<string, string>, id: string) => st[id] === 'live';
@@ -354,41 +440,56 @@ test.describe('two-browser soak (fixture + live public site)', () => {
       if (!bothLive) drops.push(`cycle ${cycle}: before=${JSON.stringify(before)} after=${JSON.stringify(after)}`);
       if (resA.posts < 5) fixtureShort.push(`cycle ${cycle}: fixture posts=${resA.posts} tools=${resA.tools.join(',')}`);
 
-      // Save the actual exported items so you can inspect the real data per cycle.
+      // Browser B (Stack Overflow): want >=20 questions carrying votes/answers/
+      // views, plus a screenshot — all produced by the LLM via MCP.
+      const hasField = (o: unknown, k: string) => o && typeof o === 'object' && k in (o as Record<string, unknown>);
+      const secondWithFields = (resB.items as unknown[]).filter(
+        (q) => hasField(q, 'votes') && hasField(q, 'answers') && hasField(q, 'views'),
+      ).length;
+      if (resB.posts < 20) secondShort.push(`cycle ${cycle}: SO questions=${resB.posts} withFields=${secondWithFields} tools=${resB.tools.join(',')}`);
+      if (!resB.screenshot) secondNoShot.push(`cycle ${cycle}`);
+
+      // Save what each LLM session exported (items + tools) and its screenshot.
       mkdirSync(EXPORT_DIR, { recursive: true });
       const cy = String(cycle).padStart(3, '0');
-      writeFileSync(path.join(EXPORT_DIR, `cycle${cy}-fixture.json`), JSON.stringify(resA.items, null, 2));
-      writeFileSync(path.join(EXPORT_DIR, `cycle${cy}-second.json`), JSON.stringify(resB.items, null, 2));
+      const writeExport = (name: string, r: ExportResult, shotFile: string) => {
+        if (r.screenshot) writeFileSync(path.join(EXPORT_DIR, shotFile), Buffer.from(r.screenshot, 'base64'));
+        writeFileSync(path.join(EXPORT_DIR, `${name}.json`), JSON.stringify({
+          count: r.posts, tools: r.tools, exit: r.exitCode,
+          screenshot: r.screenshot ? { file: shotFile, bytes: Buffer.byteLength(r.screenshot, 'base64') } : null,
+          items: r.items,
+        }, null, 2));
+      };
+      writeExport(`cycle${cy}-fixture`, resA, `cycle${cy}-fixture.png`);
+      writeExport(`cycle${cy}-second`, resB, `cycle${cy}-second.png`);
 
       appendFileSync(TIMELINE, JSON.stringify({
         cycle, t: new Date().toISOString(),
         before, after, bothLive,
-        fixture: { posts: resA.posts, tools: resA.tools, exit: resA.exitCode },
-        second: { posts: resB.posts, tools: resB.tools, exit: resB.exitCode },
+        fixture: { posts: resA.posts, tools: resA.tools, exit: resA.exitCode, screenshot: Boolean(resA.screenshot) },
+        second: { posts: resB.posts, withFields: secondWithFields, tools: resB.tools, exit: resB.exitCode, screenshot: Boolean(resB.screenshot) },
       }) + '\n');
       // eslint-disable-next-line no-console
-      console.log(`[soak] cycle ${cycle} bothLive=${bothLive} fixturePosts=${resA.posts} secondPosts=${resB.posts} secondTools=${resB.tools.length}`);
+      console.log(`[soak] cycle ${cycle} bothLive=${bothLive} fixture=${resA.posts} SO=${resB.posts}(fields ${secondWithFields}) SOshot=${Boolean(resB.screenshot)}`);
 
       if (Date.now() >= endAt) break;
       const waitMs = cycleStart + INTERVAL_MIN * 60_000 - Date.now();
       if (waitMs > 0) await sleep(waitMs);
     }
 
-    appendFileSync(TIMELINE, JSON.stringify({ event: 'end', cycles: cycle, drops: drops.length, fixtureShort: fixtureShort.length }) + '\n');
+    appendFileSync(TIMELINE, JSON.stringify({ event: 'end', cycles: cycle, drops: drops.length, fixtureShort: fixtureShort.length, secondShort: secondShort.length, secondNoShot: secondNoShot.length }) + '\n');
     // eslint-disable-next-line no-console
-    console.log(`[soak] DONE cycles=${cycle} drops=${drops.length} fixtureShort=${fixtureShort.length}\n${drops.concat(fixtureShort).join('\n')}`);
+    console.log(`[soak] DONE cycles=${cycle} drops=${drops.length} fixtureShort=${fixtureShort.length} SOshort=${secondShort.length} SOnoShot=${secondNoShot.length}`);
 
     expect(cycle, 'should complete multiple cycles').toBeGreaterThan(0);
     // HARD GATE: the soak is about connection stability. Any cycle where a
     // browser was not 'live' is a real failure.
     expect(drops, `connection dropped / not-live in some cycles:\n${drops.join('\n')}`).toEqual([]);
-    // SOFT: the fixture is deterministic (8 posts) so it should be >5, but a
-    // one-off Claude miscount over many cycles is model variability, not a
-    // system bug. Fail only if it's short in MORE than 20% of cycles (a
-    // persistent extraction problem), not on isolated hiccups.
-    expect(
-      fixtureShort.length,
-      `fixture export returned <5 in too many cycles (${fixtureShort.length}/${cycle}):\n${fixtureShort.join('\n')}`,
-    ).toBeLessThanOrEqual(Math.floor(cycle * 0.2));
+    // SOFT gates (LLM/live-site variance): fail only on a PERSISTENT problem
+    // (>20% of cycles), not isolated hiccups.
+    const tol = Math.floor(cycle * 0.2);
+    expect(fixtureShort.length, `fixture <5 in too many cycles (${fixtureShort.length}/${cycle}):\n${fixtureShort.join('\n')}`).toBeLessThanOrEqual(tol);
+    expect(secondShort.length, `Stack Overflow returned <20 questions in too many cycles (${secondShort.length}/${cycle}):\n${secondShort.join('\n')}`).toBeLessThanOrEqual(tol);
+    expect(secondNoShot.length, `Stack Overflow screenshot missing in too many cycles (${secondNoShot.length}/${cycle}): ${secondNoShot.join(',')}`).toBeLessThanOrEqual(tol);
   });
 });
