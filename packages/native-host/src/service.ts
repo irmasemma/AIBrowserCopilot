@@ -15,7 +15,9 @@ import { createServer as createHttpServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir, platform as osPlatform } from 'node:os';
+// `homedir`/`osPlatform` were removed when `defaultInstallDir`/`getInstallDir`
+// moved to the shared resolver. Re-add via `node:os` import only if a new
+// call site needs them.
 import { toolRegistry } from './tools/index.js';
 import { VERSION, BUILD_ID } from './version.js';
 import {
@@ -27,6 +29,7 @@ import { makeLogger, logRecord, type Logger, type LogRecord } from './shared/log
 import { initRemoteSink } from './remote-sink.js';
 import { redact, redactError } from './shared/redaction.js';
 import { handleDiagRequest, RecentActivity, type StateSource } from './diag-server.js';
+import { resolveInstallDir } from './shared/install-dir.js';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -178,14 +181,7 @@ export function loadAllowedExtensionIds(opts?: {
 }
 
 function defaultInstallDir(): string {
-  switch (osPlatform()) {
-    case 'win32':
-      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'agenthub');
-    case 'darwin':
-      return join(homedir(), 'Library', 'Application Support', 'agenthub');
-    default:
-      return join(homedir(), '.local', 'share', 'agenthub');
-  }
+  return resolveInstallDir();
 }
 
 function indexBrowser(browserId: string, ws: WebSocket): void {
@@ -1338,14 +1334,7 @@ function zodToJsonSchema(z: unknown): Record<string, unknown> {
 // stay available without being mixed into the new NDJSON file.
 
 function getInstallDir(): string {
-  switch (osPlatform()) {
-    case 'win32':
-      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'agenthub');
-    case 'darwin':
-      return join(homedir(), 'Library', 'Application Support', 'agenthub');
-    default:
-      return join(homedir(), '.local', 'share', 'agenthub');
-  }
+  return resolveInstallDir();
 }
 
 function getBridgeLogPath(): string {

@@ -200,7 +200,7 @@ test.describe('multi-client routing — two real browsers, one bridge', () => {
     fs.mkdirSync(path.join(installParent, 'agenthub'), { recursive: true });
     bridge = spawn('node', [nativeHostDist], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, CLAUDECODE: '1', LOCALAPPDATA: installParent },
+      env: { ...process.env, CLAUDECODE: '1', LOCALAPPDATA: installParent, AGENTHUB_INSTALL_DIR: path.join(installParent, 'agenthub') },
     });
     let bridgeExited: number | null = null;
     bridge.on('exit', (code) => { bridgeExited = code ?? -1; });

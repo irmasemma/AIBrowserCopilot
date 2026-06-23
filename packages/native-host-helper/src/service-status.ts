@@ -16,9 +16,10 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir, platform, arch as osArch } from 'node:os';
+import { platform, arch as osArch } from 'node:os';
 import { createConnection } from 'node:net';
 import { WebSocket } from 'ws';
+import { resolveInstallDir } from './install-dir.js';
 
 export const DEFAULT_PORT = 7483;
 const TCP_PROBE_TIMEOUT_MS = 1000;
@@ -65,14 +66,7 @@ export type ServiceReason =
   | 'connecting';
 
 export function getInstallDir(): string {
-  switch (platform()) {
-    case 'win32':
-      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'agenthub');
-    case 'darwin':
-      return join(homedir(), 'Library', 'Application Support', 'agenthub');
-    default:
-      return join(homedir(), '.local', 'share', 'agenthub');
-  }
+  return resolveInstallDir();
 }
 
 export function getLockFilePath(): string {

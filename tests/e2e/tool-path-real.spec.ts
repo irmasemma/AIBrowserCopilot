@@ -32,6 +32,12 @@ import { homedir, platform } from 'node:os';
 const LIST_TABS_WEDGE_MS = 3000;
 
 function installDir(): string {
+  // Honor the cross-platform override (matches the bridge's own resolver in
+  // packages/native-host/src/shared/install-dir.ts) so callers that spawn an
+  // isolated bridge can also point this helper at it.
+  if (process.env.AGENTHUB_INSTALL_DIR && process.env.AGENTHUB_INSTALL_DIR.trim().length > 0) {
+    return process.env.AGENTHUB_INSTALL_DIR.trim();
+  }
   if (platform() === 'win32') return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'agenthub');
   if (platform() === 'darwin') return join(homedir(), 'Library', 'Application Support', 'agenthub');
   return join(homedir(), '.local', 'share', 'agenthub');

@@ -24,8 +24,8 @@
 
 import { existsSync, statSync, renameSync, appendFileSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { redact, redactError } from './redaction.js';
+import { resolveInstallDir } from './install-dir.js';
 
 const MAX_FILE_BYTES = 1024 * 1024; // 1 MB
 const KEEP_GENERATIONS = 5; // .log + .log.1..4
@@ -33,8 +33,7 @@ const KEEP_GENERATIONS = 5; // .log + .log.1..4
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 function getInstallDir(): string {
-  if (process.env.LOCALAPPDATA) return join(process.env.LOCALAPPDATA, 'agenthub');
-  return join(homedir(), '.agenthub');
+  return resolveInstallDir();
 }
 
 function getHelperLogPath(): string {

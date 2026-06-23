@@ -1,8 +1,9 @@
 import { readFileSync, writeFileSync, unlinkSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir, platform } from 'node:os';
+import { platform } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { WebSocket } from 'ws';
+import { resolveInstallDir } from './shared/install-dir.js';
 
 export interface LockFileData {
   pid: number;
@@ -17,14 +18,7 @@ export interface LockFileData {
 export type InstanceCheck = 'none' | 'alive' | 'orphaned';
 
 function getLockDir(): string {
-  switch (platform()) {
-    case 'win32':
-      return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'agenthub');
-    case 'darwin':
-      return join(homedir(), 'Library', 'Application Support', 'agenthub');
-    default:
-      return join(homedir(), '.local', 'share', 'agenthub');
-  }
+  return resolveInstallDir();
 }
 
 export function getLockFilePath(): string {

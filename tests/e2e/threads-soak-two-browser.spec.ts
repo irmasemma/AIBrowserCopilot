@@ -180,7 +180,7 @@ test.describe('two-browser soak (fixture + live public site)', () => {
     fs.mkdirSync(path.join(installParent, 'agenthub'), { recursive: true });
     bridge = spawn('node', [nativeHostDist], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, CLAUDECODE: '1', LOCALAPPDATA: installParent },
+      env: { ...process.env, CLAUDECODE: '1', LOCALAPPDATA: installParent, AGENTHUB_INSTALL_DIR: path.join(installParent, 'agenthub') },
     });
     let exited: number | null = null;
     bridge.on('exit', (c) => { exited = c ?? -1; });

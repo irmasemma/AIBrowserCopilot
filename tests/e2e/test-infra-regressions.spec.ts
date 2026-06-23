@@ -45,7 +45,7 @@ test.describe('regression: bridge readiness signal', () => {
     try {
       bridge = spawn(process.execPath, ['--input-type=module', '-e', launcher], {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, CLAUDECODE: '1', LOCALAPPDATA: installParent },
+        env: { ...process.env, CLAUDECODE: '1', LOCALAPPDATA: installParent, AGENTHUB_INSTALL_DIR: path.join(installParent, 'agenthub') },
       });
       let stderr = '';
       bridge.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });

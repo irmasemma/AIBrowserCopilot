@@ -108,7 +108,7 @@ test.beforeAll(async () => {
   fs.mkdirSync(tempInstallDir, { recursive: true });
   nativeHost = spawn('node', [nativeHostDist], {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, CLAUDECODE: '1', LOCALAPPDATA: tempInstallParent },
+    env: { ...process.env, CLAUDECODE: '1', LOCALAPPDATA: tempInstallParent, AGENTHUB_INSTALL_DIR: path.join(tempInstallParent, 'agenthub') },
   });
 
   // Readiness signal: startServer writes %LOCALAPPDATA%/agenthub/server.lock

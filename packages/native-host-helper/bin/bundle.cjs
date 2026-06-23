@@ -3799,22 +3799,38 @@ function scanAITools() {
 
 // src/mcp-registrar.ts
 var import_node_fs2 = require("node:fs");
-var import_node_path2 = require("node:path");
+var import_node_path3 = require("node:path");
+var import_node_os3 = require("node:os");
+
+// src/install-dir.ts
 var import_node_os2 = require("node:os");
-var getClaudeCodeConfigPath = () => (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".claude.json");
-var getInstallDir = () => {
-  switch ((0, import_node_os2.platform)()) {
-    case "win32":
-      return (0, import_node_path2.join)(process.env.LOCALAPPDATA ?? (0, import_node_path2.join)((0, import_node_os2.homedir)(), "AppData", "Local"), "agenthub");
-    case "darwin":
-      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), "Library", "Application Support", "agenthub");
-    default:
-      return (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".local", "share", "agenthub");
+var import_node_path2 = require("node:path");
+var INSTALL_DIR_ENV_VAR = "AGENTHUB_INSTALL_DIR";
+function resolveInstallDir(opts = {}) {
+  const env = opts.env ?? process.env;
+  const override = env[INSTALL_DIR_ENV_VAR];
+  if (typeof override === "string" && override.trim().length > 0) {
+    return override.trim();
   }
-};
+  const plat = opts.platform ?? process.platform;
+  const home = opts.homeDir ?? (0, import_node_os2.homedir)();
+  const path = plat === "win32" ? import_node_path2.win32 : import_node_path2.posix;
+  switch (plat) {
+    case "win32":
+      return path.join(env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"), "agenthub");
+    case "darwin":
+      return path.join(home, "Library", "Application Support", "agenthub");
+    default:
+      return path.join(home, ".local", "share", "agenthub");
+  }
+}
+
+// src/mcp-registrar.ts
+var getClaudeCodeConfigPath = () => (0, import_node_path3.join)((0, import_node_os3.homedir)(), ".claude.json");
+var getInstallDir = () => resolveInstallDir();
 var getNativeHostBinaryName = () => {
-  const arch = (0, import_node_os2.arch)();
-  switch ((0, import_node_os2.platform)()) {
+  const arch = (0, import_node_os3.arch)();
+  switch ((0, import_node_os3.platform)()) {
     case "win32":
       return `agenthub-win-${arch === "arm64" ? "arm64" : "x64"}.exe`;
     case "darwin":
@@ -3823,7 +3839,7 @@ var getNativeHostBinaryName = () => {
       return `agenthub-linux-${arch === "arm64" ? "arm64" : "x64"}`;
   }
 };
-var getNativeHostBinaryPath = () => (0, import_node_path2.join)(getInstallDir(), getNativeHostBinaryName());
+var getNativeHostBinaryPath = () => (0, import_node_path3.join)(getInstallDir(), getNativeHostBinaryName());
 var isPlainObject = (val) => typeof val === "object" && val !== null && !Array.isArray(val);
 var detectIndent = (content) => {
   for (const line of content.split("\n")) {
@@ -3952,8 +3968,8 @@ var repairClaudeCodeRegistration = () => {
 
 // src/service-status.ts
 var import_node_fs3 = require("node:fs");
-var import_node_path3 = require("node:path");
-var import_node_os3 = require("node:os");
+var import_node_path4 = require("node:path");
+var import_node_os4 = require("node:os");
 var import_node_net = require("node:net");
 
 // ../../node_modules/ws/wrapper.mjs
@@ -3971,28 +3987,21 @@ var DEFAULT_PORT = 7483;
 var TCP_PROBE_TIMEOUT_MS = 1e3;
 var WS_PROBE_TIMEOUT_MS = 3e3;
 function getInstallDir2() {
-  switch ((0, import_node_os3.platform)()) {
-    case "win32":
-      return (0, import_node_path3.join)(process.env.LOCALAPPDATA ?? (0, import_node_path3.join)((0, import_node_os3.homedir)(), "AppData", "Local"), "agenthub");
-    case "darwin":
-      return (0, import_node_path3.join)((0, import_node_os3.homedir)(), "Library", "Application Support", "agenthub");
-    default:
-      return (0, import_node_path3.join)((0, import_node_os3.homedir)(), ".local", "share", "agenthub");
-  }
+  return resolveInstallDir();
 }
 function getLockFilePath() {
-  return (0, import_node_path3.join)(getInstallDir2(), "server.lock");
+  return (0, import_node_path4.join)(getInstallDir2(), "server.lock");
 }
 function getBinaryPath() {
   const dir = getInstallDir2();
-  const arch = (0, import_node_os3.arch)() === "arm64" ? "arm64" : "x64";
-  switch ((0, import_node_os3.platform)()) {
+  const arch = (0, import_node_os4.arch)() === "arm64" ? "arm64" : "x64";
+  switch ((0, import_node_os4.platform)()) {
     case "win32":
-      return (0, import_node_path3.join)(dir, `agenthub-win-${arch}.exe`);
+      return (0, import_node_path4.join)(dir, `agenthub-win-${arch}.exe`);
     case "darwin":
-      return (0, import_node_path3.join)(dir, `agenthub-macos-${arch}`);
+      return (0, import_node_path4.join)(dir, `agenthub-macos-${arch}`);
     default:
-      return (0, import_node_path3.join)(dir, `agenthub-linux-${arch}`);
+      return (0, import_node_path4.join)(dir, `agenthub-linux-${arch}`);
   }
 }
 function readLockFile() {
@@ -4179,8 +4188,7 @@ var HELPER_VERSION = "0.5.10";
 
 // src/logger.ts
 var import_node_fs5 = require("node:fs");
-var import_node_path4 = require("node:path");
-var import_node_os4 = require("node:os");
+var import_node_path5 = require("node:path");
 
 // src/redaction.ts
 var URL_KEYS = /* @__PURE__ */ new Set([
@@ -4396,17 +4404,16 @@ function redactStack(stack) {
 var MAX_FILE_BYTES = 1024 * 1024;
 var KEEP_GENERATIONS = 5;
 function getInstallDir3() {
-  if (process.env.LOCALAPPDATA) return (0, import_node_path4.join)(process.env.LOCALAPPDATA, "agenthub");
-  return (0, import_node_path4.join)((0, import_node_os4.homedir)(), ".agenthub");
+  return resolveInstallDir();
 }
 function getHelperLogPath() {
-  return (0, import_node_path4.join)(getInstallDir3(), "logs", "helper.log");
+  return (0, import_node_path5.join)(getInstallDir3(), "logs", "helper.log");
 }
 var _enabled = null;
 function isLoggingEnabled() {
   if (_enabled !== null) return _enabled;
   try {
-    const configPath = (0, import_node_path4.join)(getInstallDir3(), "logs-config.json");
+    const configPath = (0, import_node_path5.join)(getInstallDir3(), "logs-config.json");
     if (!(0, import_node_fs5.existsSync)(configPath)) {
       _enabled = true;
       return true;
@@ -4464,7 +4471,7 @@ function logRecord(input) {
     };
     const line = JSON.stringify(entry) + "\n";
     const filePath = getHelperLogPath();
-    const dir = (0, import_node_path4.join)(getInstallDir3(), "logs");
+    const dir = (0, import_node_path5.join)(getInstallDir3(), "logs");
     if (!(0, import_node_fs5.existsSync)(dir)) {
       try {
         (0, import_node_fs5.mkdirSync)(dir, { recursive: true });

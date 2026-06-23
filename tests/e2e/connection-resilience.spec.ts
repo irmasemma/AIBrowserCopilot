@@ -49,7 +49,7 @@ function spawnBridge(port: number, localAppData: string): ChildProcess {
   // the bridge down. The shipped bridge is launched with an open stdin too.
   return spawn(process.execPath, [harness], {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, AGENTHUB_TEST_PORT: String(port), LOCALAPPDATA: localAppData },
+    env: { ...process.env, AGENTHUB_TEST_PORT: String(port), LOCALAPPDATA: localAppData, AGENTHUB_INSTALL_DIR: path.join(localAppData, 'agenthub') },
   });
 }
 

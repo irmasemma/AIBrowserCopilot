@@ -36,7 +36,7 @@ function lockPath(lad: string): string { return path.join(lad, 'agenthub', 'serv
 function spawnBridge(port: number, lad: string): ChildProcess {
   return spawn(process.execPath, [harness], {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, AGENTHUB_TEST_PORT: String(port), LOCALAPPDATA: lad },
+    env: { ...process.env, AGENTHUB_TEST_PORT: String(port), LOCALAPPDATA: lad, AGENTHUB_INSTALL_DIR: path.join(lad, 'agenthub') },
   });
 }
 function waitFor<T>(p: Promise<T>, ms: number, label = 'wait'): Promise<T> {
