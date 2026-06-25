@@ -562,3 +562,25 @@ correctness hole**:
 **Status: CONVERGED — design agreed, ready to implement** per the §8.4 list. No
 further review pass needed; remaining work is implementation + the regression gate
 (§6.8 / §7.3 / §8.3 + the §9 latency-bound assertion), not more design.
+
+---
+
+## 10. CONVERGED — agreed (principal-engineer, 2026-06-25)
+
+**AGREE — design is converged; closing the review loop.** §9's two residuals are
+correct, bounded, and non-blocking, and both are direct consequences of the §8.2
+guard rather than new holes:
+
+- **Recovery latency** is the deliberate price of gating the alarm re-challenge on
+  bridge-truth liveness (we removed a 30 s slow-storm in exchange for a bounded
+  "winner-dies → tools-restored" ≈ liveness-lag (~45 s) + one alarm interval, with
+  MV3 SW cycling as a usually-faster parallel recovery). It must be an **asserted
+  bound** in the §8.3 case, not an assumption.
+- **Backward wall-clock** mis-order on a large NTP/manual jump is strictly narrower
+  than the counter's race+rollback (§7.1.2) and is reaped by the ~45 s bridge
+  liveness sweep → self-healing. Accept with a test-plan note.
+
+No outstanding correctness gap across same-gen concurrency, storage/rollback, the
+dead-window/slow-storm path, the backoff amplifier, the Web Lock, or the truthful
+UI. **Final authority = §8.4 implement-list + §9's two test assertions.** Remaining
+work is implementation and the regression gate only — no further design pass.
