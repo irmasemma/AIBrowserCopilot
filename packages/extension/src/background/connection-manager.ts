@@ -9,20 +9,61 @@ import type { Relay } from './relay-client';
 import type { DiscoveryResult } from './service-discovery';
 import { checkBridgeVersion } from '../shared/version-check';
 import { logRecord, flushPending } from '../shared/logger';
+import { getBrowserInstanceId } from '../shared/browser-instance-id';
 
 const DEFAULT_URL = 'ws://127.0.0.1:7483';
 const SERVER_INFO_TIMEOUT_MS = 10_000;
 
+// ── Relay identity = (genTimestamp, lifeUuid) — IN-MEMORY, never persisted ──
+// Captured ONCE per service-worker life at module load. The bridge resolves a
+// browserId collision by a STRICT lexicographic total order on (gen, lifeUuid):
+// strictly-higher wins + supersedes; exact tie is idempotent (same SW life's
+// own transport-blip reconnect); strictly-lower is rejected with close 4002.
+//
+// Why in-memory, not chrome.storage:
+//   - `Date.now()` at SW load is monotone-enough across overlapping lives and
+//     needs NO read-modify-write, so two near-simultaneous lives can't race to
+//     the same value the way a persisted counter would.
+//   - Nothing is persisted, so a storage wipe / extension update can't roll the
+//     value back and invert the order into a permanent 4002 lockout.
+//   - `lifeUuid` is a per-load random tiebreak that makes the order TOTAL even
+//     in the (rare) case two lives capture the same millisecond.
+// (See design §6.2/§6.3/§7.1.2 — the converged identity.)
+let relayGenTimestamp = Date.now();
+let relayLifeUuid = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+  ? crypto.randomUUID()
+  : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
 /**
- * Mark this connection as the canonical extension relay (`role=relay`). The
- * bridge uses this IDENTITY — not a liveness guess — to decide browserId
- * collisions: the newest canonical relay (a fresh SW life reconnecting) always
- * wins, so a real reconnect is never rejected by a stale-but-still-ponging
- * socket. Probes/health-checks must NOT carry this marker.
+ * Mint a FRESH relay identity for this SW life. Called by the guarded alarm
+ * re-challenge (reconcile) when a prior identity was 4002-terminal'd and bridge
+ * truth confirms there is no live relay for this browserId — so the new
+ * challenge outranks any stale incumbent. Never called on the happy path.
+ */
+function mintFreshRelayIdentity(): void {
+  relayGenTimestamp = Date.now();
+  relayLifeUuid = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+/**
+ * Mark this connection as the canonical extension relay and stamp it with this
+ * SW life's identity (`role=relay&gen=<ts>&lifeUuid=<uuid>`). The bridge uses
+ * this IDENTITY — not a liveness guess — to decide browserId collisions via a
+ * total order on (gen, lifeUuid). Probes/health-checks must NOT carry this
+ * marker. lifeUuid is sent raw (it is already URL-safe: a UUID or [0-9a-z.-]);
+ * the bridge compares it byte-for-byte as the raw query string, so we must not
+ * re-encode it here.
  */
 function withRelayRole(url: string): string {
-  if (/[?&]role=relay(&|$)/.test(url)) return url;
-  return url.includes('?') ? `${url}&role=relay` : `${url}?role=relay`;
+  let out = url;
+  if (!/[?&]role=relay(&|$)/.test(out)) {
+    out = out.includes('?') ? `${out}&role=relay` : `${out}?role=relay`;
+  }
+  if (!/[?&]gen=/.test(out)) out += `&gen=${relayGenTimestamp}`;
+  if (!/[?&]lifeUuid=/.test(out)) out += `&lifeUuid=${relayLifeUuid}`;
+  return out;
 }
 
 export type ToolRequestHandler = (id: string, tool: string, params: Record<string, unknown>) => void;
@@ -72,6 +113,13 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
   let logFlushTimer: ReturnType<typeof setInterval> | null = null;
   const LOG_FLUSH_INTERVAL_MS = 10_000;
   let currentUrl: string = DEFAULT_URL;
+  // §6.5 Web Lock optimization: resolver that releases the narrowly-held
+  // 'agenthub-relay' lock once this open attempt settles (server_info / close /
+  // timeout). Null when no lock is held. Held ONLY around open→server_info,
+  // never for the session, and acquired with { ifAvailable: true } so a wedged
+  // holder can never block — correctness is guaranteed by the (gen,lifeUuid)
+  // total order regardless of the lock.
+  let releaseRelayLock: (() => void) | null = null;
 
   const listeners = new Set<(ctx: ConnectionContext) => void>();
 
@@ -117,6 +165,7 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
     heartbeat = null;
     backoffTimer.cancel();
     stopLogFlushTimer();
+    releaseLock();
     if (serverInfoTimer !== null) {
       clearTimeout(serverInfoTimer);
       serverInfoTimer = null;
@@ -130,6 +179,35 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
     if (relay !== null) {
       try { relay.disconnect(); } catch { /* ignore */ }
       relay = null;
+    }
+  }
+
+  // Release the narrowly-held relay Web Lock, if any. Idempotent.
+  function releaseLock(): void {
+    if (releaseRelayLock !== null) {
+      const r = releaseRelayLock;
+      releaseRelayLock = null;
+      try { r(); } catch { /* ignore */ }
+    }
+  }
+
+  // Acquire the 'agenthub-relay' Web Lock around a single open attempt, holding
+  // it until `releaseLock()` is called (on server_info / close / timeout). Uses
+  // { ifAvailable: true }: if another in-profile SW life holds it, we DO NOT
+  // wait — we proceed immediately and let the bridge's (gen,lifeUuid) total
+  // order pick the single winner. Best-effort; never throws, never blocks.
+  function acquireRelayLock(): void {
+    releaseLock();
+    try {
+      const locks = (globalThis as { navigator?: { locks?: LockManager } }).navigator?.locks;
+      if (!locks || typeof locks.request !== 'function') return;
+      void locks.request('agenthub-relay', { ifAvailable: true }, (lock) => {
+        // lock === null → unavailable; proceed without holding it (no-op hold).
+        if (lock === null) return undefined;
+        return new Promise<void>((resolve) => { releaseRelayLock = resolve; });
+      }).catch(() => { /* lock API rejected — proceed anyway */ });
+    } catch {
+      // navigator.locks unavailable (older/test env) — correctness unaffected.
     }
   }
 
@@ -152,6 +230,10 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
     'server_not_responding',
     'protocol_timeout',
     'helper_unavailable',
+    // The relay-superseded dead-window. Must surface as-is (not collapse to the
+    // generic 'was_connected') so the UI shows the "Reconnecting… / Reconnect
+    // now" affordance instead of lying "Connected" during the window (§7.2.1).
+    'awaiting_sw_recovery',
   ];
 
   function setDiagnostic(reason: DiagnosticReason): void {
@@ -178,13 +260,58 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
       const urlChanged = result.url !== currentUrl;
       currentUrl = result.url;
       setDiagnostic(result.diagnostic);
-      // If the server appeared (lock file found after being gone, or URL changed),
-      // reset failure count so next attempt is immediate — don't make the user wait 30s
-      if (urlChanged || (result.diagnostic === 'connecting' && context.failureCount > 2)) {
+      // §6.1: only a URL CHANGE (a genuinely different bridge appeared, e.g.
+      // restart on a new port) resets failureCount for an immediate attempt.
+      // We deliberately NO LONGER reset just because the lock file is reachable
+      // (`diagnostic === 'connecting'`): during the relay storm each cycle is
+      // briefly "reachable", and resetting here kept backoff pinned at the ~1s
+      // floor (the amplifier). A stable connection resets failureCount via the
+      // first HEARTBEAT_OK instead.
+      if (urlChanged) {
         context = { ...context, failureCount: 0 };
       }
     } catch {
       // Keep current URL if discovery fails
+    }
+  }
+
+  /**
+   * §8.2 bridge-truth liveness probe. Asks the bridge's /api/state whether a
+   * relay for THIS browserId is present-and-not-wedged (the healthy winner).
+   * Returns:
+   *   'live'    — a relay for my browserId is present and NOT stale → a healthy
+   *               winner exists; the guarded retry must stay quiet. This covers
+   *               BOTH `liveness==='live'` (heard recently) AND `'unknown'`
+   *               (just connected, no inbound frame yet — server_ping is only
+   *               every ~20s, so a fresh winner legitimately reads 'unknown' for
+   *               a window; treating it as a winner avoids re-challenging it).
+   *   'none'    — no relay for my browserId, OR it is `stale` (>45s silent — the
+   *               winner is gone/wedged; the bridge sweep will reap it) → safe
+   *               to re-challenge.
+   *   'unknown' — could not determine (bridge unreachable / parse error). The
+   *               caller treats this like 'none' for recovery (better to try to
+   *               reconnect than hang), but it is logged distinctly.
+   */
+  async function probeBridgeRelayLiveness(): Promise<'live' | 'none' | 'unknown'> {
+    try {
+      const httpBase = currentUrl.replace(/^ws:/, 'http:').replace(/^wss:/, 'https:').replace(/[?#].*$/, '');
+      const myBrowserId = await getBrowserInstanceId();
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 3_000);
+      let res: Response;
+      try {
+        res = await fetch(`${httpBase}/api/state`, { signal: ctrl.signal });
+      } finally {
+        clearTimeout(t);
+      }
+      if (!res.ok) return 'unknown';
+      const data = await res.json() as { browsers?: Array<{ browserId: string; liveness?: string }> };
+      const mine = data.browsers?.find((b) => b.browserId === myBrowserId);
+      if (!mine) return 'none';
+      // A present relay that is NOT explicitly 'stale' counts as a live winner.
+      return mine.liveness === 'stale' ? 'none' : 'live';
+    } catch {
+      return 'unknown';
     }
   }
 
@@ -224,6 +351,9 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
       },
 
       onServerInfo(info: ServerInfo) {
+        // server_info reached → the open attempt is decided; release the lock so
+        // a competing life isn't narrowed out longer than necessary.
+        releaseLock();
         if (serverInfoTimer !== null) {
           clearTimeout(serverInfoTimer);
           serverInfoTimer = null;
@@ -250,8 +380,11 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
           // because setDiagnostic('connecting') only fired on the next
           // refreshUrl call, which can be 30s away.
           diagnosticReason: null,
-          // Reset failureCount + missedHeartbeats — fresh connection.
-          failureCount: 0,
+          // §6.1: do NOT reset failureCount on server_info. A connection that
+          // receives server_info but dies within seconds (the relay-storm
+          // signature) must still count as a failure so backoff climbs. The
+          // reset happens only once the link is STABLE (first HEARTBEAT_OK),
+          // handled in the connection-machine 'connected' case.
           missedHeartbeats: 0,
         };
         if (pidChanged) {
@@ -297,6 +430,7 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
       },
 
       onClose(code: number, reason: string) {
+        releaseLock();
         if (serverInfoTimer !== null) {
           clearTimeout(serverInfoTimer);
           serverInfoTimer = null;
@@ -311,6 +445,41 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
         heartbeat?.stop();
         heartbeat = null;
         relay = null;
+
+        // ── 4002: this (gen,lifeUuid) lost the bridge's total-order collision ──
+        // A higher-identity relay for the same browserId superseded us. This is
+        // TERMINAL for THIS identity: do NOT scheduleBackoff/reopen — reopening
+        // would just re-challenge with the SAME (gen,lifeUuid), lose again, and
+        // continue the storm with extra steps (design §6.4 / §7.1.3).
+        //
+        // It is terminal but SCOPED, never a global give-up:
+        //   - We never persist a "gave up" flag; a future SW life loads with a
+        //     fresh, higher genTimestamp and connects normally.
+        //   - The guarded alarm retry in reconcile() can mint a fresh identity
+        //     and reconnect, but ONLY when /api/state confirms no live relay
+        //     exists for this browserId — so we never re-challenge a healthy
+        //     winner (design §8.2). Until then we sit quietly in
+        //     'awaiting_sw_recovery' (a real state, NOT a lying "Connected").
+        if (code === 4002) {
+          context = {
+            ...context,
+            serverInfo: null,
+            // Move out of any connected/degraded state into reconnecting WITHOUT
+            // scheduling a backoff reopen — reconcile()'s guarded retry owns
+            // recovery from here.
+          };
+          void logRecord({
+            event: 'ext.ws.relay_superseded_terminal',
+            lvl: 'warn',
+            code,
+            reason,
+            gen: relayGenTimestamp,
+            hint: 'Bridge rejected this relay identity (4002): a higher (gen,lifeUuid) won. Terminal for this SW life; alarm re-challenge is guarded on bridge liveness.',
+          });
+          dispatch({ type: 'WS_CLOSE' });
+          setDiagnostic('awaiting_sw_recovery');
+          return;
+        }
         // Drop the cached serverInfo on close: the previously-connected
         // bridge generation is now gone, and continuing to display its
         // PID / port / uptime would be a lie. The diagnostics panel will
@@ -375,6 +544,8 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
       },
     });
 
+    // §6.5: narrowly hold the relay lock around this open attempt (best-effort).
+    acquireRelayLock();
     relay.connect(withRelayRole(currentUrl));
   }
 
@@ -436,6 +607,53 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
       if (relay !== null && relay.isConnected()) {
         // Relay alive in memory — send a ping to confirm and update lastVerifiedAt
         relay.sendPing(Date.now());
+        return;
+      }
+
+      // ── §8.2 guarded, time-scoped re-challenge after a 4002-terminal close ──
+      // This life was superseded (lost the (gen,lifeUuid) total order) and is
+      // sitting in 'awaiting_sw_recovery' with no relay and no scheduled
+      // backoff. We must re-challenge ONLY when there is genuinely no live relay
+      // for our browserId — confirmed from BRIDGE TRUTH (/api/state), NOT from
+      // our own `relay === null` (always true here, says nothing about the
+      // winner). Re-challenging a healthy winner would mint a fresh, HIGHER
+      // identity and supersede it → a 30s-cadence slow storm (§8.1).
+      if (context.diagnosticReason === 'awaiting_sw_recovery') {
+        const liveness = await probeBridgeRelayLiveness();
+        if (liveness === 'live') {
+          // A healthy winner owns the browserId — stay quiet. The UI remains in
+          // 'awaiting_sw_recovery'; we do NOT mint/connect.
+          void logRecord({
+            event: 'ext.reconcile.recovery_deferred',
+            lvl: 'info',
+            reason: 'live_relay_present_for_browserid',
+            hint: 'A live relay exists for this browserId; not re-challenging the winner.',
+          });
+          return;
+        }
+        // No live relay (winner gone / stale / never present) → recover. Mint a
+        // FRESH identity so the new challenge outranks any stale incumbent, then
+        // reconnect through the normal path.
+        mintFreshRelayIdentity();
+        void logRecord({
+          event: 'ext.reconcile.recovery_rechallenge',
+          lvl: 'info',
+          livenessProbe: liveness,
+          newGen: relayGenTimestamp,
+          hint: 'No live relay for this browserId; minting fresh identity and reconnecting.',
+        });
+        stopAll();
+        await refreshUrl();
+        // refreshUrl() mutates `context.diagnosticReason` via setDiagnostic; TS
+        // narrows the closure `context` to the literal from the outer `if` and
+        // cannot follow the reassignment through the await, so read it widened.
+        const reasonAfter = (context as ConnectionContext).diagnosticReason as DiagnosticReason | null;
+        if (reasonAfter === 'connecting') {
+          dispatch({ type: 'CONNECT' });
+          openRelay();
+        } else if (context.state !== 'disconnected') {
+          dispatch({ type: 'DISCONNECT' });
+        }
         return;
       }
 

@@ -192,6 +192,18 @@ export interface StateSource {
      *    'stale' (yellow) — connected but SW likely wedged
      *    'unknown' (gray) — just connected, no inbound frames yet */
     liveness: 'live' | 'stale' | 'unknown';
+    /** §7.2.3 observability — supersede/replace churn for THIS browserId.
+     *  Count of relay_superseded + replaced events recorded for this browserId
+     *  (rolling window). Drives the truthful "Flapping" UI state and is the
+     *  cross-life churn signal a single SW's reconnectsThisSession can't see. */
+    supersededCount: number;
+    /** ISO timestamp of the most recent relay close for this browserId, or null
+     *  if none recorded this bridge generation. Consumed by the extension's
+     *  guarded alarm retry and the "Recovering" UI state. */
+    lastRelayClosedAt: string | null;
+    /** Close code of the most recent relay close for this browserId (e.g. 4002
+     *  = superseded/rejected), or null if none recorded. */
+    lastRelayCloseCode: number | null;
   }>;
   mcpClients: Array<{
     clientId: string;

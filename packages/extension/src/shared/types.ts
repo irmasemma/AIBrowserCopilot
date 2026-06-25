@@ -22,7 +22,13 @@ export type DiagnosticReason =
   | 'server_not_responding'
   | 'protocol_timeout'
   | 'helper_unavailable'
-  | 'was_connected';
+  | 'was_connected'
+  // This SW life's relay was rejected by the bridge with close code 4002
+  // (a higher-identity relay for the same browserId won the total-order
+  // collision). Terminal for THIS (gen,lifeUuid): no backoff/reopen. A future
+  // SW life (new gen) connects normally; the alarm re-challenges only when
+  // /api/state shows no live relay for this browserId (see reconcile()).
+  | 'awaiting_sw_recovery';
 
 /** @deprecated Use ConnectionContext instead. Kept for backward compatibility. */
 export interface ConnectionInfo {
@@ -64,7 +70,16 @@ export interface ConnectionContext {
   versionStatus: 'ok' | 'outdated' | null;
 }
 
-export type DisplayState = ConnectionState | 'stale';
+export type DisplayState =
+  | ConnectionState
+  | 'stale'
+  // Verdict-derived badge states (see sidepanel/connection-verdict.ts). These are
+  // NOT raw connection-machine states — they are the truthful UI verdict the badge
+  // renders so color is never the only signal.
+  | 'working'
+  | 'untested'
+  | 'flapping'
+  | 'recovering';
 
 /** Threshold in ms — if lastVerifiedAt is older than this, state is stale */
 export const STALE_THRESHOLD_MS = 40_000;

@@ -5,6 +5,11 @@ import type { ServerInfo, ConnectionContext } from '../../shared/types.js';
 export interface DiagnosticsPanelProps {
   serverInfo: ServerInfo | null;
   connectionContext: ConnectionContext;
+  /** The single unified verdict headline (from `deriveVerdict`), surfaced at the
+   *  top of the panel so the panel can NEVER contradict the header (design §4 /
+   *  §7.2: surfaces must agree). Optional for back-compat / standalone tests. */
+  verdictTitle?: string;
+  verdictSeverity?: 'ok' | 'warn' | 'error';
 }
 
 export const formatUptime = (seconds: number): string => {
@@ -278,7 +283,7 @@ const StepRow: FunctionalComponent<{ step: DiagnosticStep }> = ({ step }) => {
   );
 };
 
-export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ serverInfo, connectionContext }) => {
+export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ serverInfo, connectionContext, verdictTitle, verdictSeverity }) => {
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [status, setStatus] = useState<ServiceStatusSnapshot | null>(null);
@@ -435,8 +440,21 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
     try { chrome.tabs.create({ url: dashboardUrl }); } catch { window.open(dashboardUrl, '_blank'); }
   };
 
+  const verdictColor =
+    verdictSeverity === 'error' ? 'text-red-600'
+    : verdictSeverity === 'warn' ? 'text-amber-700'
+    : 'text-emerald-700';
+
   return (
     <div class="px-4 pb-3 text-xs text-neutral-700 border-t border-neutral-100 pt-3 bg-neutral-50/50">
+      {/* Unified verdict echo — same headline the header shows, so the panel can
+          never read "Connected" while the header reads "Flapping" (surfaces must
+          agree). */}
+      {verdictTitle && (
+        <div class="mb-2" data-testid="diag-verdict">
+          <span class={`text-[11px] font-semibold ${verdictColor}`}>{verdictTitle}</span>
+        </div>
+      )}
       <div class="flex justify-between items-center mb-2">
         <span class="font-semibold text-neutral-700">Connection diagnostics</span>
         <div class="flex gap-2">

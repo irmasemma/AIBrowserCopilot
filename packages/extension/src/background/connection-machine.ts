@@ -39,15 +39,22 @@ export function transition(ctx: ConnectionContext, event: ConnectionEvent): Conn
       return ctx;
 
     case 'connecting':
+      // §6.1 backoff amplifier fix: WS_OPEN (and server_info) no longer reset
+      // failureCount — a connection that opens but dies within seconds must
+      // still count as a failure so backoff climbs to its cap. failureCount is
+      // reset only once the connection is STABLE (first HEARTBEAT_OK = survived
+      // ≥ one heartbeat interval), handled in the 'connected' case below.
       if (event.type === 'WS_OPEN')
-        return { ...ctx, state: 'connected', failureCount: 0, missedHeartbeats: 0 };
+        return { ...ctx, state: 'connected', missedHeartbeats: 0 };
       if (event.type === 'WS_ERROR' || event.type === 'TIMEOUT' || event.type === 'WS_CLOSE')
         return toReconnecting(ctx, { failureCount: ctx.failureCount + 1 });
       return ctx;
 
     case 'connected':
       if (event.type === 'HEARTBEAT_OK')
-        return { ...ctx, missedHeartbeats: 0 };
+        // First pong proves the connection survived ≥ one heartbeat interval →
+        // it is genuinely stable; safe to reset the backoff failure counter.
+        return { ...ctx, missedHeartbeats: 0, failureCount: 0 };
       if (event.type === 'HEARTBEAT_MISS') {
         const missed = ctx.missedHeartbeats + 1;
         return missed >= 1
@@ -55,22 +62,27 @@ export function transition(ctx: ConnectionContext, event: ConnectionEvent): Conn
           : { ...ctx, missedHeartbeats: missed };
       }
       if (event.type === 'WS_CLOSE')
-        return toReconnecting(ctx);
+        // A close from connected before stability (failureCount still >0, no
+        // HEARTBEAT_OK yet) must count toward backoff. After stability
+        // failureCount is 0, so this increments from 0 → 1 for the next cycle,
+        // which is correct: a freshly-dropped stable link gets one retry at the
+        // floor, then climbs if it keeps dropping.
+        return toReconnecting(ctx, { failureCount: ctx.failureCount + 1 });
       if (event.type === 'DISCONNECT')
         return { ...ctx, state: 'disconnected' };
       return ctx;
 
     case 'degraded':
       if (event.type === 'HEARTBEAT_OK')
-        return { ...ctx, state: 'connected', missedHeartbeats: 0 };
+        return { ...ctx, state: 'connected', missedHeartbeats: 0, failureCount: 0 };
       if (event.type === 'HEARTBEAT_MISS') {
         const missed = ctx.missedHeartbeats + 1;
         return missed >= 2
-          ? toReconnecting(ctx, { missedHeartbeats: 0 })
+          ? toReconnecting(ctx, { missedHeartbeats: 0, failureCount: ctx.failureCount + 1 })
           : { ...ctx, missedHeartbeats: missed };
       }
       if (event.type === 'WS_CLOSE')
-        return toReconnecting(ctx);
+        return toReconnecting(ctx, { failureCount: ctx.failureCount + 1 });
       return ctx;
 
     case 'reconnecting':
@@ -79,8 +91,10 @@ export function transition(ctx: ConnectionContext, event: ConnectionEvent): Conn
       // Failsafe: a server_info-driven WS_OPEN can arrive while we're still in
       // reconnecting (e.g. reconcile() opened a relay without dispatching
       // BACKOFF_EXPIRED first). Accept the connection rather than getting stuck.
+      // Do NOT reset failureCount here (§6.1): stability is proven by the first
+      // HEARTBEAT_OK, not by the socket opening.
       if (event.type === 'WS_OPEN')
-        return { ...ctx, state: 'connected', failureCount: 0, missedHeartbeats: 0 };
+        return { ...ctx, state: 'connected', missedHeartbeats: 0 };
       if (event.type === 'DISCONNECT')
         return { ...ctx, state: 'disconnected' };
       return ctx;

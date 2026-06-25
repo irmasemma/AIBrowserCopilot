@@ -199,6 +199,10 @@ function indexBrowser(browserId: string, ws: WebSocket): void {
   // browser session actually churned.
   const existing = browserSockets.get(browserId);
   if (existing && existing !== ws) {
+    // §7.2.3: count the replace toward the per-browser churn signal and stamp
+    // the close (the terminated socket is superseded by a new relay).
+    bumpSupersededCount(browserId);
+    recordRelayClose(browserId, 1006);
     bridgeLog().warn('bridge.browser.replaced', {
       browserId,
       reason: 'new_socket_for_same_browserid',
@@ -294,6 +298,26 @@ function parseQuery(url: string | undefined): URLSearchParams {
   return qi === -1 ? new URLSearchParams() : new URLSearchParams(url.slice(qi + 1));
 }
 
+/**
+ * Extract a query param's value as the RAW string from the URL — WITHOUT
+ * percent-decoding (URLSearchParams.get decodes). The total-order collision
+ * tiebreak (§7.1.4) compares lifeUuid byte-for-byte exactly as both sockets
+ * sent it, so we must not normalize/decode it. Returns '' if absent.
+ *   "...?a=1&lifeUuid=abc-DEF&b=2" , "lifeUuid" → "abc-DEF"
+ */
+export function extractRawParam(url: string | undefined, name: string): string {
+  if (!url) return '';
+  const qi = url.indexOf('?');
+  if (qi === -1) return '';
+  const query = url.slice(qi + 1);
+  for (const pair of query.split('&')) {
+    const eq = pair.indexOf('=');
+    const key = eq === -1 ? pair : pair.slice(0, eq);
+    if (key === name) return eq === -1 ? '' : pair.slice(eq + 1);
+  }
+  return '';
+}
+
 // ── Handle browser extension connection ───────────────────────────────────
 // Bridge sends server_ping every 20s. Each ping arrival in the extension
 // fires a WS onmessage event in the service worker, which counts as SW
@@ -322,6 +346,52 @@ const HELPER_PROBE_BROWSER_ID = 'helper-probe';
  */
 const browserLastSeen = new Map<string, number>();
 const pendingPongs = new Map<string, Array<(timestamp: number) => void>>();
+
+// ── Relay identity for the total-order collision rule (design §6.2/§7.1) ────
+// The current incumbent relay's declared identity, keyed by browserId. Stored
+// at accept() time alongside its socket so the NEXT colliding relay can be
+// compared against it by the strict lexicographic total order on
+// (gen, rawLifeUuid). `gen` is a number (Date.now() from the extension); a
+// missing/legacy gen is represented as `null` and ranks LOWEST. `rawLifeUuid`
+// is compared BYTE-FOR-BYTE as the raw query string — never re-parsed or
+// case-folded — so both racing sockets agree on the same winner (§7.1.4).
+interface RelayIdentity { gen: number | null; rawLifeUuid: string }
+const browserRelayIdentity = new Map<string, RelayIdentity>();
+
+// ── §7.2.3 observability — per-browser supersede/replace churn ─────────────
+// Count of relay_superseded + replaced events for a browserId (rolling, reset
+// when the browser fully disconnects). Drives the truthful "Flapping" UI and
+// is the cross-SW-life signal a single SW's reconnectsThisSession can't see.
+const browserSupersededCount = new Map<string, number>();
+// Most recent relay close for a browserId: when + the close code (4002 =
+// rejected/superseded). Consumed by the extension's guarded alarm retry and
+// the "Recovering" UI state.
+const browserLastRelayClose = new Map<string, { at: number; code: number }>();
+
+function bumpSupersededCount(browserId: string): void {
+  browserSupersededCount.set(browserId, (browserSupersededCount.get(browserId) ?? 0) + 1);
+}
+function recordRelayClose(browserId: string, code: number): void {
+  browserLastRelayClose.set(browserId, { at: Date.now(), code });
+}
+
+/**
+ * Strict lexicographic total order on relay identity (gen, rawLifeUuid).
+ * Returns >0 if `a` strictly outranks `b`, <0 if strictly lower, 0 on EXACT
+ * tie (same gen AND byte-identical lifeUuid — the same SW life's own
+ * transport-blip reconnect, which must be idempotent, NOT 4002'd — §7.1.1).
+ * A null gen (legacy/no-gen relay) ranks below any numeric gen.
+ */
+function compareRelayIdentity(a: RelayIdentity, b: RelayIdentity): number {
+  if (a.gen !== b.gen) {
+    if (a.gen === null) return -1;
+    if (b.gen === null) return 1;
+    return a.gen > b.gen ? 1 : -1;
+  }
+  // Equal gen → byte-for-byte raw lifeUuid compare (stable on both sockets).
+  if (a.rawLifeUuid === b.rawLifeUuid) return 0;
+  return a.rawLifeUuid > b.rawLifeUuid ? 1 : -1;
+}
 
 function markBrowserAlive(browserId: string): void {
   browserLastSeen.set(browserId, Date.now());
@@ -383,10 +453,20 @@ const INCUMBENT_LIVENESS_TIMEOUT_MS = 1_500;
 // Production wiring calls this from the WebSocketServer 'connection' handler.
 // `isCanonicalRelay` = the connection declared `?role=relay`: it is the real
 // extension relay for this browserId (not a probe or a stale-client duplicate).
-// That IDENTITY — not a liveness guess — decides who wins a browserId collision.
-export function handleExtension(ws: WebSocket, browserId: string, isCanonicalRelay = false): void {
+// `gen` / `rawLifeUuid` form this relay's IDENTITY (design §7.1): the bridge
+// resolves a browserId collision by a STRICT total order on (gen, rawLifeUuid),
+// NOT a liveness guess. `gen` is null for legacy/no-gen extensions (ranks
+// lowest); `rawLifeUuid` is the raw query-param string, compared byte-for-byte.
+export function handleExtension(
+  ws: WebSocket,
+  browserId: string,
+  isCanonicalRelay = false,
+  gen: number | null = null,
+  rawLifeUuid = '',
+): void {
   const connectedAt = Date.now();
   const isProbe = browserId === HELPER_PROBE_BROWSER_ID;
+  const myIdentity: RelayIdentity = { gen, rawLifeUuid };
 
   // Register this socket and wire up all of its handlers. Invoked either
   // immediately (no browserId collision) or, on a collision, ONLY after we
@@ -409,6 +489,12 @@ export function handleExtension(ws: WebSocket, browserId: string, isCanonicalRel
     browserRegistry.set(browserId, { connectedAt: new Date(connectedAt).toISOString() });
   }
   indexBrowser(browserId, ws);
+  if (!isProbe) {
+    // Store THIS relay's identity alongside its socket so the next colliding
+    // relay can be compared by the total order. Probes never collide (dedicated
+    // browserId) so they don't participate.
+    browserRelayIdentity.set(browserId, myIdentity);
+  }
   ws.send(JSON.stringify(getServerInfo()));
 
   const serverPingTimer = setInterval(() => {
@@ -488,9 +574,16 @@ export function handleExtension(ws: WebSocket, browserId: string, isCanonicalRel
     } catch { /* ignore */ }
   });
 
-  ws.on('close', () => {
+  ws.on('close', (code: number) => {
     clearInterval(serverPingTimer);
     if (browserSockets.get(browserId) === ws) {
+      if (!isProbe) {
+        // Record the close for /api/state observability + the extension's
+        // guarded alarm retry. Only the CURRENT incumbent reaches here (a
+        // superseded socket was already overwritten in browserSockets).
+        recordRelayClose(browserId, code);
+        browserRelayIdentity.delete(browserId);
+      }
       unindexBrowser(browserId);
       browserLastSeen.delete(browserId);
       // Resolve any in-flight liveness probes as false — the WS is gone.
@@ -501,7 +594,17 @@ export function handleExtension(ws: WebSocket, browserId: string, isCanonicalRel
         // false. Actually safer: just leave them to timeout naturally.
       }
       pendingPongs.delete(browserId);
-      if (!isProbe) browserRegistry.delete(browserId);
+      if (!isProbe) {
+        browserRegistry.delete(browserId);
+        // A clean (1000) disconnect means the browser went away deliberately,
+        // not a storm — clear the rolling churn/close signal so a future
+        // session starts fresh. A non-1000 close (e.g. liveness-sweep 1011)
+        // keeps the signal so the guarded retry / Flapping UI can still see it.
+        if (code === 1000) {
+          browserSupersededCount.delete(browserId);
+          browserLastRelayClose.delete(browserId);
+        }
+      }
       const event = isProbe ? 'bridge.probe.disconnected' : 'bridge.browser.disconnected';
       // Per-browser pending count: filter the global pending map by which
       // request was routed to this specific browser. Tier 3 #10 fix —
@@ -520,43 +623,97 @@ export function handleExtension(ws: WebSocket, browserId: string, isCanonicalRel
   });
   };
 
-  // ── Collision guard — decided by IDENTITY, not a liveness guess ─────────
-  // A second socket for an already-registered browserId has exactly two
-  // possible meanings, and we tell them apart by who DECLARED itself the
-  // canonical relay (`?role=relay`), not by pinging the incumbent:
+  // ── Collision rule — STRICT TOTAL ORDER on relay identity (design §7.1) ──
+  // A second socket for an already-registered browserId is resolved by IDENTITY,
+  // never a liveness guess. The newcomer's (gen, rawLifeUuid) is compared
+  // against the stored incumbent identity with a strict lexicographic total
+  // order:
   //
-  //   1. Newcomer IS the canonical relay → it is the real extension reconnecting
-  //      (a fresh MV3 service-worker life). A browser has exactly one canonical
-  //      relay, so the NEWEST one is by definition the current client. It WINS
-  //      unconditionally — accept it; indexBrowser() terminates the superseded
-  //      socket. No liveness check, so a stale-but-still-ponging old socket can
-  //      NEVER block a real reconnect. This is the fix for the v0.5.11 `4002`
-  //      reconnect loop (where a lingering live socket rejected the real client).
+  //   • strictly-HIGHER (gen,lifeUuid) → accept + supersede. indexBrowser()
+  //     terminates the old socket. A stale-but-still-ponging socket can NEVER
+  //     block a higher-identity reconnect (fixes the v0.5.11 4002 loop).
+  //   • EXACT TIE (same gen AND byte-identical lifeUuid) → idempotent accept,
+  //     NO 4002. This is the SAME SW life's own transport-blip reconnect
+  //     (lifeUuid is per-load, not per-socket) — rejecting it would break a
+  //     benign reconnect (§7.1.1).
+  //   • strictly-LOWER → reject with 4002, do NOT supersede the incumbent. The
+  //     extension treats 4002-on-relay as terminal (no backoff) so the loser
+  //     stops re-challenging → the storm converges in one cycle (§6.4).
   //
-  //   2. Newcomer is NOT a canonical relay → it's a legacy build with no marker,
-  //      or a stale-client health-probe using the real browserId. Here the
-  //      incumbent may be the LIVE relay, and terminating it would silently
-  //      break tool routing. So we keep the liveness guard: prove the incumbent
-  //      dead before replacing; if it's alive, reject the non-canonical newcomer
-  //      with 4002. This preserves the original protection for old clients.
+  // lifeUuid is compared BYTE-FOR-BYTE as the raw query string so both racing
+  // sockets compute the same winner (§7.1.4).
+  //
+  // Legacy/no-gen relays (incumbent and/or newcomer has gen===null): the total
+  // order can't strictly rank two null-gens, so we FALL BACK to the prior safe
+  // behavior — a canonical (role=relay) newcomer wins (newest-relay-wins, the
+  // v0.5.11 fix); a non-canonical newcomer goes through the liveness guard.
+  // This keeps old extensions no worse off than today.
   //
   // Probes (helper-probe) use a dedicated id that never collides — exempt.
   const existing = browserSockets.get(browserId);
   if (!isProbe && existing && existing !== ws && existing.readyState === WebSocket.OPEN) {
+    const incumbentIdentity = browserRelayIdentity.get(browserId);
+    const haveTotalOrder = isCanonicalRelay && gen !== null && incumbentIdentity !== undefined && incumbentIdentity.gen !== null;
+
+    if (haveTotalOrder) {
+      const cmp = compareRelayIdentity(myIdentity, incumbentIdentity!);
+      if (cmp > 0) {
+        // Newcomer strictly outranks the incumbent → supersede. (The churn
+        // counter is bumped once in indexBrowser when the old socket is
+        // terminated, so we don't double-count here.)
+        bridgeLog().info('bridge.browser.relay_superseded', {
+          browserId,
+          reason: 'higher_identity_total_order',
+          gen,
+          incumbentGen: incumbentIdentity!.gen,
+          hint: 'A strictly-higher (gen,lifeUuid) relay arrived. Total order: newcomer wins; the previous socket is closed by indexBrowser.',
+        });
+        accept();
+        return;
+      }
+      if (cmp === 0) {
+        // Exact tie: same SW life reconnecting after a transport blip. Idempotent
+        // accept — NOT a 4002, and NOT counted as churn.
+        bridgeLog().info('bridge.browser.relay_reconnect_idempotent', {
+          browserId,
+          reason: 'exact_identity_tie',
+          gen,
+          hint: 'Same (gen,lifeUuid) as the incumbent — this SW life reopened its own socket. Accepted idempotently; no 4002.',
+        });
+        accept();
+        return;
+      }
+      // cmp < 0 — newcomer is strictly lower-identity → reject, keep incumbent.
+      recordRelayClose(browserId, 4002);
+      bridgeLog().warn('bridge.browser.relay_rejected_lower_identity', {
+        browserId,
+        reason: 'lower_identity_total_order',
+        gen,
+        incumbentGen: incumbentIdentity!.gen,
+        hint: 'A strictly-lower (gen,lifeUuid) relay arrived while a higher incumbent is live. Rejected with 4002 (terminal for that identity); incumbent preserved.',
+      });
+      try { ws.close(4002, 'lower_identity_relay'); } catch { /* ignore */ }
+      return;
+    }
+
     if (isCanonicalRelay) {
-      // Newest canonical relay wins — no liveness check.
+      // Legacy/no-gen path: at least one side lacks a numeric gen, so we can't
+      // strictly rank. Preserve newest-canonical-relay-wins (v0.5.11 fix).
+      // (Churn counter bumped in indexBrowser on the terminate — no double count.)
       bridgeLog().info('bridge.browser.relay_superseded', {
         browserId,
-        reason: 'newer_canonical_relay',
-        hint: 'A newer role=relay socket arrived for this browser (fresh SW life). Newest relay wins; the previous socket is closed by indexBrowser.',
+        reason: 'newer_canonical_relay_legacy_no_gen',
+        hint: 'A newer role=relay socket arrived (legacy/no-gen). Newest relay wins; the previous socket is closed by indexBrowser.',
       });
       accept();
       return;
     }
+
     // Non-canonical newcomer: keep a live incumbent, reject the duplicate.
     proveLive(browserId, existing, INCUMBENT_LIVENESS_TIMEOUT_MS)
       .then((alive) => {
         if (alive) {
+          recordRelayClose(browserId, 4002);
           bridgeLog().warn('bridge.browser.duplicate_rejected', {
             browserId,
             reason: 'incumbent_live_newcomer_not_canonical_relay',
@@ -1532,6 +1689,7 @@ export function startServer(port: number): void {
             if (ageSec !== null) {
               liveness = ageSec < 45 ? 'live' : 'stale';
             }
+            const lastClose = browserLastRelayClose.get(browserId);
             return {
               browserId,
               connectedAt: info.connectedAt,
@@ -1539,6 +1697,11 @@ export function startServer(port: number): void {
               lastSeenAt: lastSeenMs ? new Date(lastSeenMs).toISOString() : null,
               lastSeenAgeSec: ageSec,
               liveness,
+              // §7.2.3 observability — consumed by the truthful UI (Flapping
+              // state) and the extension's guarded alarm retry.
+              supersededCount: browserSupersededCount.get(browserId) ?? 0,
+              lastRelayClosedAt: lastClose ? new Date(lastClose.at).toISOString() : null,
+              lastRelayCloseCode: lastClose ? lastClose.code : null,
             };
           }),
           mcpClients: Array.from(mcpClientRegistry.entries()).map(([clientId, info]) => ({
@@ -1673,7 +1836,14 @@ export function startServer(port: number): void {
       handleMcpClient(ws);
     } else {
       // `role=relay` marks the canonical extension relay (see handleExtension).
-      handleExtension(ws, params.get('browserId') || 'default', params.get('role') === 'relay');
+      // `gen` / `lifeUuid` form the relay identity for the total-order collision
+      // rule. Parse gen as a number (null if absent/legacy). Read lifeUuid from
+      // the RAW query string (not via URLSearchParams, which percent-decodes) so
+      // the bridge compares the exact bytes both racing sockets sent (§7.1.4).
+      const genRaw = params.get('gen');
+      const gen = genRaw !== null && /^\d+$/.test(genRaw) ? Number(genRaw) : null;
+      const rawLifeUuid = extractRawParam(req.url, 'lifeUuid');
+      handleExtension(ws, params.get('browserId') || 'default', params.get('role') === 'relay', gen, rawLifeUuid);
     }
   });
 

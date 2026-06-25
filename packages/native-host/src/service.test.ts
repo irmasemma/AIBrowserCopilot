@@ -9,6 +9,7 @@ import {
   loadAllowedExtensionIds,
   translateExtensionResponse,
   handleExtension,
+  extractRawParam,
   type FanOutResult,
   type FanOutError,
 } from './service.js';
@@ -187,6 +188,123 @@ describe('collision guard (single-relay invariant)', () => {
     expect(ws1Closed).toBe(true);   // orphan replaced
 
     ws2.close(); wss.close();
+  }, 10_000);
+});
+
+describe('extractRawParam (byte-for-byte lifeUuid compare — §7.1.4)', () => {
+  it('returns the RAW (non-decoded) value of a query param', () => {
+    expect(extractRawParam('/?browserId=chrome&role=relay&gen=5&lifeUuid=abc-DEF', 'lifeUuid')).toBe('abc-DEF');
+    expect(extractRawParam('/?gen=123&lifeUuid=AAA', 'gen')).toBe('123');
+  });
+  it('does NOT percent-decode (preserves exact bytes both sockets sent)', () => {
+    // URLSearchParams.get would decode %2D → '-'; we must compare raw bytes.
+    expect(extractRawParam('/?lifeUuid=a%2Db', 'lifeUuid')).toBe('a%2Db');
+  });
+  it('returns empty string when the param is absent or url is empty', () => {
+    expect(extractRawParam('/?role=relay', 'lifeUuid')).toBe('');
+    expect(extractRawParam(undefined, 'lifeUuid')).toBe('');
+    expect(extractRawParam('/no-query', 'lifeUuid')).toBe('');
+  });
+});
+
+describe('collision total order (gen, lifeUuid) — design §7.1', () => {
+  // Server that forwards the FULL identity (gen + raw lifeUuid) into the real
+  // production handleExtension, mirroring service.ts router wiring.
+  function makeServer(): { wss: WebSocketServer; port: number } {
+    const port = 19950 + Math.floor(Math.random() * 400);
+    const wss = new WebSocketServer({ host: '127.0.0.1', port });
+    wss.on('connection', (ws, req) => {
+      const qi = (req.url ?? '').indexOf('?');
+      const p = qi !== -1 ? new URLSearchParams(req.url!.slice(qi + 1)) : new URLSearchParams();
+      const genRaw = p.get('gen');
+      const gen = genRaw !== null && /^\d+$/.test(genRaw) ? Number(genRaw) : null;
+      handleExtension(
+        ws as unknown as Parameters<typeof handleExtension>[0],
+        p.get('browserId') || 'default',
+        p.get('role') === 'relay',
+        gen,
+        extractRawParam(req.url, 'lifeUuid'),
+      );
+    });
+    return { wss, port };
+  }
+  function waitFor<T>(p: Promise<T>, ms: number): Promise<T> {
+    return Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+  }
+  function onceServerInfo(ws: WebSocket): Promise<void> {
+    return new Promise((resolve) => {
+      ws.on('message', (d) => { try { if (JSON.parse(String(d)).type === 'server_info') resolve(); } catch { /* */ } });
+    });
+  }
+  function relay(port: number, id: string, gen: number, lifeUuid: string): WebSocket {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}?browserId=${id}&role=relay&gen=${gen}&lifeUuid=${lifeUuid}`);
+    ws.on('message', (d) => { try { if (JSON.parse(String(d)).type === 'server_ping') ws.send(JSON.stringify({ type: 'server_pong', timestamp: Date.now() })); } catch { /* */ } });
+    return ws;
+  }
+
+  it('strictly-HIGHER gen supersedes the incumbent (accepted, incumbent closed)', async () => {
+    const { wss, port } = makeServer();
+    const id = 'chrome:to-higher';
+    const lo = relay(port, id, 100, 'aaaa');
+    let loClosed = false; lo.on('close', () => { loClosed = true; });
+    await waitFor(onceServerInfo(lo), 3000);
+
+    const hi = relay(port, id, 200, 'bbbb');
+    let hi4002 = false; hi.on('close', (c) => { if (c === 4002) hi4002 = true; });
+    await waitFor(onceServerInfo(hi), 4000);   // accepted
+
+    expect(hi.readyState).toBe(WebSocket.OPEN);
+    expect(hi4002).toBe(false);
+    await waitFor(new Promise<void>((res) => { if (loClosed) res(); else lo.on('close', () => res()); }), 2000);
+    expect(loClosed).toBe(true);
+    hi.close(); wss.close();
+  }, 10_000);
+
+  it('strictly-LOWER gen is rejected 4002, incumbent SURVIVES (rollback/stale challenger)', async () => {
+    const { wss, port } = makeServer();
+    const id = 'chrome:to-lower';
+    const hi = relay(port, id, 500, 'zzzz');
+    let hiClosed = false; hi.on('close', () => { hiClosed = true; });
+    await waitFor(onceServerInfo(hi), 3000);
+
+    const lo = relay(port, id, 100, 'aaaa');
+    const code = await waitFor(new Promise<number>((res) => lo.on('close', (c) => res(c))), 4000);
+
+    expect(code).toBe(4002);            // lower identity rejected
+    expect(hiClosed).toBe(false);       // incumbent preserved (NOT superseded)
+    expect(hi.readyState).toBe(WebSocket.OPEN);
+    hi.close(); wss.close();
+  }, 10_000);
+
+  it('EXACT tie (same gen AND lifeUuid) is idempotent — accepted, NOT 4002 (§7.1.1)', async () => {
+    const { wss, port } = makeServer();
+    const id = 'chrome:to-tie';
+    const a = relay(port, id, 300, 'same-uuid');
+    await waitFor(onceServerInfo(a), 3000);
+
+    // Same SW life's own transport-blip reconnect: identical (gen, lifeUuid).
+    const b = relay(port, id, 300, 'same-uuid');
+    let b4002 = false; b.on('close', (c) => { if (c === 4002) b4002 = true; });
+    await waitFor(onceServerInfo(b), 4000);   // accepted idempotently
+
+    expect(b.readyState).toBe(WebSocket.OPEN);
+    expect(b4002).toBe(false);
+    b.close(); wss.close();
+  }, 10_000);
+
+  it('equal gen, different lifeUuid → higher lifeUuid wins; lower is 4002 (total order tiebreak)', async () => {
+    const { wss, port } = makeServer();
+    const id = 'chrome:to-tiebreak';
+    // Incumbent has the HIGHER lifeUuid ('bbbb'); challenger lower ('aaaa') → 4002.
+    const hi = relay(port, id, 400, 'bbbb');
+    let hiClosed = false; hi.on('close', () => { hiClosed = true; });
+    await waitFor(onceServerInfo(hi), 3000);
+
+    const lo = relay(port, id, 400, 'aaaa');
+    const code = await waitFor(new Promise<number>((res) => lo.on('close', (c) => res(c))), 4000);
+    expect(code).toBe(4002);
+    expect(hiClosed).toBe(false);
+    hi.close(); wss.close();
   }, 10_000);
 });
 

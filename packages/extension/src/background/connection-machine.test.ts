@@ -44,12 +44,31 @@ describe('disconnected', () => {
 describe('connecting', () => {
   const base = ctx({ state: 'connecting' });
 
-  it('WS_OPEN -> connected, resets failureCount and missedHeartbeats', () => {
+  it('WS_OPEN -> connected, resets missedHeartbeats but NOT failureCount (§6.1 stability)', () => {
+    // §6.1 backoff amplifier fix: opening a socket is not proof of stability.
+    // failureCount is preserved until the connection survives ≥1 heartbeat
+    // (first HEARTBEAT_OK) — so a connection that opens then dies in seconds
+    // still climbs backoff instead of looping at the floor.
     const c = ctx({ state: 'connecting', failureCount: 3, missedHeartbeats: 2 });
     const result = transition(c, { type: 'WS_OPEN' });
     expect(result.state).toBe('connected');
-    expect(result.failureCount).toBe(0);
+    expect(result.failureCount).toBe(3);
     expect(result.missedHeartbeats).toBe(0);
+  });
+
+  it('HEARTBEAT_OK after WS_OPEN resets failureCount (connection proven stable)', () => {
+    let c = ctx({ state: 'connecting', failureCount: 3 });
+    c = transition(c, { type: 'WS_OPEN' });   // connected, failureCount still 3
+    expect(c.failureCount).toBe(3);
+    c = transition(c, { type: 'HEARTBEAT_OK' }); // survived ≥1 heartbeat → reset
+    expect(c.failureCount).toBe(0);
+  });
+
+  it('WS_CLOSE before stability (connected, no HEARTBEAT_OK) increments failureCount', () => {
+    const c = ctx({ state: 'connected', failureCount: 2 });
+    const result = transition(c, { type: 'WS_CLOSE' });
+    expect(result.state).toBe('reconnecting');
+    expect(result.failureCount).toBe(3);
   });
 
   it('WS_ERROR -> reconnecting, increments failureCount', () => {
@@ -171,10 +190,11 @@ describe('reconnecting', () => {
     expect(transition(base, { type: 'AUTO_CONNECT' }).state).toBe('connecting');
   });
 
-  it('WS_OPEN -> connected (failsafe when relay opens during reconnecting)', () => {
+  it('WS_OPEN -> connected (failsafe when relay opens during reconnecting), failureCount preserved until stable', () => {
     const result = transition(base, { type: 'WS_OPEN' });
     expect(result.state).toBe('connected');
-    expect(result.failureCount).toBe(0);
+    // §6.1: opening is not stability — failureCount stays until first HEARTBEAT_OK.
+    expect(result.failureCount).toBe(2);
     expect(result.missedHeartbeats).toBe(0);
   });
 

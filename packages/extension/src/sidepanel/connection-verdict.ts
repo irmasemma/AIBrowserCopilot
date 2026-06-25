@@ -1,0 +1,470 @@
+import type { ConnectionContext } from '../shared/types.js';
+
+/**
+ * THE single source of truth for "what is the connection actually doing right now"
+ * across every user-facing surface (header title, status badge, diagnostics panel).
+ *
+ * Why this module exists
+ * ======================
+ * The side panel header (`deriveHeader`) and the diagnostics panel (`buildSteps`)
+ * used to derive status INDEPENDENTLY from `connectionContext`, and the dashboard
+ * derived its own from `/api/state`. They disagreed in exactly the failure modes
+ * that matter — the dashboard would read "stale" while the side panel sat green on
+ * "Connected". One derivation, consumed everywhere, is the fix (design §4 / §7.2 /
+ * §6.6: "unify the verdict across surfaces").
+ *
+ * The lie this kills
+ * ==================
+ * "Working / Connected — tools working" used to bind to `lastVerifiedAt`, which is
+ * bumped by `onPong`/`onServerInfo`. A pong is NOT a tool round-trip — it rides the
+ * very socket being superseded every ~1.3s during the relay storm, so the heartbeat
+ * stays "on time" through a TOTAL outage. Here, "Working" requires a REAL tool-path
+ * fact:
+ *   - a recent real request SUCCESS for this browserId in `/api/state`
+ *     `recentActivity`, OR
+ *   - an on-demand synthetic `list_tabs` succeeded this session, OR
+ *   - bridge liveness === 'live' for this browserId AND no recent failed/superseded
+ *     requests AND a flat supersede count.
+ * Otherwise a freshly-`connected` session is "Connected — not yet tested", never a
+ * confident green (law: no silent staleness).
+ */
+
+/** A normalized view of THIS browser's row in `/api/state`, plus the recent-request
+ *  facts the verdict needs. Caller (`useApiState`) extracts this from the raw
+ *  `/api/state` payload, keyed to OUR browserId. Null when `/api/state` is
+ *  unreachable or our browserId isn't present in it. */
+export interface ApiStateFacts {
+  /** Bridge-derived liveness for OUR browserId. */
+  liveness: 'live' | 'stale' | 'unknown';
+  /** Seconds since the bridge last heard an inbound frame from us. */
+  lastSeenAgeSec: number | null;
+  /** Cross-life relay supersede/replace count for OUR browserId (the storm signal
+   *  a single SW's `reconnectsThisSession` cannot see). */
+  supersededCount: number;
+  /** Close code of the most recent relay close for OUR browserId (4002 = superseded). */
+  lastRelayCloseCode: number | null;
+  /** Did a real request for OUR browserId succeed within the recent window? */
+  hadRecentSuccess: boolean;
+  /** Did a real request for OUR browserId fail/timeout within the recent window? */
+  hadRecentFailure: boolean;
+  /** Did a recent request fail specifically with the relay-storm signature? */
+  hadRecentReplacedMidRequest: boolean;
+}
+
+export type VerdictKind =
+  | 'working' // proven by a real tool-path fact
+  | 'untested' // connected, but no tool call has proven it yet this session
+  | 'flapping' // the relay keeps getting replaced before a command can finish
+  | 'recovering' // 4002-terminal'd, waiting for the winner to die / SW to cycle
+  | 'stale' // a previously-good connection went quiet
+  | 'degraded' // heartbeats missing
+  | 'connecting'
+  | 'reconnecting'
+  | 'version_mismatch'
+  | 'broken' // a named, actionable hard failure (no bridge, protocol dead, etc.)
+  | 'disconnected';
+
+export type VerdictSeverity = 'ok' | 'warn' | 'error';
+
+/** The `DisplayState` the status badge renders — superset of `ConnectionState`. */
+export type BadgeState =
+  | 'working'
+  | 'untested'
+  | 'flapping'
+  | 'recovering'
+  | 'stale'
+  | 'degraded'
+  | 'connecting'
+  | 'reconnecting'
+  | 'disconnected';
+
+export interface VerdictAction {
+  id:
+    | 'run_quick_check'
+    | 'restart_service'
+    | 'reconnect_now'
+    | 'reload_extension'
+    | 'start_service'
+    | 'copy_install_command';
+  label: string;
+  variant: 'primary' | 'secondary';
+}
+
+export interface Verdict {
+  kind: VerdictKind;
+  /** Headline shown in the header title row. */
+  title: string;
+  /** One-line plain-English explanation. */
+  subtitle: string | null;
+  severity: VerdictSeverity;
+  /** Which badge state the dot/icon renders. */
+  badge: BadgeState;
+  /** Ordered recovery actions (first = primary). */
+  actions: VerdictAction[];
+  /** Expand the diagnostics panel automatically? */
+  autoOpenDiagnostics: boolean;
+}
+
+export interface DeriveVerdictArgs {
+  ctx: Pick<
+    ConnectionContext,
+    'state' | 'diagnosticReason' | 'failureCount' | 'lastConnectedAt' | 'reconnectsThisSession' | 'lastVerifiedAt' | 'versionStatus'
+  >;
+  /** Facts pulled from `/api/state` for OUR browserId. Null when unavailable. */
+  api: ApiStateFacts | null;
+  /** Did an on-demand "Run a quick check" (synthetic list_tabs) succeed this
+   *  session? Once true, "Working" is provable without waiting for a real MCP call. */
+  quickCheckPassed: boolean;
+  /** ms the connection has been in reconnecting/connecting. */
+  reconnectingSinceMs: number | null;
+  /** ms threshold above which staleness applies (= STALE_THRESHOLD_MS). */
+  staleThresholdMs: number;
+}
+
+/** Flapping threshold: this many supersede/replace events for our browserId in the
+ *  bridge's rolling window means the relay is being torn down faster than a command
+ *  can complete. Bound to the BRIDGE replace-rate (cross-life), not a single SW's
+ *  reconnectsThisSession (design §7.2.2). */
+export const FLAPPING_SUPERSEDE_THRESHOLD = 3;
+/** Secondary corroborator only (design §7.2.2): a single SW seeing this many
+ *  reconnects also counts as flapping even if /api/state is briefly unavailable. */
+export const FLAPPING_RECONNECTS_THRESHOLD = 3;
+
+const INSTALL_COMMAND_ACTION: VerdictAction = {
+  id: 'copy_install_command',
+  label: 'Copy update command',
+  variant: 'primary',
+};
+
+/**
+ * THE decision rule. Precedence is deliberate (most-dangerous-lie first):
+ *
+ *   1. Recovering (awaiting_sw_recovery) — must NEVER read "Connected".
+ *   2. Flapping — bound to the bridge replace-rate; the storm is invisible to a
+ *      single SW, so /api/state.supersededCount is primary.
+ *   3. Hard named failures (no bridge / protocol dead / setup) — actionable.
+ *   4. Version mismatch.
+ *   5. Stale — a previously-good link gone quiet.
+ *   6. Degraded — heartbeats missing.
+ *   7. connected → Working ONLY with a real tool-path fact; else Untested.
+ *   8. connecting / reconnecting / disconnected.
+ */
+export function deriveVerdict(args: DeriveVerdictArgs): Verdict {
+  const { ctx, api, quickCheckPassed, reconnectingSinceMs, staleThresholdMs } = args;
+  const reason = ctx.diagnosticReason;
+  const reconnectingTooLong = (reconnectingSinceMs ?? 0) > 30_000;
+
+  // ── 1. Recovering — the silent dead-window (§7.2.1 / §8.2) ──────────────────
+  // 4002-terminal'd: no live relay, but NOT in scheduleBackoff. Without this the
+  // panel sits stale-green (green-but-zero-tabs class). MUST not read "Connected".
+  if (reason === 'awaiting_sw_recovery') {
+    return {
+      kind: 'recovering',
+      title: 'Reconnecting to your browser',
+      subtitle: 'This usually fixes itself in a few seconds. You can nudge it if it doesn’t.',
+      severity: 'warn',
+      badge: 'recovering',
+      actions: [{ id: 'reconnect_now', label: 'Reconnect now', variant: 'primary' }],
+      autoOpenDiagnostics: false,
+    };
+  }
+
+  // ── 2. Flapping — bound to BRIDGE replace-rate, not reconnectsThisSession ────
+  // The storm is split across two SW lives and largely invisible to any single
+  // SW's reconnectsThisSession (§7.2.2). /api/state.supersededCount counts across
+  // both lives on one browserId, so it is the PRIMARY signal; a request failing
+  // with the storm signature is corroborating; reconnectsThisSession is a weak
+  // secondary fallback for when /api/state is momentarily unreachable.
+  const flappingFromBridge =
+    api !== null &&
+    (api.supersededCount >= FLAPPING_SUPERSEDE_THRESHOLD || api.hadRecentReplacedMidRequest);
+  const flappingFromClient = ctx.reconnectsThisSession >= FLAPPING_RECONNECTS_THRESHOLD;
+  if (flappingFromBridge || (api === null && flappingFromClient)) {
+    return {
+      kind: 'flapping',
+      title: 'Connection keeps dropping',
+      subtitle:
+        'AgentHub reconnects to your browser, but each link gets replaced before a command can finish, so tools aren’t working right now. A restart usually clears this up.',
+      severity: 'error',
+      badge: 'flapping',
+      actions: [
+        { id: 'restart_service', label: 'Restart bridge', variant: 'primary' },
+        { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
+      ],
+      autoOpenDiagnostics: true,
+    };
+  }
+
+  // ── 3. Hard named failures — surface the actionable step ────────────────────
+  if (reason === 'no_lock_file' || reason === 'bridge_not_started') {
+    return {
+      kind: 'broken',
+      title: "Bridge isn't running",
+      subtitle:
+        reason === 'no_lock_file'
+          ? 'No AgentHub service was found. Start it to enable browser tools.'
+          : 'A bridge is registered but not currently running.',
+      severity: 'error',
+      badge: 'disconnected',
+      actions: [
+        { id: 'start_service', label: 'Start AgentHub service', variant: 'primary' },
+        { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
+      ],
+      autoOpenDiagnostics: reconnectingTooLong,
+    };
+  }
+
+  if (reason === 'helper_unavailable') {
+    return {
+      kind: 'broken',
+      title: 'Setup incomplete',
+      subtitle: 'The native messaging helper isn’t registered. Re-run the installer.',
+      severity: 'error',
+      badge: 'disconnected',
+      actions: [
+        { id: 'copy_install_command', label: 'Copy install command', variant: 'primary' },
+        { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
+      ],
+      autoOpenDiagnostics: true,
+    };
+  }
+
+  if (reason === 'server_not_responding' || reason === 'protocol_timeout') {
+    return {
+      kind: 'broken',
+      title: 'Bridge running but unresponsive',
+      subtitle:
+        reason === 'protocol_timeout'
+          ? 'The service accepted the connection but never spoke the protocol. Restart it.'
+          : 'The service isn’t answering. Restart to recover.',
+      severity: 'error',
+      badge: 'disconnected',
+      actions: [
+        { id: 'restart_service', label: 'Restart service', variant: 'primary' },
+        { id: 'reconnect_now', label: 'Reconnect', variant: 'secondary' },
+        { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
+      ],
+      autoOpenDiagnostics: true,
+    };
+  }
+
+  // ── 4. Version mismatch ─────────────────────────────────────────────────────
+  if (ctx.versionStatus === 'outdated') {
+    return {
+      kind: 'version_mismatch',
+      title: 'Versions don’t match',
+      subtitle: 'Your AgentHub pieces are on different versions. They work best when they all match — updating takes about a minute.',
+      severity: 'warn',
+      badge: 'degraded',
+      actions: [INSTALL_COMMAND_ACTION, { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' }],
+      autoOpenDiagnostics: false,
+    };
+  }
+
+  const isConnectedish = ctx.state === 'connected' || ctx.state === 'degraded';
+
+  // ── 5. Stale — previously-good link gone quiet ──────────────────────────────
+  // Prefer bridge truth: liveness='stale' is the authoritative cross-surface
+  // signal (it's what the dashboard shows). Fall back to the client's
+  // lastVerifiedAt age only when /api/state is unavailable.
+  const bridgeSaysStale = api !== null && api.liveness === 'stale';
+  const clientSaysStale =
+    api === null &&
+    isConnectedish &&
+    ctx.lastVerifiedAt > 0 &&
+    Date.now() - ctx.lastVerifiedAt > staleThresholdMs;
+  if (isConnectedish && (bridgeSaysStale || clientSaysStale)) {
+    return {
+      kind: 'stale',
+      title: 'Connection went quiet',
+      subtitle: 'AgentHub hasn’t heard from your browser recently. Reconnect to be sure tools still work.',
+      severity: 'warn',
+      badge: 'stale',
+      actions: [{ id: 'reconnect_now', label: 'Reconnect', variant: 'primary' }],
+      autoOpenDiagnostics: false,
+    };
+  }
+
+  // ── 6. Degraded — heartbeats missing ────────────────────────────────────────
+  if (ctx.state === 'degraded') {
+    return {
+      kind: 'degraded',
+      title: 'Connection unstable',
+      subtitle: 'Heartbeats are missing. Try restarting the service.',
+      severity: 'warn',
+      badge: 'degraded',
+      actions: [
+        { id: 'restart_service', label: 'Restart service', variant: 'primary' },
+        { id: 'reconnect_now', label: 'Reconnect', variant: 'secondary' },
+      ],
+      autoOpenDiagnostics: false,
+    };
+  }
+
+  // ── 7. connected → Working (proven) vs Untested (default) ───────────────────
+  if (ctx.state === 'connected') {
+    // A real recent request failed/superseded for us → never claim Working.
+    const recentlyFailed = api !== null && api.hadRecentFailure;
+
+    // Working requires a REAL tool-path fact, never a pong:
+    //   (a) a real request succeeded recently for our browserId, OR
+    //   (b) an on-demand quick check (synthetic list_tabs) passed this session, OR
+    //   (c) bridge liveness='live' AND no recent failure AND flat supersede count.
+    const provenBySuccess = api !== null && api.hadRecentSuccess && !recentlyFailed;
+    const provenByLiveness =
+      api !== null &&
+      api.liveness === 'live' &&
+      !recentlyFailed &&
+      api.supersededCount < FLAPPING_SUPERSEDE_THRESHOLD;
+    const working = provenBySuccess || provenByLiveness || (quickCheckPassed && !recentlyFailed);
+
+    if (working) {
+      return {
+        kind: 'working',
+        title: 'Connected — tools working',
+        subtitle: null,
+        severity: 'ok',
+        badge: 'working',
+        actions: [],
+        autoOpenDiagnostics: false,
+      };
+    }
+
+    // Connected but NOT yet proven by a tool-path fact. This is the honest
+    // default — green dot would be a lie (law: no silent staleness).
+    return {
+      kind: 'untested',
+      title: 'Connected — not yet tested',
+      subtitle: 'The bridge is up. Run a quick check to confirm browser tools actually work.',
+      severity: 'warn',
+      badge: 'untested',
+      actions: [{ id: 'run_quick_check', label: 'Run a quick check', variant: 'primary' }],
+      autoOpenDiagnostics: false,
+    };
+  }
+
+  // ── 8. was_connected / reconnecting / connecting / disconnected ─────────────
+  if (reason === 'was_connected') {
+    return {
+      kind: 'reconnecting',
+      title: 'Lost connection',
+      subtitle: 'Reopen your AI tool to reconnect.',
+      severity: 'warn',
+      badge: 'reconnecting',
+      actions: [
+        { id: 'reconnect_now', label: 'Reconnect now', variant: 'primary' },
+        { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
+      ],
+      autoOpenDiagnostics: reconnectingTooLong,
+    };
+  }
+
+  if (ctx.state === 'reconnecting') {
+    return {
+      kind: 'reconnecting',
+      title: reconnectingTooLong ? 'Bridge looks broken' : `Reconnecting (attempt ${ctx.failureCount})…`,
+      subtitle: reconnectingTooLong
+        ? 'Reconnect attempts have been failing — open diagnostics for details.'
+        : 'Trying to re-establish the connection.',
+      severity: reconnectingTooLong ? 'error' : 'warn',
+      badge: 'reconnecting',
+      actions: reconnectingTooLong
+        ? [
+            { id: 'restart_service', label: 'Restart service', variant: 'primary' },
+            { id: 'reconnect_now', label: 'Reconnect', variant: 'secondary' },
+            { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
+          ]
+        : [],
+      autoOpenDiagnostics: reconnectingTooLong,
+    };
+  }
+
+  if (ctx.state === 'connecting') {
+    return {
+      kind: 'connecting',
+      title: 'Looking for bridge…',
+      subtitle: 'Finding the running AgentHub service.',
+      severity: 'warn',
+      badge: 'connecting',
+      actions: [],
+      autoOpenDiagnostics: false,
+    };
+  }
+
+  return {
+    kind: 'disconnected',
+    title: 'Not connected',
+    subtitle: 'Start the AgentHub service to enable browser tools.',
+    severity: 'error',
+    badge: 'disconnected',
+    actions: [
+      { id: 'start_service', label: 'Start AgentHub service', variant: 'primary' },
+      { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
+    ],
+    autoOpenDiagnostics: false,
+  };
+}
+
+/**
+ * Extract the facts the verdict needs from a raw `/api/state` payload, keyed to
+ * OUR browserId. Returns null when our browserId is not present (we should not
+ * borrow another browser's liveness). `recentWindowMs` bounds "recent" so an old
+ * success can't keep masquerading as proof of a currently-working link.
+ */
+export function extractApiStateFacts(
+  payload: ApiStatePayload,
+  myBrowserId: string,
+  nowMs: number,
+  recentWindowMs = 60_000,
+): ApiStateFacts | null {
+  const mine = payload.browsers?.find((b) => b.browserId === myBrowserId);
+  if (!mine) return null;
+
+  const requests = payload.recentActivity?.requests ?? [];
+  let hadRecentSuccess = false;
+  let hadRecentFailure = false;
+  let hadRecentReplacedMidRequest = false;
+  for (const r of requests) {
+    if (r.browserId !== myBrowserId) continue;
+    const ts = r.finishedAt ? Date.parse(r.finishedAt) : Date.parse(r.startedAt);
+    if (Number.isFinite(ts) && nowMs - ts > recentWindowMs) continue;
+    if (r.status === 'success') hadRecentSuccess = true;
+    if (r.status === 'error' || r.status === 'timeout') {
+      hadRecentFailure = true;
+      if ((r.errorMessage ?? '').includes('browser_socket_replaced_mid_request')) {
+        hadRecentReplacedMidRequest = true;
+      }
+    }
+  }
+
+  return {
+    liveness: mine.liveness ?? 'unknown',
+    lastSeenAgeSec: mine.lastSeenAgeSec ?? null,
+    supersededCount: mine.supersededCount ?? 0,
+    lastRelayCloseCode: mine.lastRelayCloseCode ?? null,
+    hadRecentSuccess,
+    hadRecentFailure,
+    hadRecentReplacedMidRequest,
+  };
+}
+
+/** Minimal shape of `/api/state` this module reads. Mirrors `StateSource` in
+ *  `diag-server.ts` (the fields the truthful UI consumes). */
+export interface ApiStatePayload {
+  browsers?: Array<{
+    browserId: string;
+    liveness?: 'live' | 'stale' | 'unknown';
+    lastSeenAgeSec?: number | null;
+    supersededCount?: number;
+    lastRelayCloseCode?: number | null;
+  }>;
+  recentActivity?: {
+    requests?: Array<{
+      browserId: string;
+      status: 'pending' | 'success' | 'error' | 'timeout';
+      startedAt: string;
+      finishedAt: string | null;
+      errorMessage?: string;
+    }>;
+  };
+}
