@@ -374,3 +374,77 @@ loser always `4002`, a rollback-resistant generation, scoped-terminal `4002`, an
 the backoff-reset fix** — the mechanism becomes deterministic regardless of MV3
 timing, storage atomicity, or clock, which is the bar for "robust." Implement §6,
 not §5 item 1.
+
+---
+
+## 7. Fourth-pass review of §6 — corrections from full-stack + ui-ux (2026-06-25)
+
+Both repo expert subagents re-reviewed §6 against the real code. **Verdict: §6 is
+the right hardening and should be implemented over §5 — Hole 1 alone justifies it
+(traced: `service.ts:553` → `indexBrowser` → `:214`, the equal-gen "silent
+replace" re-emits `browser_socket_replaced_mid_request`).** But §6 overshoots in
+three backend spots and its §6.6 "no UI changes" is wrong. Fold these in before
+implementing.
+
+### 7.1 Backend corrections (full-stack)
+
+1. **§6.2 is too absolute — the EXACT tie must stay idempotent.** "No silent
+   idempotent replace branch anymore" overshoots. An exact `(gen, lifeUuid)` match
+   is the *same SW life's own transport-blip reconnect* (lifeUuid is per-load, not
+   per-socket; `openRelay` already closed the old socket, `connection-manager.ts:200-208`).
+   Rule must be: **strictly-lower `(gen,lifeUuid)` → 4002; exact tie → idempotent
+   accept (no 4002); strictly-higher → accept + supersede.** Only the *strict*
+   loser is rejected. Compare on strict inequality.
+2. **§6.3 timestamp is contradictory and oversold — drop persistence.**
+   "Captured at SW start" vs "persisted for the life" conflict, and a backward
+   clock (NTP/manual) still lowers the value and inverts the order, so it is **not**
+   "rollback-free" — only *narrower* than the counter. Cleaner and strictly more
+   robust: identity = `(Date.now() at SW load, random lifeUuid)`, **both in-memory,
+   neither persisted** — which also deletes the `chrome.storage` atomicity surface
+   entirely (the `(startupEpochMs, counter)` composite is strictly worse).
+3. **§6.4 "wait for next SW restart" is a real outage window — make terminal
+   time-scoped.** Terminal must mean "this `(gen,lifeUuid)` stops retrying," and
+   the existing ~30s reconcile/alarm (`connection-manager.ts:433`) should mint a
+   **new** identity (fresh clock + lifeUuid) and retry, so a winner's death after
+   the other life was 4002-terminal'd self-heals on the next tick instead of
+   hanging on unpredictable MV3 eviction.
+4. **Minor new hole — lifeUuid compare stability.** The lexicographic tiebreak is
+   only a stable total order if the bridge compares the **raw query-param strings
+   byte-for-byte** (no case-fold, no re-parse) on both sockets. Add one spec
+   sentence + one chaos-test assertion.
+
+### 7.2 UI corrections (ui-ux) — §6.6's "no changes" is wrong
+
+§4's core rule (Working binds to a real tool-path success, never pong/heartbeat)
+survives §6 untouched — and is now load-bearing for two more §6 failure modes.
+But §6 **adds** UI work it didn't account for:
+
+1. **New silent dead-window state.** §6.4 (winner dies, loser was 4002-terminal'd)
+   = no live relay, but the extension is **not** in `reconnecting` (terminal 4002
+   skips `scheduleBackoff`), so the panel sits **stale-green** — the exact
+   green-but-zero-tabs class. Add a `Recovering` / `awaiting_sw_recovery` state
+   (new `DiagnosticReason`), header copy "Reconnecting to your browser… usually
+   fixes itself" → action **Reconnect now**, announced via the existing live
+   region — must NOT read "Connected" during the window.
+2. **Flapping must bind to the bridge replace-rate, not `reconnectsThisSession`.**
+   §6.1 + the two-lives mechanism mean the churn is split across SW lives and
+   largely invisible to any single SW's `reconnectsThisSession`
+   (`connection-machine.ts:31`). Bind Flapping to the bridge-side
+   `relay_superseded`/`replaced` rate (`service.ts:202,548`), which counts across
+   both lives on one browserId; keep `reconnectsThisSession` only as a secondary
+   corroborator.
+3. **Both signals are missing from `/api/state` today** (they live only in
+   `bridgeLog()`). §6 specified the collision mechanics but not the observability
+   the truthful UI must consume. Small additive backend ask: a per-browser
+   **supersede/replace counter** and a **last-relay-close-code / `lastRelayClosedAt`**
+   on `StateSource.browsers[]` (`diag-server.ts:179-195`), plus one
+   `DiagnosticReason` enum value.
+
+### 7.3 Net
+
+The two reviews cross-validate: the §6 backend hardening is correct, and it
+exposes one UX state §6 left silent. Final implement-list = **§6.7 with the four
+§7.1 backend corrections + the three §7.2 UI/observability additions**, and extend
+the §6.8 regression gate with the lifeUuid-compare-stability assertion and a
+"winner dies after loser was 4002-terminal'd → recovers within one alarm interval"
+case.
