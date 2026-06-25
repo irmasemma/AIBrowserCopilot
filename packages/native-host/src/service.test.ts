@@ -10,6 +10,8 @@ import {
   translateExtensionResponse,
   handleExtension,
   extractRawParam,
+  supersededRecentCount,
+  pruneSupersedeTimes,
   type FanOutResult,
   type FanOutError,
 } from './service.js';
@@ -292,6 +294,33 @@ describe('collision total order (gen, lifeUuid) — design §7.1', () => {
     b.close(); wss.close();
   }, 10_000);
 
+  it('exact-tie idempotent reconnect does NOT bump the supersede RATE (§7.1.1, finding #2)', async () => {
+    const { wss, port } = makeServer();
+    const id = 'chrome:tie-norate';
+    const a = relay(port, id, 300, 'same-uuid');
+    await waitFor(onceServerInfo(a), 3000);
+
+    // Same SW life reopening its own socket is benign — it must NOT pollute the
+    // Flapping rate the side panel reads from /api/state (the old code bumped it
+    // here and made the panel lie "Connection keeps dropping").
+    const b = relay(port, id, 300, 'same-uuid');
+    await waitFor(onceServerInfo(b), 4000);
+    expect(supersededRecentCount(id)).toBe(0);
+    b.close(); wss.close();
+  }, 10_000);
+
+  it('a real strictly-higher supersede DOES bump the supersede RATE (only true churn counts)', async () => {
+    const { wss, port } = makeServer();
+    const id = 'chrome:super-rate';
+    const lo = relay(port, id, 100, 'aaaa');
+    await waitFor(onceServerInfo(lo), 3000);
+
+    const hi = relay(port, id, 200, 'bbbb');
+    await waitFor(onceServerInfo(hi), 4000);   // hi supersedes lo → one real churn
+    expect(supersededRecentCount(id)).toBe(1);
+    hi.close(); wss.close();
+  }, 10_000);
+
   it('equal gen, different lifeUuid → higher lifeUuid wins; lower is 4002 (total order tiebreak)', async () => {
     const { wss, port } = makeServer();
     const id = 'chrome:to-tiebreak';
@@ -306,6 +335,30 @@ describe('collision total order (gen, lifeUuid) — design §7.1', () => {
     expect(hiClosed).toBe(false);
     hi.close(); wss.close();
   }, 10_000);
+});
+
+describe('supersede RATE window — pruneSupersedeTimes (§7.2.2: Flapping binds to rate, self-heals)', () => {
+  it('drops timestamps older than the 60s window, keeps in-window ones', () => {
+    const now = 1_000_000;
+    // 70s and 61s ago are outside the 60s window; 59s and 1s ago are inside.
+    const times = [now - 70_000, now - 61_000, now - 59_000, now - 1_000];
+    pruneSupersedeTimes(times, now);
+    expect(times).toEqual([now - 59_000, now - 1_000]);
+  });
+
+  it('an event exactly at the window edge (now - 60s) is retained (boundary is inclusive)', () => {
+    const now = 5_000_000;
+    const times = [now - 60_000];
+    pruneSupersedeTimes(times, now);
+    expect(times).toEqual([now - 60_000]);
+  });
+
+  it('empties once every event ages out — the rate decays to 0 so the verdict self-heals', () => {
+    const now = 2_000_000;
+    const times = [now - 120_000, now - 90_000, now - 61_000];
+    pruneSupersedeTimes(times, now);
+    expect(times).toEqual([]);
+  });
 });
 
 describe('parseBrand', () => {

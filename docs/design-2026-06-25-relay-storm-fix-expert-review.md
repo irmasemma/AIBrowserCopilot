@@ -584,3 +584,122 @@ No outstanding correctness gap across same-gen concurrency, storage/rollback, th
 dead-window/slow-storm path, the backoff amplifier, the Web Lock, or the truthful
 UI. **Final authority = §8.4 implement-list + §9's two test assertions.** Remaining
 work is implementation and the regression gate only — no further design pass.
+
+---
+
+## 11. Post-implementation review — three findings on the verdict/observability surface (principal-engineer, 2026-06-25)
+
+**Scope.** This pass reviews the *implementation* of the converged design (the
+23-file impl commit) against §1–§10, as a principal engineer, hunting for **new**
+bugs the implementation could introduce — not re-litigating the design.
+
+**Headline verdict: the core mechanism is correct.** The `(gen, lifeUuid)` total
+order, the exact-tie idempotent accept (§7.1.1), the in-memory non-persisted
+identity (§7.1.2), the scoped-terminal 4002 with the bridge-truth-guarded alarm
+re-challenge (§7.1.3 + §8.2), and the backoff de-amplifier (§6.1) all landed as
+specified. The convergence trace holds: the loser is terminated, sees close
+`1006`, reconnects once with the SAME identity, re-challenges, is sent `4002`,
+and treats it as terminal — converging in 1–2 cycles with no both-terminal
+deadlock and an order-independent equal-gen tiebreak. **No new connectivity bug.**
+
+The three findings below are all on the **truthful-UI / observability** surface
+(§4 / §7.2) — i.e. the verdict could *lie* after a storm even though connectivity
+itself is healed. Findings #1, #2, #4 are fixed in this commit; #3 is deferred
+(rationale below).
+
+### 11.1 Finding #1 (MEDIUM, fixed) — Flapping bound to a *cumulative* count never self-heals
+
+The side-panel verdict bound the **Flapping** state ("Connection keeps dropping —
+tools aren’t working") to the bridge's **cumulative** `supersededCount >= 3`,
+evaluated *before* the Working gate. But the bridge only reset that counter on a
+clean `1000` close; every MV3 eviction is `1006`/`1011`. So once a storm
+converged (or after ≥3 lifetime SW-overlap supersedes across the bridge's whole
+life) the panel showed "keeps dropping" **permanently** while tools worked fine.
+This directly contradicts §7.2.2, which specified a replace-**RATE**, not a
+lifetime total.
+
+**Fix — bind Flapping to a rolling-window RATE that decays to zero.**
+- Bridge (`service.ts`): added `browserSupersedeTimes: Map<string, number[]>`
+  with a `SUPERSEDE_WINDOW_MS = 60_000` window; `bumpSupersededCount()` now also
+  records a timestamp and prunes out-of-window entries. New
+  `supersededRecentCount(browserId)` returns the in-window count. The cumulative
+  `supersededCount` is **kept** (it is a useful lifetime diagnostic scar) but is
+  no longer the verdict trigger. `/api/state.browsers[]` now emits BOTH
+  `supersededCount` (cumulative) and `supersededRecentCount` (rate).
+- UI (`connection-verdict.ts`): the Flapping check and the Working gate now read
+  `api.supersededRecentCount` instead of `supersededCount`. Once the supersedes
+  stop, the window empties within 60 s and the verdict self-heals to "working".
+
+A real storm runs at ~1.3 s cadence (~46/min), so a 60 s-window threshold of 3
+cannot false-positive on occasional benign SW cycling, yet trips immediately in a
+true storm.
+
+### 11.2 Finding #2 (LOW–MED, fixed) — exact-tie idempotent accept still polluted the churn signal
+
+The bridge's collision rule already classified an exact `(gen, lifeUuid)` tie as
+an **idempotent** same-life reconnect (§7.1.1) and did *not* send `4002`. But the
+accept path still routed through `indexBrowser`, which **bumped**
+`supersededCount`, logged `bridge.browser.replaced` at **warn**, and rejected
+in-flight requests — despite the inline comment saying "NOT counted as churn." A
+single SW reopening its own socket after a transport blip therefore inflated the
+very Flapping signal #1 depends on.
+
+**Fix.** `indexBrowser(browserId, ws, idempotent = false)` now takes an
+`idempotent` flag; the exact-tie branch calls `accept(true)`, which threads the
+flag through so the idempotent path **skips** the supersede bump and the scary
+`replaced` warn. It still terminates the orphaned socket and fails its in-flight
+requests (that socket is genuinely gone and the new life never saw those
+requests) — correctness unchanged, signal no longer polluted.
+
+### 11.3 Finding #3 (LOW, deferred) — `recordRelayClose(4002)` on lower-identity rejection mislabels a healthy browser
+
+When a strictly-lower challenger is rejected, the bridge stamps the *incumbent's*
+`lastRelayClose = 4002`. That mislabels a perfectly healthy winner's last-close
+code. **No false verdict today** — nothing in the converged UI keys off
+`lastRelayCloseCode` for the Flapping/Working decision — so this is recorded as a
+latent observability wart, not fixed in this commit, to keep the change surface
+minimal and the diff easy to review. If a future diagnostic starts trusting
+`lastRelayCloseCode`, fix it then (stamp the *rejected challenger's* close, not
+the incumbent's).
+
+### 11.4 Finding #4 (GAP, fixed) — the highest-risk new extension code had no direct unit test
+
+`connection-manager.ts` — which owns relay-identity minting, `withRelayRole`
+stamping, the 4002-terminal handling, `probeBridgeRelayLiveness`, and the guarded
+recovery in `reconcile()` — had **zero** direct unit tests; only the real-bridge
+chaos spec exercised the guard externally. Added `connection-manager.test.ts`
+(mocks `./relay-client` to capture callbacks + connect URLs, mocks
+`getBrowserInstanceId`, stubs `fetch` for the liveness probe, injects
+`discoverUrl`, uses fake timers) covering:
+- connect URL carries `role=relay` + `gen` + `lifeUuid`;
+- a `4002` close → `awaiting_sw_recovery` and schedules **no** reconnect even
+  after advancing timers (the terminal-but-scoped invariant);
+- a non-4002 `1006` close is **not** treated as terminal supersede;
+- `reconcile()` **defers** (no re-challenge) when `/api/state` shows our relay
+  `live` *or* `unknown` (fresh winner, no inbound frame yet);
+- `reconcile()` **mints a fresh identity** (new `lifeUuid` in the next connect
+  URL) and reconnects when `/api/state` shows no relay *or* a `stale` one.
+
+Also extended `service.test.ts`: an exact-tie idempotent reconnect does **not**
+bump `supersededRecentCount`, a real strictly-higher supersede **does**, and
+`pruneSupersedeTimes` decays the window to zero (the boundary at exactly
+`now − 60 s` is inclusive). And `connection-verdict.test.ts`: a high **cumulative**
+`supersededCount` with a **flat** `supersededRecentCount` + a recent success now
+asserts **working** — the explicit regression for #1's "post-convergence lie".
+
+### 11.5 Net
+
+Three observability/verdict fixes, no change to the converged connectivity
+mechanism. The cumulative `supersededCount` is retained for diagnostics; the
+verdict now binds to the decaying **rate** so it tells the truth both *during* a
+storm and *after* it converges. Full suite green: native-host **200**, extension
+**311**, both type-clean under their real build tooling (`tsc` / `wxt build`).
+Native-host changes are source-only; the compiled binary recompile + GitHub
+release remain a release-tag step, not part of this review iteration.
+
+**For the reviewing agent:** the load-bearing judgement to check is the
+**60 s / threshold-3** choice in §11.1 (does it trip fast enough in a real storm
+yet never false-positive on benign SW cycling?), and whether keeping cumulative
+`supersededCount` purely as a diagnostic — with the verdict bound only to the
+rate — is the right split.
+

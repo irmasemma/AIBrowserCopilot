@@ -184,7 +184,7 @@ function defaultInstallDir(): string {
   return resolveInstallDir();
 }
 
-function indexBrowser(browserId: string, ws: WebSocket): void {
+function indexBrowser(browserId: string, ws: WebSocket, idempotent = false): void {
   // If the same browserId already has a socket, the old one is stale (e.g.
   // SW eviction left the previous WS in OPEN state from our side, but the
   // extension reconnected with a new socket). Tear it down so its
@@ -197,17 +197,29 @@ function indexBrowser(browserId: string, ws: WebSocket): void {
   // many `bridge.browser.connected` for the same browserId with no
   // corresponding disconnects, and the dashboard cannot tell that the
   // browser session actually churned.
+  //
+  // `idempotent` = the caller resolved an EXACT (gen,lifeUuid) tie: the SAME SW
+  // life reopened its own socket after a transport blip (§7.1.1). That is NOT
+  // churn — we must not bump the supersede/Flapping signal nor emit a scary
+  // `replaced` warn for a benign reconnect (the caller already logged
+  // relay_reconnect_idempotent). We DO still terminate the old socket and fail
+  // its in-flight requests, because that socket is genuinely gone and the new
+  // life can't complete requests it never saw.
   const existing = browserSockets.get(browserId);
   if (existing && existing !== ws) {
-    // §7.2.3: count the replace toward the per-browser churn signal and stamp
-    // the close (the terminated socket is superseded by a new relay).
-    bumpSupersededCount(browserId);
-    recordRelayClose(browserId, 1006);
-    bridgeLog().warn('bridge.browser.replaced', {
-      browserId,
-      reason: 'new_socket_for_same_browserid',
-      hint: 'Old socket was orphaned (likely Chrome MV3 SW eviction). Terminating it now.',
-    });
+    if (idempotent) {
+      recordRelayClose(browserId, 1006);
+    } else {
+      // §7.2.3: count the replace toward the per-browser churn signal and stamp
+      // the close (the terminated socket is superseded by a new relay).
+      bumpSupersededCount(browserId);
+      recordRelayClose(browserId, 1006);
+      bridgeLog().warn('bridge.browser.replaced', {
+        browserId,
+        reason: 'new_socket_for_same_browserid',
+        hint: 'Old socket was orphaned (likely Chrome MV3 SW eviction). Terminating it now.',
+      });
+    }
     try { existing.terminate(); } catch { /* noop */ }
     // Also clear any pending requests routed to the old socket — they
     // would never have completed (the new SW life knows nothing about them).
@@ -363,6 +375,15 @@ const browserRelayIdentity = new Map<string, RelayIdentity>();
 // when the browser fully disconnects). Drives the truthful "Flapping" UI and
 // is the cross-SW-life signal a single SW's reconnectsThisSession can't see.
 const browserSupersededCount = new Map<string, number>();
+// Timestamps (ms) of recent supersede events per browserId, for the RATE signal
+// the truthful "Flapping" UI binds to (design §7.2.2: replace-RATE, not a
+// lifetime count). The cumulative `browserSupersededCount` above is a monotone
+// scar — it only resets on a clean 1000 disconnect, so after a storm CONVERGES
+// (or after a few benign SW-overlap supersedes) it stays ≥ threshold forever and
+// the UI would lie "Connection keeps dropping" while tools work fine. A rolling
+// window decays to 0 once the supersedes stop, so the verdict self-heals.
+const browserSupersedeTimes = new Map<string, number[]>();
+const SUPERSEDE_WINDOW_MS = 60_000;
 // Most recent relay close for a browserId: when + the close code (4002 =
 // rejected/superseded). Consumed by the extension's guarded alarm retry and
 // the "Recovering" UI state.
@@ -370,6 +391,25 @@ const browserLastRelayClose = new Map<string, { at: number; code: number }>();
 
 function bumpSupersededCount(browserId: string): void {
   browserSupersededCount.set(browserId, (browserSupersededCount.get(browserId) ?? 0) + 1);
+  const now = Date.now();
+  const times = browserSupersedeTimes.get(browserId) ?? [];
+  times.push(now);
+  pruneSupersedeTimes(times, now);
+  browserSupersedeTimes.set(browserId, times);
+}
+// Drop timestamps older than the rolling window (mutates in place).
+// Exported for unit tests (the Flapping-rate window is the core of the §7.2.2 fix).
+export function pruneSupersedeTimes(times: number[], now: number): void {
+  const cutoff = now - SUPERSEDE_WINDOW_MS;
+  while (times.length > 0 && times[0] < cutoff) times.shift();
+}
+// Supersede events for a browserId within the rolling window — the RATE signal.
+// Exported for unit tests (asserts idempotent reconnects don't pollute the rate).
+export function supersededRecentCount(browserId: string): number {
+  const times = browserSupersedeTimes.get(browserId);
+  if (!times) return 0;
+  pruneSupersedeTimes(times, Date.now());
+  return times.length;
 }
 function recordRelayClose(browserId: string, code: number): void {
   browserLastRelayClose.set(browserId, { at: Date.now(), code });
@@ -471,7 +511,7 @@ export function handleExtension(
   // Register this socket and wire up all of its handlers. Invoked either
   // immediately (no browserId collision) or, on a collision, ONLY after we
   // have proven the incumbent socket is dead — see the collision guard below.
-  const accept = (): void => {
+  const accept = (idempotent = false): void => {
   // On the collision path, accept() runs after an async liveness probe — the
   // newcomer may have closed in the meantime (the stale clients that trigger
   // this path open very short-lived sockets). Never register a dead socket or
@@ -488,7 +528,7 @@ export function handleExtension(
     bridgeLog().info('bridge.browser.connected', { browserId });
     browserRegistry.set(browserId, { connectedAt: new Date(connectedAt).toISOString() });
   }
-  indexBrowser(browserId, ws);
+  indexBrowser(browserId, ws, idempotent);
   if (!isProbe) {
     // Store THIS relay's identity alongside its socket so the next colliding
     // relay can be compared by the total order. Probes never collide (dedicated
@@ -602,6 +642,7 @@ export function handleExtension(
         // keeps the signal so the guarded retry / Flapping UI can still see it.
         if (code === 1000) {
           browserSupersededCount.delete(browserId);
+          browserSupersedeTimes.delete(browserId);
           browserLastRelayClose.delete(browserId);
         }
       }
@@ -673,14 +714,16 @@ export function handleExtension(
       }
       if (cmp === 0) {
         // Exact tie: same SW life reconnecting after a transport blip. Idempotent
-        // accept — NOT a 4002, and NOT counted as churn.
+        // accept — NOT a 4002, and NOT counted as churn (§7.1.1). Pass idempotent
+        // so indexBrowser does not bump the supersede/Flapping signal nor emit a
+        // `replaced` warn for this benign same-life reconnect.
         bridgeLog().info('bridge.browser.relay_reconnect_idempotent', {
           browserId,
           reason: 'exact_identity_tie',
           gen,
           hint: 'Same (gen,lifeUuid) as the incumbent — this SW life reopened its own socket. Accepted idempotently; no 4002.',
         });
-        accept();
+        accept(true);
         return;
       }
       // cmp < 0 — newcomer is strictly lower-identity → reject, keep incumbent.
@@ -1699,7 +1742,11 @@ export function startServer(port: number): void {
               liveness,
               // §7.2.3 observability — consumed by the truthful UI (Flapping
               // state) and the extension's guarded alarm retry.
+              // `supersededCount` is the cumulative lifetime count (diagnostics
+              // only); `supersededRecentCount` is the rolling-window RATE the
+              // Flapping verdict binds to so it self-heals after convergence.
               supersededCount: browserSupersededCount.get(browserId) ?? 0,
+              supersededRecentCount: supersededRecentCount(browserId),
               lastRelayClosedAt: lastClose ? new Date(lastClose.at).toISOString() : null,
               lastRelayCloseCode: lastClose ? lastClose.code : null,
             };

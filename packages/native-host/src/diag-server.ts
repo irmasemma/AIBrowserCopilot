@@ -193,10 +193,15 @@ export interface StateSource {
      *    'unknown' (gray) — just connected, no inbound frames yet */
     liveness: 'live' | 'stale' | 'unknown';
     /** §7.2.3 observability — supersede/replace churn for THIS browserId.
-     *  Count of relay_superseded + replaced events recorded for this browserId
-     *  (rolling window). Drives the truthful "Flapping" UI state and is the
-     *  cross-life churn signal a single SW's reconnectsThisSession can't see. */
+     *  CUMULATIVE lifetime count of relay_superseded + replaced events for this
+     *  browserId (resets only on a clean 1000 disconnect). Diagnostics only —
+     *  do NOT bind the Flapping verdict to this, it is a monotone scar that
+     *  stays high after a storm converges. Use `supersededRecentCount`. */
     supersededCount: number;
+    /** Supersede events for this browserId within the rolling ~60s window — the
+     *  RATE signal the truthful "Flapping" UI binds to (design §7.2.2). Decays
+     *  to 0 once supersedes stop, so the verdict self-heals after convergence. */
+    supersededRecentCount: number;
     /** ISO timestamp of the most recent relay close for this browserId, or null
      *  if none recorded this bridge generation. Consumed by the extension's
      *  guarded alarm retry and the "Recovering" UI state. */

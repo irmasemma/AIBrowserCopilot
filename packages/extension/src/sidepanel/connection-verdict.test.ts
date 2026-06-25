@@ -13,6 +13,7 @@ const liveFacts: ApiStateFacts = {
   liveness: 'live',
   lastSeenAgeSec: 1,
   supersededCount: 0,
+  supersededRecentCount: 0,
   lastRelayCloseCode: null,
   hadRecentSuccess: false,
   hadRecentFailure: false,
@@ -74,12 +75,28 @@ describe('deriveVerdict — Working requires a tool-path fact, never a pong', ()
   });
 });
 
-describe('deriveVerdict — Flapping from bridge supersede rate', () => {
-  it(`supersededCount ≥ ${FLAPPING_SUPERSEDE_THRESHOLD} → flapping, Restart bridge`, () => {
-    const v = deriveVerdict(args({ api: { ...liveFacts, supersededCount: FLAPPING_SUPERSEDE_THRESHOLD } }));
+describe('deriveVerdict — Flapping from bridge supersede RATE (not a lifetime count)', () => {
+  it(`supersededRecentCount ≥ ${FLAPPING_SUPERSEDE_THRESHOLD} → flapping, Restart bridge`, () => {
+    const v = deriveVerdict(args({ api: { ...liveFacts, supersededRecentCount: FLAPPING_SUPERSEDE_THRESHOLD } }));
     expect(v.kind).toBe('flapping');
     expect(v.title).toBe('Connection keeps dropping');
     expect(v.actions[0]?.label).toBe('Restart bridge');
+  });
+
+  it('a high CUMULATIVE supersededCount but FLAT recent rate + recent success → working, NOT flapping', () => {
+    // Regression for the post-convergence lie: the storm this fix targets drives
+    // the lifetime supersededCount sky-high, then converges. The cumulative count
+    // stays high for the life of the bridge, but the RATE decays to 0 — so the
+    // verdict must self-heal to "working", never sit on "keeps dropping" forever.
+    const v = deriveVerdict(args({
+      api: { ...liveFacts, supersededCount: 500, supersededRecentCount: 0, hadRecentSuccess: true },
+    }));
+    expect(v.kind).toBe('working');
+  });
+
+  it('a high cumulative count alone (flat rate, no recent fact) → untested, NOT flapping', () => {
+    const v = deriveVerdict(args({ api: { ...liveFacts, liveness: 'unknown', supersededCount: 500, supersededRecentCount: 0 } }));
+    expect(v.kind).not.toBe('flapping');
   });
 
   it('a replaced-mid-request failure → flapping', () => {
@@ -141,6 +158,7 @@ describe('extractApiStateFacts', () => {
         liveness: 'live' as const,
         lastSeenAgeSec: 3,
         supersededCount: 0,
+        supersededRecentCount: 0,
         lastRelayCloseCode: null,
         ...over.browsersExtra,
       },
@@ -153,9 +171,14 @@ describe('extractApiStateFacts', () => {
     expect(facts).toBeNull();
   });
 
-  it('maps liveness + supersededCount for our browserId', () => {
-    const facts = extractApiStateFacts(mkPayload({ browsersExtra: { supersededCount: 5, liveness: 'stale' } }), 'chrome:me', now);
+  it('maps liveness + supersededCount (cumulative) + supersededRecentCount (rate) for our browserId', () => {
+    const facts = extractApiStateFacts(
+      mkPayload({ browsersExtra: { supersededCount: 5, supersededRecentCount: 2, liveness: 'stale' } }),
+      'chrome:me',
+      now,
+    );
     expect(facts?.supersededCount).toBe(5);
+    expect(facts?.supersededRecentCount).toBe(2);
     expect(facts?.liveness).toBe('stale');
   });
 

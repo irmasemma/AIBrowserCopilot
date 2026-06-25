@@ -18,6 +18,7 @@ const liveFacts: ApiStateFacts = {
   liveness: 'live',
   lastSeenAgeSec: 2,
   supersededCount: 0,
+  supersededRecentCount: 0,
   lastRelayCloseCode: null,
   hadRecentSuccess: false,
   hadRecentFailure: false,
@@ -68,12 +69,12 @@ describe('deriveHeader — verdict adapter', () => {
     expect(h.badge).toBe('untested');
   });
 
-  // ── Flapping — bound to bridge supersede rate, not reconnectsThisSession ────
-  it('flapping from /api/state supersededCount ≥ 3 → "Connection keeps dropping", Restart bridge', () => {
+  // ── Flapping — bound to bridge supersede RATE, not reconnectsThisSession ────
+  it('flapping from /api/state supersededRecentCount ≥ 3 → "Connection keeps dropping", Restart bridge', () => {
     const h = deriveHeader({
       ...baseArgs,
       state: 'connected',
-      api: { ...liveFacts, supersededCount: 4 },
+      api: { ...liveFacts, supersededRecentCount: 4 },
     });
     expect(h.title).toBe('Connection keeps dropping');
     expect(h.severity).toBe('error');

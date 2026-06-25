@@ -38,9 +38,16 @@ export interface ApiStateFacts {
   liveness: 'live' | 'stale' | 'unknown';
   /** Seconds since the bridge last heard an inbound frame from us. */
   lastSeenAgeSec: number | null;
-  /** Cross-life relay supersede/replace count for OUR browserId (the storm signal
-   *  a single SW's `reconnectsThisSession` cannot see). */
+  /** Cross-life relay supersede/replace count for OUR browserId — CUMULATIVE
+   *  lifetime scar (resets only on a clean disconnect). Display/diagnostics
+   *  only; do NOT drive the verdict from this (it stays high after a storm
+   *  converges). The storm signal a single SW's `reconnectsThisSession` can't
+   *  see. */
   supersededCount: number;
+  /** Supersede events for OUR browserId within the bridge's rolling ~60s window
+   *  — the RATE the Flapping verdict binds to (design §7.2.2). Decays to 0 once
+   *  supersedes stop, so the verdict self-heals after convergence. */
+  supersededRecentCount: number;
   /** Close code of the most recent relay close for OUR browserId (4002 = superseded). */
   lastRelayCloseCode: number | null;
   /** Did a real request for OUR browserId succeed within the recent window? */
@@ -169,15 +176,18 @@ export function deriveVerdict(args: DeriveVerdictArgs): Verdict {
     };
   }
 
-  // ── 2. Flapping — bound to BRIDGE replace-rate, not reconnectsThisSession ────
+  // ── 2. Flapping — bound to the BRIDGE supersede RATE, not a lifetime count ──
   // The storm is split across two SW lives and largely invisible to any single
-  // SW's reconnectsThisSession (§7.2.2). /api/state.supersededCount counts across
-  // both lives on one browserId, so it is the PRIMARY signal; a request failing
-  // with the storm signature is corroborating; reconnectsThisSession is a weak
-  // secondary fallback for when /api/state is momentarily unreachable.
+  // SW's reconnectsThisSession (§7.2.2). /api/state.supersededRecentCount counts
+  // supersedes across both lives on one browserId WITHIN A ROLLING WINDOW, so it
+  // is the PRIMARY signal AND it decays to 0 once the storm converges — the
+  // verdict self-heals instead of lying "keeps dropping" forever (the cumulative
+  // supersededCount would stay ≥ threshold for the life of the bridge). A request
+  // failing with the storm signature is corroborating; reconnectsThisSession is a
+  // weak secondary fallback for when /api/state is momentarily unreachable.
   const flappingFromBridge =
     api !== null &&
-    (api.supersededCount >= FLAPPING_SUPERSEDE_THRESHOLD || api.hadRecentReplacedMidRequest);
+    (api.supersededRecentCount >= FLAPPING_SUPERSEDE_THRESHOLD || api.hadRecentReplacedMidRequest);
   const flappingFromClient = ctx.reconnectsThisSession >= FLAPPING_RECONNECTS_THRESHOLD;
   if (flappingFromBridge || (api === null && flappingFromClient)) {
     return {
@@ -315,7 +325,7 @@ export function deriveVerdict(args: DeriveVerdictArgs): Verdict {
       api !== null &&
       api.liveness === 'live' &&
       !recentlyFailed &&
-      api.supersededCount < FLAPPING_SUPERSEDE_THRESHOLD;
+      api.supersededRecentCount < FLAPPING_SUPERSEDE_THRESHOLD;
     const working = provenBySuccess || provenByLiveness || (quickCheckPassed && !recentlyFailed);
 
     if (working) {
@@ -441,6 +451,7 @@ export function extractApiStateFacts(
     liveness: mine.liveness ?? 'unknown',
     lastSeenAgeSec: mine.lastSeenAgeSec ?? null,
     supersededCount: mine.supersededCount ?? 0,
+    supersededRecentCount: mine.supersededRecentCount ?? 0,
     lastRelayCloseCode: mine.lastRelayCloseCode ?? null,
     hadRecentSuccess,
     hadRecentFailure,
@@ -456,6 +467,7 @@ export interface ApiStatePayload {
     liveness?: 'live' | 'stale' | 'unknown';
     lastSeenAgeSec?: number | null;
     supersededCount?: number;
+    supersededRecentCount?: number;
     lastRelayCloseCode?: number | null;
   }>;
   recentActivity?: {
