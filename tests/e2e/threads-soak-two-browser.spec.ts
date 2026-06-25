@@ -42,7 +42,39 @@ const extensionPath = path.resolve(REPO_ROOT, 'packages/extension/dist/chrome-mv
 // Replaced in beforeAll with a host-access-patched copy (see buildPatchedExtension).
 let loadExtensionPath = extensionPath;
 const nativeHostDist = path.resolve(REPO_ROOT, 'packages/native-host/dist/index.js');
-const fixtureHtml = readFileSync(path.resolve(__dirname, 'fixtures/threads-feed.html'), 'utf8');
+const FIXTURE_PER_PAGE = 100;
+const FIXTURE_PAGES = 2;
+/**
+ * Browser A fixture: a 2-page feed (100 records/page) that genuinely requires
+ * BOTH scroll and pagination:
+ *  - Records LAZY-LOAD in chunks of 20 as you scroll (so get_page_content cannot
+ *    read all 100 without scrolling — a static page would defeat the scroll test).
+ *  - The "Next page" link is hidden until all 100 are loaded, forcing scroll THEN
+ *    pagination to a real second URL (/?page=2).
+ */
+const fixturePageHtml = (page: number): string => {
+  const start = (page - 1) * FIXTURE_PER_PAGE + 1;
+  const items = Array.from({ length: FIXTURE_PER_PAGE }, (_, i) => ({
+    id: start + i,
+    text: `Record ${start + i} — sample feed item for scroll/pagination testing`,
+  }));
+  const nav = page < FIXTURE_PAGES
+    ? `<a id="next-page" href="/?page=${page + 1}">Next page &rarr;</a>`
+    : `<a id="prev-page" href="/?page=${page - 1}">&larr; Previous page</a>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Test Feed — Page ${page} of ${FIXTURE_PAGES}</title>
+<style>body{font-family:sans-serif;margin:0}h1{position:sticky;top:0;background:#fff;padding:12px;margin:0;border-bottom:1px solid #ccc;font-size:16px}
+.post{min-height:90px;padding:16px;border-bottom:1px solid #eee}#pager{display:none;padding:24px;font-size:18px}</style></head>
+<body>
+<h1>Test Feed — Page ${page} of ${FIXTURE_PAGES} <span id="count">(0 loaded)</span></h1>
+<div id="feed"></div>
+<div id="pager">${nav}</div>
+<script>
+const ALL=${JSON.stringify(items)};let rendered=0;const feed=document.getElementById('feed');
+function renderMore(){const next=ALL.slice(rendered,rendered+20);for(const it of next){const a=document.createElement('article');a.className='post';a.setAttribute('data-id',String(it.id));a.innerHTML='<h3>Post #'+it.id+'</h3><p>'+it.text+'</p>';feed.appendChild(a);}rendered+=next.length;document.getElementById('count').textContent='('+rendered+' loaded)';if(rendered>=ALL.length){document.getElementById('pager').style.display='block';}}
+renderMore();
+window.addEventListener('scroll',function(){if(window.innerHeight+window.scrollY>=document.body.offsetHeight-120){renderMore();}});
+</script></body></html>`;
+};
 
 const DURATION_MIN = Number(process.env.SOAK_DURATION_MIN ?? 60);
 const INTERVAL_MIN = Number(process.env.SOAK_INTERVAL_MIN ?? 5);
@@ -286,14 +318,14 @@ function resolveRemote(): { endpoint: string; apiKey: string } | null {
   return endpoint && apiKey ? { endpoint, apiKey } : null;
 }
 
-interface ExportResult { tools: string[]; posts: number; items: unknown[]; screenshot: string; exitCode: number }
+interface ExportResult { tools: string[]; posts: number; items: unknown[]; screenshot: string; exitCode: number; raw: string }
 
 /**
  * One real Claude CLI session running `prompt` against the connected browsers.
  * Captures: the agenthub MCP tools used, the JSON array the LLM exported, and
  * the screenshot image (base64) returned by take_screenshot.
  */
-const runExport = async (prompt: string, model = 'haiku'): Promise<ExportResult> => {
+const runExport = async (prompt: string, model = 'haiku', timeoutMs = 150_000): Promise<ExportResult> => {
   const child = spawn('claude',
     ['--print', '--input-format', 'text', '--output-format', 'stream-json', '--verbose',
       '--model', model, '--dangerously-skip-permissions'],
@@ -325,24 +357,36 @@ const runExport = async (prompt: string, model = 'haiku'): Promise<ExportResult>
     }
   });
   const exitCode: number = await new Promise((resolve) => {
-    const t = setTimeout(() => { try { child.kill(); } catch { /* noop */ } resolve(-2); }, 150_000);
+    const t = setTimeout(() => { try { child.kill(); } catch { /* noop */ } resolve(-2); }, timeoutMs);
     child.on('exit', (c) => { clearTimeout(t); resolve(c ?? -1); });
     child.on('error', () => { clearTimeout(t); resolve(-3); });
   });
   let items: unknown[] = [];
   const j = text.match(/```json\s*([\s\S]*?)```/i)?.[1] ?? text.match(/\[\s*\{[\s\S]*?\}\s*\]/)?.[0] ?? '';
   try { const p = JSON.parse(j.trim()); if (Array.isArray(p)) items = p; } catch { /* [] */ }
-  return { tools: [...new Set(tools.filter((t) => t.startsWith('mcp__agenthub__')))], posts: items.length, items, screenshot, exitCode };
+  return { tools: [...new Set(tools.filter((t) => t.startsWith('mcp__agenthub__')))], posts: items.length, items, screenshot, exitCode, raw: text };
 };
 
 /** Prompt for the local fixture feed (browser A). */
 const fixturePrompt = (match: string): string => [
-  'You have agenthub MCP tools connected to a real Chrome.',
-  `Operate ONLY on the tab whose URL contains "${match}".`,
-  '1) mcp__agenthub__list_tabs to find the tab id; 2) mcp__agenthub__take_screenshot of it;',
-  '3) scroll down twice with mcp__agenthub__scroll_page; 4) read every post with',
-  'mcp__agenthub__get_page_content or mcp__agenthub__extract_data.',
-  'Output ONLY a JSON array of {"text"} in a ```json block. No prose.',
+  'You are operating a real Chrome browser through the agenthub MCP tools.',
+  `Operate ONLY on the tab whose URL contains "${match}". It shows a 2-page feed`,
+  '(100 records per page) where records LAZY-LOAD as you scroll — they are NOT all',
+  'in the page until you scroll down.',
+  '',
+  'Do this:',
+  '1. Find the tab (mcp__agenthub__list_tabs).',
+  '2. Take a screenshot (mcp__agenthub__take_screenshot).',
+  '3. Scroll down repeatedly with mcp__agenthub__scroll_page until ALL 100 records',
+  '   on this page are loaded — the "Next page" link (id="next-page") only appears',
+  '   once everything is loaded.',
+  '4. Read every record with mcp__agenthub__get_page_content or extract_data.',
+  '5. Then go to the SECOND page by clicking the "Next page" link with',
+  '   mcp__agenthub__click_element. Scroll it the same way and read all its records.',
+  '',
+  'Collect records from BOTH pages. Output ONLY a JSON array of',
+  '{"id": number, "text": string} (about 200 items, ids spanning 1..200) in a',
+  '```json block. No prose.',
 ].join(' ');
 
 /** Prompt for the live Stack Overflow questions list (browser B). */
@@ -415,8 +459,10 @@ test.describe('two-browser soak (fixture + live public site)', () => {
       poll();
     });
 
-    fixtureServer = http.createServer((_q, res) => {
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(fixtureHtml);
+    fixtureServer = http.createServer((q, res) => {
+      const m = /[?&]page=(\d+)/.exec(q.url ?? '');
+      const page = m ? Math.min(FIXTURE_PAGES, Math.max(1, Number(m[1]))) : 1;
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(fixturePageHtml(page));
     });
     const fixturePort = await new Promise<number>((resolve) =>
       fixtureServer.listen(0, '127.0.0.1', () => resolve((fixtureServer.address() as import('net').AddressInfo).port)));
@@ -503,7 +549,10 @@ test.describe('two-browser soak (fixture + live public site)', () => {
       cycle += 1;
       const cycleStart = Date.now();
       const before = await fetchState(bridgePort);
-      const resA = await runExport(fixturePrompt('127.0.0.1'));
+      // Fixture now requires scroll (lazy-load) + pagination across 200 records —
+      // use a stronger model and a longer timeout (the heavier job overran the
+      // default 150s, producing empty extractions).
+      const resA = await runExport(fixturePrompt('127.0.0.1'), process.env.SOAK_FIXTURE_MODEL ?? 'sonnet', 300_000);
       // SO needs >=15 structured questions (votes/answers/views) off a live
       // page — use a stronger model for reliable structured extraction.
       const resB = await runExport(stackOverflowPrompt(SECOND_MATCH), process.env.SOAK_SECOND_MODEL ?? 'sonnet');
@@ -527,7 +576,16 @@ test.describe('two-browser soak (fixture + live public site)', () => {
         };
         drops.push(`cycle ${cycle}: before=${JSON.stringify(before)} after=${JSON.stringify(after)} identity=${JSON.stringify(identityProbe)}`);
       }
-      if (resA.posts < 5) fixtureShort.push(`cycle ${cycle}: fixture posts=${resA.posts} tools=${resA.tools.join(',')}`);
+      // Browser A (fixture): must exercise BOTH scroll (records lazy-load) and
+      // pagination (reach page 2). Verify via tools used + ids spanning both pages,
+      // not just a raw count (a count alone wouldn't prove scroll/pagination).
+      const fixtureIds = (resA.items as unknown[])
+        .map((r) => (r && typeof r === 'object' ? (r as { id?: unknown }).id : undefined))
+        .filter((n): n is number => typeof n === 'number');
+      const usedScroll = resA.tools.includes('mcp__agenthub__scroll_page');
+      const reachedPage2 = fixtureIds.some((id) => id > FIXTURE_PER_PAGE);
+      const fixtureOk = resA.posts >= 150 && usedScroll && reachedPage2;
+      if (!fixtureOk) fixtureShort.push(`cycle ${cycle}: fixture posts=${resA.posts} scroll=${usedScroll} page2=${reachedPage2} tools=${resA.tools.join(',')}`);
 
       // Browser B (Stack Overflow): want >=15 questions carrying votes/answers/
       // views, plus a screenshot — all produced by the LLM via MCP.
@@ -546,6 +604,7 @@ test.describe('two-browser soak (fixture + live public site)', () => {
         writeFileSync(path.join(EXPORT_DIR, `${name}.json`), JSON.stringify({
           count: r.posts, tools: r.tools, exit: r.exitCode,
           screenshot: r.screenshot ? { file: shotFile, bytes: Buffer.byteLength(r.screenshot, 'base64') } : null,
+          rawTail: r.raw.slice(-1500),
           items: r.items,
         }, null, 2));
       };
@@ -577,7 +636,7 @@ test.describe('two-browser soak (fixture + live public site)', () => {
     // SOFT gates (LLM/live-site variance): fail only on a PERSISTENT problem
     // (>20% of cycles), not isolated hiccups.
     const tol = Math.floor(cycle * 0.2);
-    expect(fixtureShort.length, `fixture <5 in too many cycles (${fixtureShort.length}/${cycle}):\n${fixtureShort.join('\n')}`).toBeLessThanOrEqual(tol);
+    expect(fixtureShort.length, `fixture failed scroll/pagination/count (>=150 + scroll + page2) in too many cycles (${fixtureShort.length}/${cycle}):\n${fixtureShort.join('\n')}`).toBeLessThanOrEqual(tol);
     expect(secondShort.length, `Stack Overflow returned <15 questions in too many cycles (${secondShort.length}/${cycle}):\n${secondShort.join('\n')}`).toBeLessThanOrEqual(tol);
     expect(secondNoShot.length, `Stack Overflow screenshot missing in too many cycles (${secondNoShot.length}/${cycle}): ${secondNoShot.join(',')}`).toBeLessThanOrEqual(tol);
   });
