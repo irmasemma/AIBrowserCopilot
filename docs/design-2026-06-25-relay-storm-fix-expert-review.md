@@ -198,3 +198,179 @@ identity-based, not heuristic.
 
 Related: `docs/stability-assessment-2026-06-19.md`,
 `docs/rca-2026-06-18-green-but-zero-tabs.md`.
+
+---
+
+## 6. Hardened version — third-pass principal-engineer review (2026-06-25)
+
+The §5 refined plan is directionally correct and already removed the two worst
+foot-guns (session-length lock, count-based heuristic). But it is **not yet
+provably robust**: two holes in the generation scheme re-admit the *exact* storm
+or convert it into a permanent disconnect. This section specifies the hardened
+design an implementer should build instead of §5 item 1.
+
+### 6.1 Independent corroboration of the diagnosis
+
+The log forensics that motivated §1 were reproduced independently from the Neon
+remote-log store and agree on every load-bearing point:
+
+- `ext.ws.replacing_relay = 0` during the storm ⇒ each SW life is individually
+  compliant (its own `openRelay()` closes its own relay first). The contention is
+  **between two lives**, not within one — confirming the §3 mechanism.
+- The trigger (a `1005` close ~0.5 s after `server_info`) is the *other* life's
+  relay superseding this one at the bridge; it is **not** observable from any
+  extension-side close path (`server_info_timeout`=10 s, heartbeat=20 s,
+  alarm=30 s, fast-poll=5 s all far too slow). Diagnosis required correlating
+  bridge + ext logs by **event time** (`fields->>'t'`), not ingestion time.
+- The shared persisted `browserId` is confirmed: `getBrowserInstanceId()`
+  (`browser-instance-id.ts:62-72`) reads/writes the UUID in
+  `chrome.storage.local`, so every SW life of one browser context resolves the
+  same id — the precondition for the collision.
+- **Aggravator downgraded:** a storm was observed with a *single* bridge pid
+  (one soak install, one listening pid, full storm). So "two bridge processes"
+  is **not** a precondition — the cause is two SW lives + shared browserId. The
+  zombie bridge only adds noise.
+
+**Latent amplifier (must also fix, orthogonal to the gen scheme):** the reconnect
+backoff never escalates during the storm because **`failureCount` is reset to 0
+on every `server_info`** (`connection-manager.ts:254`) and again by `refreshUrl()`
+whenever the bridge is reachable (`:184`). Each ping-pong cycle briefly succeeds
+(receives `server_info`), so `calculateBackoff(0)` stays at its ~1 s floor and the
+loop runs at full speed. Even after the gen fix stops the *collision*, this makes
+any *future* flapping condition (transport, wedge, partial success) a full-rate
+storm instead of a backing-off retry. **Fix:** only reset `failureCount` after a
+connection has been *stable* (survived ≥ one heartbeat / ≥ N seconds), not on
+`server_info` arrival. A connection that drops within seconds must count as a
+failure so backoff climbs to the 5 s cap and the system self-throttles.
+
+### 6.2 Hole 1 — generation assignment races; "equal gen" re-admits the storm
+
+`gen` is incremented per SW life via read→modify→write on
+`chrome.storage.local`, which is **not atomic**. The bug's precondition is two SW
+lives starting near-simultaneously: both read `gen=5`, both write `6`, both
+connect with `gen=6`. The §3/§5 bridge rule for equal gen is "idempotent — replace
+silently" (**no 4002**). So the terminated socket reopens with the same gen, is
+silently replaced again, reopens… **the ping-pong continues**, now amplified by
+the §6.1 backoff defect. The fix's correctness silently depends on `gen` being
+*strictly different* between concurrent lives, yet the serializing Web Lock is
+described as a "secondary guard" and is not in the gen-assignment path.
+
+**Hardening — make the order total so equal-primary still yields a strict winner.**
+Each SW life also generates a one-time random `lifeUuid` (per load, not persisted).
+The relay connects with both `?gen=<n>&lifeUuid=<uuid>`. The bridge collision rule
+becomes a **lexicographic total order on `(gen, lifeUuid)`**:
+
+- higher `gen` wins;
+- equal `gen` → higher `lifeUuid` wins (deterministic, stable tiebreak);
+- the loser is **always** rejected with `4002` — there is **no "silent
+  idempotent replace"** branch anymore.
+
+Because the order is total, two concurrent lives that raced to the same `gen`
+still resolve to exactly one winner, and the loser gets `4002` (terminal, see
+§6.4) → storm stops in one cycle. This **removes the dependency on atomic
+increment / on the Web Lock for correctness** (the lock becomes a pure
+optimization that narrows the window, never a correctness requirement).
+
+### 6.3 Hole 2 — a persisted counter rolls back and inverts the order
+
+A bare persisted monotonic counter resets to 1 on extension update, profile
+reset, or "clear browsing data." A stale wedged life still holding `gen=50` then
+outranks the *real* new life at `gen=1`; the bridge `4002`s the real life; and
+because `4002` is terminal, the **extension gives up — dead until the next SW
+cycle.** Rollback inverts the total order into a permanent lockout.
+
+**Hardening — make the generation rollback-resistant.** Use a composite
+generation `(startupEpochMs, counter)` compared as a tuple, OR a
+**startup-timestamp generation** (`gen = Date.now()` captured at SW start,
+persisted for the life). A timestamp generation is strictly better on two axes:
+
+- **race-free:** two lives starting milliseconds apart get different values with
+  no shared read-modify-write at all;
+- **rollback-free:** a `chrome.storage.local` wipe does not lower a wall-clock
+  timestamp the way it resets a counter.
+
+Its only failure mode is the wall clock moving backwards (NTP correction, manual
+change) — a strictly narrower exposure than the counter's race **and** rollback.
+Combined with the §6.2 `lifeUuid` tiebreaker, the final relay identity is
+`(genTimestamp, lifeUuid)` — total, race-free, rollback-resistant.
+
+### 6.4 Hole 3 — "4002-is-terminal" must be scoped, not global
+
+Terminal is correct for breaking the loop but must mean **"this socket / this
+`(gen, lifeUuid)` stops retrying,"** never "this extension gives up." Invariants:
+
+- A subsequent **genuine new SW life** (new, higher generation) MUST always be
+  able to connect — never persist a global "gave up" flag that survives a new
+  life.
+- Do **not** route `4002` through the generic `scheduleBackoff` path
+  (`connection-manager.ts:307, 333`) — that is what would otherwise reopen the
+  loser and continue the storm with extra steps. Add an explicit terminal branch
+  in `onClose` for close code `4002`.
+- **Residual, must be stated + tested:** if the winner later dies and the only
+  other life was `4002`-terminal'd, recovery waits for the next SW restart. This
+  is acceptable *only* because MV3 cycles service workers frequently; it is an
+  assumption, not an accident.
+
+### 6.5 Web Lock — pure optimization, with safe semantics
+
+With §6.2 the lock is no longer load-bearing. Keep it only as a window-narrowing
+optimization around `open → server_info`, and acquire it with
+`navigator.locks.request(name, { ifAvailable: true }, …)` (or a short timeout) so
+a wedged holder can **never** hard-block a competing life. If the lock is
+unavailable, proceed anyway — the `(gen, lifeUuid)` total order still guarantees
+single-winner convergence at the bridge. Lock name is global to the agent; each
+profile is a separate agent, so there is no cross-profile contention. Epoch/gen
+state on the bridge stays keyed by `browserId`.
+
+### 6.6 Truthful UI — endorsed as written (§4)
+
+No changes. Binding "Working" to a real tool-path success (not a heartbeat/pong),
+adding a **Flapping** state from `reconnectsThisSession`/replace-rate, and unifying
+the header/panel/dashboard verdict from one `/api/state`-derived source are all
+correct and high-value. Just ensure the single unified verdict is actually
+consumed by all three surfaces (today they derive independently and already
+disagree — dashboard "stale" vs side panel "Connected").
+
+### 6.7 Hardened plan — what to implement
+
+1. **Relay identity = `(genTimestamp, lifeUuid)`.** `genTimestamp` = persisted
+   startup timestamp (rollback-resistant); `lifeUuid` = per-load random tiebreak.
+   Send both on the `role=relay` upgrade.
+2. **Bridge: total-order collision rule.** higher `(gen, lifeUuid)` wins; loser
+   **always** `4002`; remove the "silent idempotent replace" branch.
+3. **Extension: `4002`-on-relay is terminal and scoped** — explicit `onClose`
+   branch, no backoff/reopen for that identity; a new SW life (new gen) still
+   connects normally; never persist a global give-up.
+4. **Fix the backoff amplifier (§6.1):** reset `failureCount` only after a
+   connection is *stable* (≥ one heartbeat / ≥ N s), not on `server_info`.
+5. **Web Lock as optimization only (§6.5):** narrow hold, `ifAvailable`/timeout,
+   proceed-on-unavailable.
+6. **Truthful UI (§4/§6.6).**
+7. **Hygiene:** zombie-bridge exit + version-skew reconciliation (aggravators).
+
+### 6.8 Regression gate — add two cases the §3 list misses
+
+Extend `tests/e2e/chaos-connection.spec.ts` (real bridge + real sockets) with the
+§3 assertions **plus**:
+
+- **Equal-gen convergence:** inject two concurrent `role=relay` sockets with the
+  **same `gen`** but different `lifeUuid`, each reopening on close. Assert they
+  converge to exactly one survivor, the loser receives `4002` and does **not**
+  reopen, and an in-flight >2 s `tool_request` completes (no
+  `browser_socket_replaced_mid_request`). (Proves the §6.2 tiebreaker.)
+- **Rollback resistance:** an incumbent with a **high** generation, then a new
+  life with a **lower** generation (simulating a `chrome.storage.local` wipe).
+  Assert the new life is **not** permanently locked out — i.e., generation is
+  rollback-resistant (timestamp-based), so the newer life still wins/recovers.
+  (Proves the §6.3 fix.)
+
+### 6.9 Verdict
+
+The §5 plan stops the *observed* collision but is **a better storm, not a
+provably-stopped one**: hole 1 re-admits the full-rate ping-pong under the exact
+concurrency the fix targets, and hole 2 can turn the fix into a permanent
+disconnect. With the §6.7 hardening — **total order `(gen, lifeUuid)` with the
+loser always `4002`, a rollback-resistant generation, scoped-terminal `4002`, and
+the backoff-reset fix** — the mechanism becomes deterministic regardless of MV3
+timing, storage atomicity, or clock, which is the bar for "robust." Implement §6,
+not §5 item 1.
