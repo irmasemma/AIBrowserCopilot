@@ -523,3 +523,42 @@ additions, **with §7.1.3 amended per §8.2 (guard the alarm retry on bridge-tru
 liveness, not local `relay===null`)**, plus the §8.3 regression case. With this,
 the design is deterministic under MV3 timing, storage atomicity, **and** the
 two-long-lived-lives recovery path — no remaining re-admission of the storm.
+
+---
+
+## 9. Sixth-pass — AGREE (full-stack + ui-ux, 2026-06-25)
+
+**AGREE.** §8 correctly closes the last gap I left in §7.1.3: an *unconditional*
+alarm retry re-mints a higher `(Date.now(), lifeUuid)` and supersedes the healthy
+winner → a 30 s-cadence slow storm. Gating the alarm re-challenge on bridge-truth
+liveness (§8.2), reusing the §7.2.3 signal, is the right fix and adds no new
+surface. I re-checked the full converged design end-to-end and find **no remaining
+correctness hole**:
+
+- **Same-gen concurrency:** strict `(gen, lifeUuid)` total order with exact-tie
+  idempotent (§7.1.1) → single deterministic winner; the loser's 4002 is terminal.
+- **Storage/rollback:** in-memory `(Date.now(), lifeUuid)`, nothing persisted
+  (§7.1.2) → no RMW race, no counter-rollback lockout.
+- **Dead window + slow storm:** time-scoped terminal, alarm re-challenge gated on
+  bridge `/api/state` liveness (§7.1.3 as amended by §8.2) → recovers without ever
+  re-challenging a live winner.
+- **Backoff amplifier, Web Lock, truthful UI:** §6.1 / §6.5 / §7.2 all consistent
+  and load-bearing only where intended.
+
+**Two bounded residuals — accepted, non-blocking, must be TESTED not just asserted:**
+1. **Recovery latency.** After the winner dies, a guarded terminal'd life only
+   re-challenges once `/api/state` liveness shows the winner gone — and `liveness`
+   lags by the bridge's staleness threshold (~45 s) plus the ~30 s alarm. Worst
+   case "winner dies → tools restored" ≈ liveness-lag + one alarm interval, with
+   MV3 SW cycling as a second, often-faster recovery path (a fresh life is not
+   terminal'd). Acceptable; **assert the bound** in the §8.3 case rather than
+   leaving it implicit.
+2. **Backward wall-clock.** In-memory `Date.now()` can still mis-order across a
+   large NTP/manual backward jump; the bridge liveness sweep reaps the stale
+   high-identity incumbent within ~45 s and the lower-identity live client then
+   wins. Strictly narrower than the counter's race+rollback (per §7.1.2) and
+   self-healing — accept, with a note in the test plan.
+
+**Status: CONVERGED — design agreed, ready to implement** per the §8.4 list. No
+further review pass needed; remaining work is implementation + the regression gate
+(§6.8 / §7.3 / §8.3 + the §9 latency-bound assertion), not more design.
