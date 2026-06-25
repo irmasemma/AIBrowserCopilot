@@ -448,3 +448,78 @@ exposes one UX state §6 left silent. Final implement-list = **§6.7 with the fo
 the §6.8 regression gate with the lifeUuid-compare-stability assertion and a
 "winner dies after loser was 4002-terminal'd → recovers within one alarm interval"
 case.
+
+---
+
+## 8. Fifth-pass — one correction to §7.1.3 (principal-engineer, 2026-06-25)
+
+§7 is accepted in full with one exception: **§7.1.3 as written re-admits a slow
+storm.** The other corrections (§7.1.1 exact-tie idempotency, §7.1.2 in-memory
+`(Date.now(), lifeUuid)`, §7.1.4 byte-for-byte compare, all of §7.2) are correct
+and should be implemented as stated.
+
+### 8.1 The gap in §7.1.3
+
+§7.1.3 says a 4002-terminal'd life should let "the existing ~30 s reconcile/alarm
+mint a **new** identity (fresh clock + lifeUuid) and retry." But the real
+`reconcile()` (`connection-manager.ts:433-445`, verified) re-attempts on a purely
+**local** predicate — *"Relay is dead in memory. Attempt rediscovery **regardless
+of persisted state**."* It has **no knowledge of whether the other life is the
+live winner.**
+
+Failure trace with §7.1.3 unguarded:
+
+1. Life A wins; life B is `4002`-terminal'd → B's `relay = null`.
+2. B's next alarm (~30 s) → `reconcile()` sees a dead relay → rediscovers →
+   `openRelay()` with a **fresh, higher** `Date.now()` identity.
+3. By the §7.1.2 total order, B now **outranks the healthy A** → bridge supersedes
+   A → A's `relay = null`.
+4. A's next alarm does the identical thing to B.
+
+Result: a **30 s-cadence ping-pong between two long-lived lives** — my §6.4
+dead-window traded for a slow storm. The very property that makes §7.1.2 robust
+(a retry always mints a *higher* identity) is what makes an *unconditional* retry
+re-challenge a healthy winner.
+
+### 8.2 The fix — gate the time-scoped retry on bridge truth, not local `relay===null`
+
+A 4002-terminal'd life must re-challenge **only when there is genuinely no live
+relay for its `browserId`**, confirmed from bridge truth — not from its own
+`relay === null` (which is always true post-4002 and says nothing about the other
+life).
+
+- Before a terminal'd life mints a fresh identity in `reconcile()`, probe the
+  bridge's per-browser liveness via `/api/state` (the **same** `lastRelayClosedAt`
+  / supersede-counter / browser-`liveness` signal §7.2.3 is already adding — so
+  this needs **no new** backend surface).
+- If `/api/state` shows a **live** relay for this `browserId` → **stay quiet**
+  (remain in the `awaiting_sw_recovery` state from §7.2.1; do **not** mint/connect).
+- Only if `/api/state` shows **no live relay** (winner gone / stale) → mint a
+  fresh `(Date.now(), lifeUuid)` and reconnect. This bounds recovery to one alarm
+  interval **without** ever re-challenging a healthy winner.
+- The existing terminal-vs-`scheduleBackoff` distinction is unchanged: 4002 still
+  skips generic backoff (§6.4); this guard governs only the *alarm-driven*
+  re-challenge, which is what makes "terminal" time-scoped instead of permanent.
+
+This also tightens §7.2.1's UX state machine: the panel sits in `Recovering` /
+`awaiting_sw_recovery` precisely while the guard holds the life quiet, and only
+transitions to an active reconnect when bridge truth says the winner is gone — so
+the UI never reads "Connected" during the window **and** never flaps green↔amber
+on a 30 s cadence.
+
+### 8.3 Regression gate — one more case
+
+Extend §6.8 / §7.3 with: **"loser 4002-terminal'd, winner stays healthy for
+≥ 3 alarm intervals."** Assert the terminal'd life does **not** re-challenge while
+`/api/state` reports a live relay (zero additional `relay_superseded`/`replaced`
+on the bridge), and that it **does** reconnect within one alarm interval once the
+winner's socket is closed. This is the case that distinguishes "time-scoped,
+guarded" from "unconditional retry / slow ping-pong."
+
+### 8.4 Final implement-list (supersedes §7.3)
+
+§6.7 + the four §7.1 backend corrections + the three §7.2 UI/observability
+additions, **with §7.1.3 amended per §8.2 (guard the alarm retry on bridge-truth
+liveness, not local `relay===null`)**, plus the §8.3 regression case. With this,
+the design is deterministic under MV3 timing, storage atomicity, **and** the
+two-long-lived-lives recovery path — no remaining re-admission of the storm.
