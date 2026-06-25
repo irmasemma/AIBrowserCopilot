@@ -331,6 +331,41 @@ test.describe('connection chaos (real bridge, real protocol, injected faults)', 
     } finally { bridge.kill(); }
   });
 
+  test('CHAOS idempotent reopen FAST-FAILS in-flight requests (browser_socket_replaced_mid_request, §11 #2)', async () => {
+    // §11 finding #2's load-bearing claim: an EXACT-tie reopen (same gen AND
+    // lifeUuid — the same SW life reopening its own socket) is accepted
+    // idempotently, but it still TERMINATES the orphaned socket, so any request
+    // in-flight on that socket cannot complete there. It must fail FAST with
+    // browser_socket_replaced_mid_request — NOT hang to the ~10s fan-out wedge
+    // timeout. (The idempotent path skips the churn-rate bump; it must NOT also
+    // skip failing the dead socket's pending work.)
+    const lad = makeLocalAppData(); const port = await freePort();
+    const bridge = spawnBridge(port, lad);
+    try {
+      await waitForBridge(port);
+      const id = 'chrome:chaos-idem-inflight';
+      // `a` pongs but never answers tools → the tool_request stays in-flight.
+      const a = new Relay(port, id, { gen: 500, lifeUuid: 'same', answerTools: null });
+      await a.serverInfo();
+
+      const mcp = await Mcp.connect(port);
+      const t0 = Date.now();
+      const callP = mcp.callTool('list_tabs', {}, 15_000); // in-flight on `a`
+      await new Promise((r) => setTimeout(r, 400));        // let the tool_request reach `a`
+
+      // Same SW life reopens its own socket (exact tie) → bridge terminates `a`
+      // and rejects `a`'s pending request.
+      const b = new Relay(port, id, { gen: 500, lifeUuid: 'same', answerTools: null });
+      await b.serverInfo();                                 // accepted idempotently
+
+      const res = await callP;
+      const durMs = Date.now() - t0;
+      expect(res.isError).toBe(true);                       // the in-flight request failed
+      expect(durMs).toBeLessThan(8000);                     // FAST (replacement), not the ~10s wedge timeout
+      mcp.close(); a.close(); b.close();
+    } finally { bridge.kill(); }
+  });
+
   test('CHAOS rollback resistance: a LOWER-gen challenger is rejected, but a genuine HIGHER-gen life is not locked out', async () => {
     // §6.8(b): incumbent has a high identity (simulating a healthy winner); a
     // lower-gen challenger (storage wipe / counter rollback) must NOT supersede

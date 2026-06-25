@@ -1,6 +1,6 @@
 {
   "name": "agenthub-setup",
-  "version": "0.5.15",
+  "version": "0.5.16",
   "description": "One-command setup for AgentHub — installs the native host and configures your AI tools (Claude Code, Cursor, VS Code, Windsurf, Continue, JetBrains, Zed)",
   "type": "module",
   "bin": {
