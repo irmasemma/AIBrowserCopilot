@@ -79,13 +79,16 @@ Env knobs: `SOAK_DURATION_MIN` (default 60), `SOAK_INTERVAL_MIN` (default 5),
 - `3d6701a` deterministic host access (patched manifest) + capability gate + hardened cleanup + identity probe
 - `d4b11a3` Window A exercises scroll + pagination (2 pages, 200 records)
 
-## Current state (2026-06-24)
+## Current state
 
 - Single-cycle smoke PASSES: Window A = 200 records (scroll + pagination proven),
   Window B = 15 SO questions + screenshot, 0 drops, ships to Neon.
-- A **10-hour run @ 30-min cadence** (`SOAK_DURATION_MIN=600 SOAK_INTERVAL_MIN=30`,
-  ~20 cycles) was launched on the dev box; results land in
-  `test-results/soak-timeline.ndjson` (start event has the Neon `install_id`).
+- **10-hour run @ 30-min cadence PASSED clean (2026-06-24 → 06-25).**
+  `SOAK_DURATION_MIN=600 SOAK_INTERVAL_MIN=30`, **20/20 cycles, 0 drops**;
+  fixture ≥150 records 20/20, SO ≥15 questions 20/20, SO screenshots 20/20.
+  Neon `install_id 15cfb36b-200e-4ae4-82e5-cde98b9c0f43`; ship-probe 200/inserted=1.
+  Result: `1 passed (10.0h)`. This is the validated baseline — the test and the
+  fixes in the commits below are confirmed stable over a full multi-hour soak.
 
 ## Caveats
 
