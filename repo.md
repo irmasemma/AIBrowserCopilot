@@ -44,6 +44,47 @@ Env knobs: `SOAK_DURATION_MIN` (default 60), `SOAK_INTERVAL_MIN` (default 5),
 `packages/log-ingest/.env.production.local` (INGEST_KEY) and
 `%LOCALAPPDATA%/agenthub/logs-config.json` (endpoint); ship-probe runs at start.
 
+## Operator runbook — long soaks (4–12h)
+
+When asked to "run the Nh soak", do exactly this:
+
+1. `cd C:\dev\1M\ai-browser-copilot`. If a new release was just built, confirm
+   `packages/native-host/dist/index.js` and `packages/extension/dist/chrome-mv3/manifest.json`
+   are freshly rebuilt (the test loads these).
+2. **Clean first** (a leaked temp profile once filled the disk → mass failures):
+   ```bash
+   rm -rf "$LOCALAPPDATA/agenthub"/../Temp/copilot-soak-*   # or %LOCALAPPDATA%\Temp\copilot-soak-*
+   rm -f test-results/soak-timeline.ndjson soak-run.log && rm -rf test-results/exports
+   ```
+3. **Smoke one cycle first** (`SOAK_DURATION_MIN=1`). It will report `1 failed`
+   because soft-gate tolerance is 0 on a single cycle — that's expected; what you
+   check is the per-cycle log line: `fixture=200 ... SO=15(fields 15) SOshot=true`,
+   `drops=0`. Only proceed if that line is healthy.
+4. **Launch the long run in the background** (interval is almost always 30 min):
+   ```bash
+   SOAK_DURATION_MIN=<MIN> SOAK_INTERVAL_MIN=30 npx playwright test tests/e2e/threads-soak-two-browser.spec.ts --project=chromium-extension > soak-run.log 2>&1
+   ```
+   Durations: **4h=240, 6h=360, 8h=480, 10h=600, 12h=720**. Cycles ≈ MIN/30.
+5. **Keep the machine idle** during the run — no RDP/SSH-heavy work, no rebuilds,
+   no sleep. The Playwright budget is `(DURATION+12) min`; if cycles run slower
+   than the 30-min interval (machine busy/suspended) the run can trip that timeout
+   with fewer cycles done. That is environmental, not a test regression.
+6. **Pass criteria:** `1 passed`, `drops=0`, and every cycle fixture ≥150 (scroll+
+   pagination) and SO ≥15 + screenshot. Read from `test-results/soak-timeline.ndjson`.
+7. **Verify Neon ingestion** by the run's `install_id` (start event of the
+   timeline). Read-only query:
+   ```bash
+   cd packages/log-ingest && node -e "const fs=require('fs');const url=(fs.readFileSync('.env.production.local','utf8').match(/^\s*DATABASE_URL\s*=\s*(.+?)\s*$/m)||[])[1];const {neon}=require('@neondatabase/serverless');const sql=neon(url);const ID='<install_id>';(async()=>{console.log(await sql\`select count(*)::int n,min(received_at) lo,max(received_at) hi from logs where install_id=\${ID}\`);console.log(await sql\`select src,count(*)::int n from logs where install_id=\${ID} group by src\`)})()"
+   ```
+   Expect rows from both `src=bridge` and `src=ext` (a ~4h run produced ~1,400).
+
+Notes: remote shipping is best-effort (5s flush, batch ≤50, drops on 5xx) and
+covers bridge+extension logs only — not the Claude CLI transcript.
+`SOAK_REMOTE_LOGS=0` disables Neon; `SOAK_REQUIRE_GRANT=0` downgrades the
+host-access gate to a warning. Endpoint resolves from
+`%LOCALAPPDATA%/agenthub/logs-config.json` (currently
+`https://log-ingest-irmas-projects-28aa1036.vercel.app/api/logs`).
+
 ## Hard-won lessons (RCA results)
 
 1. **Disk-full was the real cause of "connection drops."** The test leaked temp
@@ -89,6 +130,12 @@ Env knobs: `SOAK_DURATION_MIN` (default 60), `SOAK_INTERVAL_MIN` (default 5),
   Neon `install_id 15cfb36b-200e-4ae4-82e5-cde98b9c0f43`; ship-probe 200/inserted=1.
   Result: `1 passed (10.0h)`. This is the validated baseline — the test and the
   fixes in the commits below are confirmed stable over a full multi-hour soak.
+- **4-hour run on the new release build PASSED clean (2026-06-26).** 8/8 cycles,
+  0 drops, fixture ≥150 8/8, SO ≥15 + screenshot 8/8. Neon verified: 1,430 rows
+  (bridge 830, ext 600), `install_id b9b8ccf1-ca7a-47fa-b9f1-2cb2da39d8c2`.
+- **Caveat learned:** a 10h attempt failed on the Playwright `(DURATION+12)min`
+  timeout after only 13/13 (clean) cycles because the machine was busy/suspended,
+  so cycles ran ~10x slower. Keep the box idle for long runs (see runbook step 5).
 
 ## Caveats
 
