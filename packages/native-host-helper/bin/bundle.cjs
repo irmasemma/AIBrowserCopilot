@@ -4183,12 +4183,106 @@ async function startNativeHost(opts = {}) {
   }
 }
 
+// src/bridge-killer.ts
+var import_node_child_process2 = require("node:child_process");
+var import_node_util = require("node:util");
+var import_node_path5 = require("node:path");
+var import_node_os5 = require("node:os");
+var execFileAsync = (0, import_node_util.promisify)(import_node_child_process2.execFile);
+var DEFAULT_POLL_INTERVAL_MS = 200;
+var DEFAULT_PORT_WAIT_TIMEOUT_MS = 3e3;
+var PORT_PROBE_POLL_MS = 300;
+async function defaultKillPid(pid) {
+  if ((0, import_node_os5.platform)() === "win32") {
+    await execFileAsync("taskkill", ["/F", "/T", "/PID", String(pid)]);
+  } else {
+    process.kill(pid, "SIGKILL");
+  }
+}
+async function defaultKillByImageName(imageName) {
+  if ((0, import_node_os5.platform)() === "win32") {
+    await execFileAsync("taskkill", ["/F", "/IM", imageName]);
+  } else {
+    await execFileAsync("pkill", ["-f", imageName]);
+  }
+}
+async function waitForPortFree(port, pollMs, timeoutMs, probePortFn) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const busy = await probePortFn(port);
+    if (!busy) return true;
+    if (Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+  return false;
+}
+async function killIncumbentBridge(seams = {}) {
+  const readLockFileFn = seams.readLockFile ?? readLockFile;
+  const isPidAliveFn = seams.isPidAlive ?? isPidAlive;
+  const probePortFn = seams.probePort ?? ((p) => probePort(p, PORT_PROBE_POLL_MS));
+  const getBinaryPathFn = seams.getBinaryPath ?? getBinaryPath;
+  const killPidFn = seams.killPid ?? defaultKillPid;
+  const killByImageNameFn = seams.killByImageName ?? defaultKillByImageName;
+  const pollMs = seams.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const waitTimeoutMs = seams.portWaitTimeoutMs ?? DEFAULT_PORT_WAIT_TIMEOUT_MS;
+  const warnings = [];
+  const lockInfo = readLockFileFn();
+  if (!lockInfo.exists || lockInfo.pid == null) {
+    return { attempted: false, portFree: true, escalated: false, warnings };
+  }
+  const pid = lockInfo.pid;
+  const port = lockInfo.port ?? 7483;
+  if (isPidAliveFn(pid)) {
+    try {
+      await killPidFn(pid);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const alreadyGone = msg.includes("ESRCH") || msg.includes("No such process") || msg.includes("not found") || msg.includes("could not be found");
+      if (!alreadyGone) {
+        warnings.push(`PID ${pid} kill failed: ${msg}`);
+      }
+    }
+  }
+  const portFreeAfterKill = await waitForPortFree(port, pollMs, waitTimeoutMs, probePortFn);
+  if (portFreeAfterKill) {
+    return { attempted: true, pid, port, portFree: true, escalated: false, warnings };
+  }
+  const binaryPath = getBinaryPathFn();
+  const imageName = (0, import_node_path5.basename)(binaryPath);
+  if (imageName.includes("-helper-")) {
+    warnings.push(
+      `Image-name escalation skipped: resolved image "${imageName}" contains "-helper-" \u2014 this looks like the helper binary, not the bridge. Possible getBinaryPath() bug; not escalating to avoid self-termination.`
+    );
+    return { attempted: true, pid, port, portFree: false, escalated: false, warnings };
+  }
+  try {
+    await killByImageNameFn(imageName);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    warnings.push(`Image-name kill "${imageName}" failed: ${msg}`);
+  }
+  const portFreeAfterEscalation = await waitForPortFree(
+    port,
+    pollMs,
+    waitTimeoutMs,
+    probePortFn
+  );
+  return {
+    attempted: true,
+    pid,
+    port,
+    portFree: portFreeAfterEscalation,
+    escalated: true,
+    warnings
+  };
+}
+
 // src/version.ts
-var HELPER_VERSION = "0.5.10";
+var HELPER_VERSION = "0.5.17";
 
 // src/logger.ts
 var import_node_fs5 = require("node:fs");
-var import_node_path5 = require("node:path");
+var import_node_path6 = require("node:path");
 
 // src/redaction.ts
 var URL_KEYS = /* @__PURE__ */ new Set([
@@ -4407,13 +4501,13 @@ function getInstallDir3() {
   return resolveInstallDir();
 }
 function getHelperLogPath() {
-  return (0, import_node_path5.join)(getInstallDir3(), "logs", "helper.log");
+  return (0, import_node_path6.join)(getInstallDir3(), "logs", "helper.log");
 }
 var _enabled = null;
 function isLoggingEnabled() {
   if (_enabled !== null) return _enabled;
   try {
-    const configPath = (0, import_node_path5.join)(getInstallDir3(), "logs-config.json");
+    const configPath = (0, import_node_path6.join)(getInstallDir3(), "logs-config.json");
     if (!(0, import_node_fs5.existsSync)(configPath)) {
       _enabled = true;
       return true;
@@ -4471,7 +4565,7 @@ function logRecord(input) {
     };
     const line = JSON.stringify(entry) + "\n";
     const filePath = getHelperLogPath();
-    const dir = (0, import_node_path5.join)(getInstallDir3(), "logs");
+    const dir = (0, import_node_path6.join)(getInstallDir3(), "logs");
     if (!(0, import_node_fs5.existsSync)(dir)) {
       try {
         (0, import_node_fs5.mkdirSync)(dir, { recursive: true });
@@ -4613,6 +4707,28 @@ async function main() {
         break;
       }
       case "restart_native_host": {
+        let killResult;
+        try {
+          killResult = await killIncumbentBridge();
+        } catch (err) {
+          logErr("helper.restart.kill_unexpected_error", err, { action });
+          killResult = { attempted: false, portFree: false, escalated: false, warnings: [String(err)] };
+        }
+        if (killResult.warnings.length > 0) {
+          logRecord({
+            event: "helper.restart.kill_warnings",
+            lvl: "warn",
+            warnings: killResult.warnings
+          });
+        }
+        logRecord({
+          event: "helper.restart.kill_complete",
+          attempted: killResult.attempted,
+          pid: killResult.pid,
+          port: killResult.port,
+          portFree: killResult.portFree,
+          escalated: killResult.escalated
+        });
         const result = await startNativeHost({ skipAlreadyRunningCheck: true });
         writeMessage(result);
         logRecord({
