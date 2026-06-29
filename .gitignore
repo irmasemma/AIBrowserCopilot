@@ -20,3 +20,9 @@ _bmad-output/
 # CWS upload artifacts (rebuilt per release — never commit)
 packages/extension/dist/*.zip
 packages/native-host/bin/bundle.cjs
+
+# Generated version files — source of truth is each package's package.json.
+# Regenerated automatically before every build/bundle/test via npm lifecycle hooks.
+# See packages/*/scripts/gen-version.mjs.
+packages/native-host-helper/src/version.ts
+packages/native-host/src/version.ts

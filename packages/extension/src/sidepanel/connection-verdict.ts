@@ -144,6 +144,98 @@ const INSTALL_COMMAND_ACTION: VerdictAction = {
 };
 
 /**
+ * Three-way version-skew detection across the extension (browser), the bridge,
+ * and the native-messaging helper.
+ *
+ * Why this lives here (and not only in the panel): the version verdict is a
+ * first-class user-visible state (design §4 / §7.2 / ui-ux law: "version skew is
+ * a first-class state"), and keeping the comparison rule in the shared verdict
+ * module means every surface that can see all three versions reasons about them
+ * the SAME way. The header's `versionStatus` only knows bridge-vs-minimum; the
+ * diagnostics panel is the only surface that also holds the helper version (it
+ * fetches the helper snapshot), so it's the surface that computes the full
+ * three-way skew — but it does so through this one shared rule.
+ *
+ * The skew that caused the 2026-06-28 outage: a loaded extension on v0.5.16 with
+ * an autostarted bridge binary stuck on a stale v0.5.14 — "Connected" while every
+ * tool call failed. The UI must call that out loudly.
+ */
+
+/** Normalize a raw version to a clean display value, or `null` when the value is
+ *  genuinely unknown. Unknown values MUST be ignored by the mismatch rule —
+ *  otherwise a slow helper poll that hasn't returned yet (helperVersion absent)
+ *  would false-positive a skew. */
+function normalizeVersion(v: string | null | undefined): string | null {
+  if (v == null) return null;
+  const t = v.trim().replace(/^v/i, '');
+  if (t === '' || /^(unknown|n\/?a)$/i.test(t)) return null;
+  return t;
+}
+
+export interface VersionSkew {
+  /** True ONLY when ≥2 DISTINCT known versions exist across browser/bridge/helper.
+   *  Genuinely-unknown values are ignored, so a not-yet-loaded value never trips
+   *  a false positive (design §4: "ignore genuinely-unknown values"). */
+  mismatch: boolean;
+  /** Display string for the extension version ('unknown' when unavailable). */
+  browser: string;
+  /** Display string for the bridge version ('unknown' when unavailable). */
+  bridge: string;
+  /** Display string for the helper version ('unknown' when unavailable). */
+  helper: string;
+}
+
+/**
+ * Compare the three component versions. A mismatch requires at least two DISTINCT
+ * *known* versions — any number of unknowns alongside a single known version is
+ * NOT a mismatch (no false positives while values are still loading).
+ */
+export function detectVersionSkew(input: {
+  extension?: string | null;
+  bridge?: string | null;
+  helper?: string | null;
+}): VersionSkew {
+  const browser = normalizeVersion(input.extension);
+  const bridge = normalizeVersion(input.bridge);
+  const helper = normalizeVersion(input.helper);
+  const distinctKnown = new Set([browser, bridge, helper].filter((v): v is string => v !== null));
+  return {
+    mismatch: distinctKnown.size > 1,
+    browser: browser ?? 'unknown',
+    bridge: bridge ?? 'unknown',
+    helper: helper ?? 'unknown',
+  };
+}
+
+export interface UpdateCommand {
+  /** The exact command to run — ALWAYS present, never empty. Carries the
+   *  extension ID when known so the installer re-registers the right origin. */
+  command: string;
+  /** Context label shown above the command. */
+  label: string;
+  /** Loud when there's a real skew to fix; unobtrusive when healthy. */
+  prominent: boolean;
+}
+
+/**
+ * Build the always-visible reinstall/update command for the diagnostics panel.
+ * The command is produced in EVERY connection state (the panel renders it
+ * unconditionally) so the user can always copy "re-run the installer" — the fix
+ * for the silent version-skew outage. `mismatch` only changes the framing
+ * (loud vs unobtrusive), never whether the command exists.
+ */
+export function buildUpdateCommand(extId: string | null | undefined, mismatch: boolean): UpdateCommand {
+  const command = extId
+    ? `npx agenthub-setup@latest --update --extension-id ${extId}`
+    : 'npx agenthub-setup@latest --update';
+  return {
+    command,
+    label: mismatch ? 'Update every AgentHub part to the same version:' : 'Reinstall or update AgentHub:',
+    prominent: mismatch,
+  };
+}
+
+/**
  * THE decision rule. Precedence is deliberate (most-dangerous-lie first):
  *
  *   1. Recovering (awaiting_sw_recovery) — must NEVER read "Connected".

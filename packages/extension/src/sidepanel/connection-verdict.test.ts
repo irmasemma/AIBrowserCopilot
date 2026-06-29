@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   deriveVerdict,
+  detectVersionSkew,
+  buildUpdateCommand,
   extractApiStateFacts,
   FLAPPING_SUPERSEDE_THRESHOLD,
   type ApiStateFacts,
@@ -146,6 +148,71 @@ describe('deriveVerdict — stale + degraded', () => {
   it('degraded state with no staleness → degraded', () => {
     const v = deriveVerdict(args({ ctx: { state: 'degraded', lastVerifiedAt: Date.now() }, api: null }));
     expect(v.kind).toBe('degraded');
+  });
+});
+
+describe('buildUpdateCommand — always-visible reinstall/update command', () => {
+  // (a) The command is produced in EVERY state — including connected/healthy
+  // (mismatch=false) — so the panel can render it unconditionally and keep it
+  // copyable at all times. Healthy framing is unobtrusive (not prominent).
+  it('renders the extension-scoped command when healthy, unobtrusively', () => {
+    const cmd = buildUpdateCommand('ehchmchlmggdigicfjfmlgcbhdcdcmll', false);
+    expect(cmd.command).toBe('npx agenthub-setup@latest --update --extension-id ehchmchlmggdigicfjfmlgcbhdcdcmll');
+    expect(cmd.prominent).toBe(false);
+    expect(cmd.label.length).toBeGreaterThan(0);
+  });
+
+  it('falls back to the no-extension-id command when the id is unknown', () => {
+    expect(buildUpdateCommand('', false).command).toBe('npx agenthub-setup@latest --update');
+    expect(buildUpdateCommand(null, false).command).toBe('npx agenthub-setup@latest --update');
+  });
+
+  it('is loud (prominent) when there is a skew to fix', () => {
+    const cmd = buildUpdateCommand('abc123', true);
+    expect(cmd.prominent).toBe(true);
+    expect(cmd.command).toContain('--extension-id abc123');
+  });
+});
+
+describe('detectVersionSkew — three-way browser/bridge/helper comparison', () => {
+  // (b) The exact outage scenario: extension v0.5.16, autostarted bridge stuck on
+  // a stale v0.5.14, helper on v0.5.10 → mismatch, with the three versions listed.
+  it('ext 0.5.16 / bridge 0.5.14 / helper 0.5.10 → mismatch, lists all three', () => {
+    const skew = detectVersionSkew({ extension: '0.5.16', bridge: '0.5.14', helper: '0.5.10' });
+    expect(skew.mismatch).toBe(true);
+    expect(skew.browser).toBe('0.5.16');
+    expect(skew.bridge).toBe('0.5.14');
+    expect(skew.helper).toBe('0.5.10');
+  });
+
+  it('detects a two-way skew even when the third value is unknown (the real outage shape)', () => {
+    // helper version often hasn't loaded yet, but ext != bridge is the skew.
+    const skew = detectVersionSkew({ extension: '0.5.16', bridge: '0.5.14', helper: undefined });
+    expect(skew.mismatch).toBe(true);
+    expect(skew.helper).toBe('unknown');
+  });
+
+  // (c) All three matching → no callout.
+  it('all three matching → no mismatch', () => {
+    const skew = detectVersionSkew({ extension: '0.5.16', bridge: '0.5.16', helper: '0.5.16' });
+    expect(skew.mismatch).toBe(false);
+  });
+
+  it('ignores a leading v and surrounding whitespace when comparing', () => {
+    expect(detectVersionSkew({ extension: 'v0.5.16', bridge: '0.5.16 ', helper: ' v0.5.16' }).mismatch).toBe(false);
+  });
+
+  // (d) Genuinely-unknown values must NOT false-positive a skew.
+  it('a single known version alongside unknowns → no mismatch (no false positive)', () => {
+    expect(detectVersionSkew({ extension: '0.5.16', bridge: undefined, helper: undefined }).mismatch).toBe(false);
+    expect(detectVersionSkew({ extension: '0.5.16', bridge: '', helper: null }).mismatch).toBe(false);
+    expect(detectVersionSkew({ extension: '0.5.16', bridge: 'unknown', helper: 'N/A' }).mismatch).toBe(false);
+  });
+
+  it('all unknown → no mismatch, all reported as unknown', () => {
+    const skew = detectVersionSkew({ extension: '', bridge: undefined, helper: 'unknown' });
+    expect(skew.mismatch).toBe(false);
+    expect(skew).toMatchObject({ browser: 'unknown', bridge: 'unknown', helper: 'unknown' });
   });
 });
 
