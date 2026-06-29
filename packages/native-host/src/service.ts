@@ -1822,25 +1822,60 @@ export function startServer(port: number): void {
   // Don't let the watchdog itself keep the event loop alive.
   if (typeof listenWatchdog.unref === 'function') listenWatchdog.unref();
 
-  httpServer.on('error', (err: NodeJS.ErrnoException) => {
+  // Set once the port is bound. After a successful bind, a later server-level
+  // 'error' is NOT a lost-bind race and must not tear down a healthy bridge.
+  let didBind = false;
+  // Guards against handling the SAME listen error twice (it arrives on both
+  // `wss` — via ws's forwarder — and `httpServer`; see below).
+  let listenErrorHandled = false;
+
+  // CRITICAL: the listen-error handler MUST live on the WebSocketServer, not
+  // only on the http server.
+  //
+  // `ws` forwards the underlying http server's 'error' (and 'listening') events
+  // onto the WebSocketServer instance (ws/lib/websocket-server.js → addListeners:
+  // `error: this.emit.bind(this, 'error')`). Because `wss` is constructed BEFORE
+  // this point, ws's forwarder is the FIRST 'error' listener on httpServer. When
+  // listen() fails (EADDRINUSE), that forwarder re-emits 'error' on `wss`; if
+  // `wss` has no 'error' listener the re-emit THROWS synchronously inside
+  // httpServer's emit loop, which (a) aborts the loop so a handler attached only
+  // to httpServer never runs, and (b) surfaces as an uncaughtException. The
+  // uncaughtException handler below re-throws, so the bridge CRASH-LOOPS on every
+  // EADDRINUSE until the 5s watchdog kills it — observed in production as
+  // thousands of `bridge.lifecycle.uncaught` EADDRINUSE records, i.e. the exact
+  // ship-blocker this block was meant to fix. Attaching to `wss` is what actually
+  // catches the forwarded error; we keep the httpServer handler too as a
+  // belt-and-suspenders against future ws-forwarding changes.
+  const handleListenError = (err: NodeJS.ErrnoException, via: 'wss' | 'httpServer'): void => {
+    if (didBind) {
+      // Already serving — a late server error is not a bind race. Log, don't die.
+      bridgeLog().error('bridge.lifecycle.server_error_after_bind', { port, via, ...redactError(err) });
+      return;
+    }
+    if (listenErrorHandled) return;
+    listenErrorHandled = true;
     if (err.code === 'EADDRINUSE') {
       // A sibling bridge already owns the port (and therefore the lock).
       // registerCleanupHandlers() has NOT run yet, so exiting here leaves the
       // sibling's lock file untouched — which is exactly what we want.
       bridgeLog().warn('bridge.lifecycle.port_in_use', {
         port,
+        via,
         action: 'exiting_without_lock_cleanup',
         hint: 'Another bridge already holds this port; leaving the running instance’s lock file intact.',
       });
     } else {
-      bridgeLog().error('bridge.lifecycle.listen_failed', { port, ...redactError(err) });
+      bridgeLog().error('bridge.lifecycle.listen_failed', { port, via, ...redactError(err) });
     }
     clearTimeout(listenWatchdog);
     // eslint-disable-next-line n/no-process-exit
     process.exit(0);
-  });
+  };
+  wss.on('error', (err: NodeJS.ErrnoException) => handleListenError(err, 'wss'));
+  httpServer.on('error', (err: NodeJS.ErrnoException) => handleListenError(err, 'httpServer'));
 
   httpServer.on('listening', () => {
+    didBind = true;
     clearTimeout(listenWatchdog);
     // We own the port. Only NOW claim the lock file and register the cleanup
     // handlers that delete it on a clean exit.
