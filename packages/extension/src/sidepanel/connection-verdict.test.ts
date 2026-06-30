@@ -216,6 +216,83 @@ describe('detectVersionSkew — three-way browser/bridge/helper comparison', () 
   });
 });
 
+describe('deriveVerdict — down bridge + stale reconnects is NOT flapping (correctness fix)', () => {
+  // Regression for the 2026-06-29 contradictory verdict: header said "Connection
+  // keeps dropping" (flapping) while the diagnostics step showed "Lock file
+  // present: ✕" (bridge not running). These cannot both be true. Root cause:
+  // reconnectsThisSession≥3 from a previous storm fired the flapping fallback
+  // (precedence 2) even when /api/state was absent BECAUSE the bridge was down,
+  // masking the no_lock_file branch (precedence 3). Fix: isDefinitelyDown guard.
+
+  it('no_lock_file + stale reconnectsThisSession → broken ("Bridge isn\'t running"), NOT flapping', () => {
+    const v = deriveVerdict(args({
+      ctx: { state: 'reconnecting', diagnosticReason: 'no_lock_file', reconnectsThisSession: 5 },
+      api: null,
+    }));
+    expect(v.kind).toBe('broken');
+    expect(v.kind).not.toBe('flapping');
+    expect(v.title).toBe("Bridge isn't running");
+  });
+
+  it('bridge_not_started + high reconnectsThisSession → broken, NOT flapping', () => {
+    const v = deriveVerdict(args({
+      ctx: { state: 'reconnecting', diagnosticReason: 'bridge_not_started', reconnectsThisSession: 10 },
+      api: null,
+    }));
+    expect(v.kind).toBe('broken');
+    expect(v.kind).not.toBe('flapping');
+  });
+
+  it('reconnectsThisSession still fires flapping when bridge is NOT definitively down (null reason, no api)', () => {
+    // was_connected or null reason: bridge was running, something is wrong.
+    // The stale counter IS a valid flapping signal here.
+    const v = deriveVerdict(args({
+      ctx: { state: 'reconnecting', diagnosticReason: null, reconnectsThisSession: 5 },
+      api: null,
+    }));
+    expect(v.kind).toBe('flapping');
+  });
+
+  it('broken (no_lock_file) + version mismatch → broken outranks version_mismatch verdict', () => {
+    // Ensures the panel's version-mismatch callout is correctly demoted when
+    // a more fundamental failure owns the verdict (step 3 before step 4).
+    const v = deriveVerdict(args({
+      ctx: { state: 'reconnecting', diagnosticReason: 'no_lock_file', versionStatus: 'outdated', reconnectsThisSession: 3 },
+      api: null,
+    }));
+    expect(v.kind).toBe('broken');
+    expect(v.kind).not.toBe('version_mismatch');
+    expect(v.kind).not.toBe('flapping');
+  });
+
+  it('version mismatch only (bridge running, no broken reason) → version_mismatch IS the primary verdict', () => {
+    // Confirms the version-mismatch callout remains full/primary when it is
+    // the sole known problem (no bridge-down reason, bridge is live).
+    const v = deriveVerdict(args({
+      ctx: { state: 'connected', versionStatus: 'outdated', reconnectsThisSession: 0 },
+      api: liveFacts,
+    }));
+    expect(v.kind).toBe('version_mismatch');
+  });
+
+  it('flapping verdict includes restart_service action; working/untested do not (panel de-dup anchor)', () => {
+    const flapping = deriveVerdict(args({ api: { ...liveFacts, supersededRecentCount: FLAPPING_SUPERSEDE_THRESHOLD } }));
+    expect(flapping.kind).toBe('flapping');
+    expect(flapping.actions.map((a) => a.id)).toContain('restart_service');
+
+    const working = deriveVerdict(args({ api: { ...liveFacts, hadRecentSuccess: true } }));
+    expect(working.kind).toBe('working');
+    expect(working.actions.map((a) => a.id)).not.toContain('restart_service');
+  });
+
+  it('broken/no_lock_file includes start_service, not restart_service (panel hides its own Restart)', () => {
+    const v = deriveVerdict(args({ ctx: { state: 'reconnecting', diagnosticReason: 'no_lock_file' }, api: null }));
+    expect(v.kind).toBe('broken');
+    expect(v.actions.map((a) => a.id)).toContain('start_service');
+    expect(v.actions.map((a) => a.id)).not.toContain('restart_service');
+  });
+});
+
 describe('extractApiStateFacts', () => {
   const now = Date.parse('2026-06-25T12:00:00.000Z');
   const mkPayload = (over: { requests?: unknown[]; browsersExtra?: Record<string, unknown> } = {}) => ({

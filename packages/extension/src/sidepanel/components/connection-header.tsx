@@ -19,6 +19,10 @@ const INSTALL_COMMAND = 'npx agenthub-setup@latest --update';
  * behaves as the legacy client-only derivation when /api/state is unavailable.
  */
 export interface DerivedHeader {
+  /** The verdict kind — passed to DiagnosticsPanel so it knows whether a
+   *  version-mismatch callout should be primary (kind==='version_mismatch') or
+   *  demoted to a secondary note (another issue owns the headline). */
+  kind: Verdict['kind'];
   title: string;
   subtitle: string | null;
   /** When true, the title row should be styled red (broken) instead of amber. */
@@ -60,6 +64,7 @@ export function deriveHeader(args: {
     staleThresholdMs: STALE_THRESHOLD_MS,
   });
   return {
+    kind: verdict.kind,
     title: verdict.title,
     subtitle: verdict.subtitle,
     severity: verdict.severity,
@@ -252,6 +257,8 @@ export const ConnectionHeader: FunctionalComponent = () => {
           connectionContext={connectionContext}
           verdictTitle={header.title}
           verdictSeverity={header.severity}
+          verdictKind={header.kind}
+          verdictActionIds={header.buttons.map((b) => b.id)}
         />
       )}
     </header>

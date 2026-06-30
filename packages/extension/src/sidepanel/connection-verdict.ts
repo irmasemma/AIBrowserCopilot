@@ -280,7 +280,14 @@ export function deriveVerdict(args: DeriveVerdictArgs): Verdict {
   const flappingFromBridge =
     api !== null &&
     (api.supersededRecentCount >= FLAPPING_SUPERSEDE_THRESHOLD || api.hadRecentReplacedMidRequest);
-  const flappingFromClient = ctx.reconnectsThisSession >= FLAPPING_RECONNECTS_THRESHOLD;
+  // Guard: a "definitely down" diagnostic reason means /api/state is unreachable
+  // BECAUSE the bridge is not running — not because of a transient drop. A stale
+  // reconnectsThisSession counter from a previous storm MUST NOT make a down
+  // bridge look like flapping. This is the exact false verdict the 2026-06-29
+  // scenario produced: no_lock_file + reconnects≥3 → "Connection keeps dropping"
+  // while the diagnostic step below showed "Lock file present: ✕".
+  const isDefinitelyDown = reason === 'no_lock_file' || reason === 'bridge_not_started';
+  const flappingFromClient = !isDefinitelyDown && ctx.reconnectsThisSession >= FLAPPING_RECONNECTS_THRESHOLD;
   if (flappingFromBridge || (api === null && flappingFromClient)) {
     return {
       kind: 'flapping',

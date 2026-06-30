@@ -6,11 +6,19 @@ import { detectVersionSkew, buildUpdateCommand } from '../connection-verdict.js'
 export interface DiagnosticsPanelProps {
   serverInfo: ServerInfo | null;
   connectionContext: ConnectionContext;
-  /** The single unified verdict headline (from `deriveVerdict`), surfaced at the
-   *  top of the panel so the panel can NEVER contradict the header (design §4 /
-   *  §7.2: surfaces must agree). Optional for back-compat / standalone tests. */
+  /** Kept for back-compat / standalone tests. The visible echo was removed —
+   *  the header remains the single visible title so there is no duplicate. */
   verdictTitle?: string;
   verdictSeverity?: 'ok' | 'warn' | 'error';
+  /** The verdict kind — controls whether the version-mismatch callout is the
+   *  primary alarm (kind==='version_mismatch') or a demoted secondary note
+   *  (another issue already owns the headline). Absent → treated as primary. */
+  verdictKind?: string;
+  /** Action IDs the header verdict already surfaces. Suppresses duplicate
+   *  controls: "Restart bridge" in the panel toolbar is hidden when restart or
+   *  start is already the header's primary action (law #5: controls usable when
+   *  needed, not duplicated when confusing). */
+  verdictActionIds?: string[];
 }
 
 export const formatUptime = (seconds: number): string => {
@@ -296,7 +304,7 @@ const CommandBlock: FunctionalComponent<{ command: string; label: string; promin
   );
 };
 
-export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ serverInfo, connectionContext, verdictTitle, verdictSeverity }) => {
+export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ serverInfo, connectionContext, verdictKind, verdictActionIds }) => {
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [status, setStatus] = useState<ServiceStatusSnapshot | null>(null);
@@ -465,46 +473,58 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
     try { chrome.tabs.create({ url: dashboardUrl }); } catch { window.open(dashboardUrl, '_blank'); }
   };
 
-  const verdictColor =
-    verdictSeverity === 'error' ? 'text-red-600'
-    : verdictSeverity === 'warn' ? 'text-amber-700'
-    : 'text-emerald-700';
+  // Version-mismatch is the PRIMARY alarm only when the verdict itself IS
+  // version_mismatch (or when verdictKind is absent for back-compat). When
+  // another issue owns the headline (broken bridge, flapping, etc.) the mismatch
+  // is a CONTRIBUTING DETAIL — the update command below is already prominent, so
+  // a full co-equal callout just adds noise and confuses the one-action model.
+  const versionMismatchIsPrimary = !verdictKind || verdictKind === "version_mismatch";
+
+  // Suppress the panel "Restart bridge" button when the header verdict already
+  // surfaces a restart or start action — those two are mutually exclusive:
+  //   • start_service  → bridge is definitively down, nothing to restart
+  //   • restart_service → header already shows it as the primary action
+  // Keep the button for working/untested/version-mismatch/recovering states where
+  // the header has NO restart — that is the original "always-available fallback
+  // for the wedged-while-connected scenario" use case (design note in handleRestart).
+  const showPanelRestart = !(verdictActionIds?.includes("restart_service") || verdictActionIds?.includes("start_service"));
 
   return (
     <div class="px-4 pb-3 text-xs text-neutral-700 border-t border-neutral-100 pt-3 bg-neutral-50/50">
-      {/* Unified verdict echo — same headline the header shows, so the panel can
-          never read "Connected" while the header reads "Flapping" (surfaces must
-          agree). */}
-      {verdictTitle && (
-        <div class="mb-2" data-testid="diag-verdict">
-          <span class={`text-[11px] font-semibold ${verdictColor}`}>{verdictTitle}</span>
-        </div>
-      )}
-
-      {/* Loud, accessible version-skew callout. Icon + text (never color alone),
-          and the transition is announced via a polite live region so a screen
-          reader hears it without the user opening the panel manually (ui-ux law
-          6). The actual three versions are listed so the user — and any LLM
-          helping debug — sees exactly which piece is behind. The fix-it command
-          is rendered just below, always copyable. Copy follows design §4. */}
+      {/* Version-skew callout — full alarm when version_mismatch IS the verdict;
+          demoted to a one-line secondary note when another issue owns the headline.
+          Icon + text + ARIA live region (never color-alone, ui-ux law 6). */}
       {versionSkew.mismatch && (
         <>
           <span role="status" aria-live="polite" class="sr-only" data-testid="version-mismatch-live">
             {`Versions don’t match: browser ${versionSkew.browser}, bridge ${versionSkew.bridge}, helper ${versionSkew.helper}. Run the update command to fix it.`}
           </span>
-          <div
-            class="mb-2 flex items-start gap-2 rounded-md border border-amber-400 bg-amber-50 px-3 py-2"
-            data-testid="version-mismatch-callout"
-          >
-            <span class="text-amber-700 text-sm leading-none mt-0.5" aria-hidden="true">{'⚠'}</span>
-            <div class="min-w-0">
-              <p class="text-[11px] font-semibold text-amber-800">Versions don’t match</p>
-              <p class="text-[11px] text-amber-700 leading-snug">
-                Your AgentHub pieces are on different versions (browser {versionSkew.browser}, bridge {versionSkew.bridge},
-                helper {versionSkew.helper}). They work best when they all match — updating takes about a minute.
-              </p>
+          {versionMismatchIsPrimary ? (
+            /* Full callout: version mismatch IS the primary verdict. */
+            <div
+              class="mb-2 flex items-start gap-2 rounded-md border border-amber-400 bg-amber-50 px-3 py-2"
+              data-testid="version-mismatch-callout"
+            >
+              <span class="text-amber-700 text-sm leading-none mt-0.5" aria-hidden="true">{"⚠"}</span>
+              <div class="min-w-0">
+                <p class="text-[11px] font-semibold text-amber-800">Versions don’t match</p>
+                <p class="text-[11px] text-amber-700 leading-snug">
+                  Your AgentHub pieces are on different versions (browser {versionSkew.browser}, bridge {versionSkew.bridge},
+                  helper {versionSkew.helper}). They work best when they all match — updating takes about a minute.
+                </p>
+              </div>
             </div>
-          </div>
+          ) : (
+            /* Demoted secondary note: a more fundamental issue owns the headline.
+               The update command below is already prominent — no need for a
+               second co-equal alarm. */
+            <div class="mb-2 flex items-center gap-1.5 text-[11px] text-amber-700" data-testid="version-mismatch-secondary">
+              <span aria-hidden="true">{"⚠"}</span>
+              <span>
+                Version mismatch (browser {versionSkew.browser}, bridge {versionSkew.bridge}, helper {versionSkew.helper}) — the update command below fixes this too.
+              </span>
+            </div>
+          )}
         </>
       )}
 
@@ -524,14 +544,16 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
           >
             {copied ? 'Copied!' : 'Copy report'}
           </button>
-          <button
-            class="text-[10px] px-2 py-0.5 rounded border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-700 transition-colors disabled:opacity-50"
-            onClick={() => void handleRestart()}
-            disabled={restarting}
-            title="Kill and respawn the bridge, then reconnect. Use this if tools time out even though the status looks connected."
-          >
-            {restarting ? 'Restarting…' : 'Restart bridge'}
-          </button>
+          {showPanelRestart && (
+            <button
+              class="text-[10px] px-2 py-0.5 rounded border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-700 transition-colors disabled:opacity-50"
+              onClick={() => void handleRestart()}
+              disabled={restarting}
+              title="Kill and respawn the bridge, then reconnect. Use this if tools time out even though the status looks connected."
+            >
+              {restarting ? 'Restarting…' : 'Restart bridge'}
+            </button>
+          )}
         </div>
       </div>
 
