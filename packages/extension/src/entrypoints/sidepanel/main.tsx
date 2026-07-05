@@ -1,7 +1,7 @@
 import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { useStore, initStoreFromStorage, listenForUpdates } from '../../sidepanel/store.js';
-import { ConnectionHeader } from '../../sidepanel/components/connection-header.js';
+import { ConnectionHeader, deriveHeader } from '../../sidepanel/components/connection-header.js';
 import { ToolCard } from '../../sidepanel/components/tool-card.js';
 import { ActivityEntryComponent } from '../../sidepanel/components/activity-entry.js';
 import { SetupWizard } from '../../sidepanel/components/setup-wizard.js';
@@ -11,36 +11,110 @@ import { OutdatedBridgeBanner } from '../../sidepanel/components/outdated-bridge
 import { SiteAccessBanner } from '../../sidepanel/components/site-access-banner.js';
 import { TOOL_DEFINITIONS } from '../../shared/tool-definitions.js';
 import { MIN_NATIVE_HOST_VERSION } from '../../shared/version-check.js';
+import { mcpTabNeedsAttention } from '../../sidepanel/mcp-tab-attention.js';
 
-type TabId = 'chat' | 'tools' | 'settings';
+type TabId = 'chat' | 'tools' | 'mcp' | 'settings';
 
-const TabStrip = ({ active, onChange }: { active: TabId; onChange: (id: TabId) => void }) => {
+const TabStrip = ({
+  active,
+  onChange,
+  mcpAttention,
+}: {
+  active: TabId;
+  onChange: (id: TabId) => void;
+  mcpAttention: boolean;
+}) => {
   const tabs: Array<{ id: TabId; label: string }> = [
     { id: 'chat', label: 'Chat' },
     { id: 'tools', label: 'Tools' },
+    // "MCP" sits between Tools and Settings — all connection/bridge/install
+    // status now lives on this tab instead of at the top of the shell.
+    { id: 'mcp', label: 'MCP' },
     { id: 'settings', label: 'Settings' },
   ];
   return (
-    <nav class="flex border-b border-card-border bg-white" role="tablist">
-      {tabs.map((t) => {
-        const isActive = active === t.id;
-        return (
-          <button
-            key={t.id}
-            role="tab"
-            aria-selected={isActive}
-            class={`flex-1 text-sm py-2 transition-colors ${
-              isActive
-                ? 'text-brand-primary border-b-2 border-brand-primary font-medium'
-                : 'text-neutral-500 border-b-2 border-transparent hover:text-neutral-800'
-            }`}
-            onClick={() => onChange(t.id)}
-          >
-            {t.label}
-          </button>
-        );
-      })}
-    </nav>
+    <>
+      <nav class="flex border-b border-card-border bg-white" role="tablist">
+        {tabs.map((t) => {
+          const isActive = active === t.id;
+          const showBadge = t.id === 'mcp' && mcpAttention;
+          return (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={isActive}
+              aria-label={
+                t.id === 'mcp'
+                  ? mcpAttention
+                    ? 'MCP — connection needs attention'
+                    : 'MCP'
+                  : undefined
+              }
+              class={`flex-1 text-sm py-2 transition-colors ${
+                isActive
+                  ? 'text-brand-primary border-b-2 border-brand-primary font-medium'
+                  : 'text-neutral-500 border-b-2 border-transparent hover:text-neutral-800'
+              }`}
+              onClick={() => onChange(t.id)}
+            >
+              {t.label}
+              {showBadge && (
+                <>
+                  {/* Non-color-only badge: amber glyph + visually-hidden text so
+                      the alert never depends on color perception alone. */}
+                  <span
+                    class="ml-1 font-bold text-amber-600"
+                    aria-hidden="true"
+                    data-testid="mcp-tab-attention-badge"
+                  >
+                    !
+                  </span>
+                  <span class="sr-only">connection needs attention</span>
+                </>
+              )}
+            </button>
+          );
+        })}
+      </nav>
+      {/* Single polite live region announcing the MCP badge state to screen
+          readers; empty when there is nothing to report. */}
+      <span
+        class="sr-only"
+        role="status"
+        aria-live="polite"
+        data-testid="mcp-tab-attention-status"
+      >
+        {mcpAttention ? 'MCP connection needs attention' : ''}
+      </span>
+    </>
+  );
+};
+
+const McpTab = ({
+  needsSetup,
+  onSetupComplete,
+}: {
+  needsSetup: boolean;
+  onSetupComplete: () => void;
+}) => {
+  const connectionContext = useStore((s) => s.connectionContext);
+
+  // First-launch onboarding lives HERE now (not as a full-screen override):
+  // the wizard only replaces the MCP tab's content, never the whole app.
+  if (needsSetup) {
+    return <SetupWizard onComplete={onSetupComplete} />;
+  }
+
+  return (
+    <>
+      <ConnectionHeader />
+      {connectionContext.versionStatus === 'outdated' && (
+        <OutdatedBridgeBanner
+          installedVersion={connectionContext.serverInfo?.version ?? null}
+          minimumVersion={MIN_NATIVE_HOST_VERSION}
+        />
+      )}
+    </>
   );
 };
 
@@ -94,7 +168,7 @@ const ToolsTab = () => {
   );
 };
 
-const App = () => {
+export const App = () => {
   const connectionContext = useStore((s) => s.connectionContext);
   const [setupComplete, setSetupComplete] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>('chat');
@@ -140,42 +214,57 @@ const App = () => {
 
   const { state, diagnosticReason, lastConnectedAt } = connectionContext;
 
-  // First-launch onboarding: only override if user has never connected MCP and the helper
-  // isn't installed yet. Once dismissed (or once the user has used Chat instead), the
-  // normal tabbed UI shows. Chat works without MCP, so this is no longer a hard block.
+  // First-launch onboarding: only relevant if the user has never connected MCP
+  // and the helper isn't installed yet. This boolean is UNCHANGED (it reads
+  // discovery outputs read-only); it now only switches the MCP tab's CONTENT
+  // (SetupWizard vs live status) — it never blanks the app anymore. Chat works
+  // without MCP, so first-launch lands on Chat.
   const needsSetup = !setupComplete && (
     diagnosticReason === 'helper_unavailable' ||
     (state === 'disconnected' && !lastConnectedAt && !diagnosticReason)
   );
 
-  if (needsSetup) {
-    return (
-      <div class="flex flex-col h-screen bg-panel">
-        <ConnectionHeader />
-        <div class="flex-1 overflow-y-auto">
-          <SetupWizard onComplete={handleSetupComplete} />
-        </div>
-      </div>
-    );
-  }
+  // Conservative MCP-tab attention badge. `deriveHeader` with api:null is a
+  // READ-ONLY reuse of the existing verdict adapter — client-only facts are
+  // enough for a badge (untested/working are excluded so no false alarm), and
+  // this never touches connection discovery.
+  const hasEngagedMcp = connectionContext.lastConnectedAt != null;
+  const mcpVerdict = deriveHeader({
+    state,
+    diagnosticReason,
+    failureCount: connectionContext.failureCount,
+    lastConnectedAt,
+    reconnectingSinceMs: null,
+    versionStatus: connectionContext.versionStatus,
+    reconnectsThisSession: connectionContext.reconnectsThisSession,
+    lastVerifiedAt: connectionContext.lastVerifiedAt,
+    api: null,
+    quickCheckPassed: false,
+  });
+  const mcpAttention = mcpTabNeedsAttention({
+    hasEngagedMcp,
+    severity: mcpVerdict.severity,
+    kind: mcpVerdict.kind,
+  });
 
   return (
     <div class="flex flex-col h-screen bg-panel">
-      <ConnectionHeader />
+      {/* Banner-placement rule: a banner stays global (above TabStrip, visible
+          from every tab) IFF it gates a capability usable from the current tab
+          regardless of tab. SiteAccessBanner gates content tools invoked from
+          Chat, so it stays global. MCP/bridge/install-only messages
+          (ConnectionHeader, OutdatedBridgeBanner, SetupWizard) move to the MCP
+          tab because they don't gate anything usable outside it. */}
       <SiteAccessBanner />
-      {connectionContext.versionStatus === 'outdated' && (
-        <OutdatedBridgeBanner
-          installedVersion={connectionContext.serverInfo?.version ?? null}
-          minimumVersion={MIN_NATIVE_HOST_VERSION}
-        />
-      )}
-      <TabStrip active={activeTab} onChange={setActiveTab} />
+      <TabStrip active={activeTab} onChange={setActiveTab} mcpAttention={mcpAttention} />
       {/*
         Tab panels are always mounted; visibility is toggled with `hidden`
         so per-tab state (chat transcript, in-flight model run, drafts,
         revealed keys, etc.) survives tab switches. Unmounting these
         components on every switch would discard the chat history and
-        cancel any active conversation, which was the prior behavior.
+        cancel any active conversation, which was the prior behavior. This is
+        also load-bearing for the relocated ConnectionHeader: it keeps computing
+        its verdict while the MCP tab is hidden (no discovery change).
       */}
       <div class="flex-1 min-h-0">
         <div class={`h-full ${activeTab === 'chat' ? '' : 'hidden'}`}>
@@ -186,6 +275,12 @@ const App = () => {
         </div>
         <div class={`h-full ${activeTab === 'tools' ? '' : 'hidden'}`}>
           <ToolsTab />
+        </div>
+        <div
+          class={`h-full overflow-y-auto ${activeTab === 'mcp' ? '' : 'hidden'}`}
+          data-testid="mcp-panel"
+        >
+          <McpTab needsSetup={needsSetup} onSetupComplete={handleSetupComplete} />
         </div>
         <div class={`h-full overflow-y-auto ${activeTab === 'settings' ? '' : 'hidden'}`}>
           <SettingsTab />

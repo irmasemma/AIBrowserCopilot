@@ -70,7 +70,7 @@ describe('deriveHeader — verdict adapter', () => {
   });
 
   // ── Flapping — bound to bridge supersede RATE, not reconnectsThisSession ────
-  it('flapping from /api/state supersededRecentCount ≥ 3 → "Connection keeps dropping", Restart bridge', () => {
+  it('flapping from /api/state supersededRecentCount ≥ 3 → "Connection keeps dropping", re-run setup primary', () => {
     const h = deriveHeader({
       ...baseArgs,
       state: 'connected',
@@ -79,8 +79,10 @@ describe('deriveHeader — verdict adapter', () => {
     expect(h.title).toBe('Connection keeps dropping');
     expect(h.severity).toBe('error');
     expect(h.badge).toBe('flapping');
-    expect(h.buttons[0]?.id).toBe('restart_service');
-    expect(h.buttons[0]?.label).toBe('Restart bridge');
+    // Primary recovery is now re-running setup (npx re-registers the extension
+    // with the bridge); restart bridge remains available as a secondary action.
+    expect(h.buttons[0]?.id).toBe('copy_install_command');
+    expect(h.buttons.map((b) => b.id)).toContain('restart_service');
   });
 
   it('flapping from a request failing with browser_socket_replaced_mid_request', () => {

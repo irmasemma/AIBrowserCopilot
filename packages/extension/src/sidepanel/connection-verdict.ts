@@ -293,11 +293,16 @@ export function deriveVerdict(args: DeriveVerdictArgs): Verdict {
       kind: 'flapping',
       title: 'Connection keeps dropping',
       subtitle:
-        'AgentHub reconnects to your browser, but each link gets replaced before a command can finish, so tools aren’t working right now. A restart usually clears this up.',
+        'AgentHub keeps reconnecting to your browser, but each link is replaced before a command can finish, so tools aren’t working right now. Re-running AgentHub setup usually fixes this — copy the setup command and run it in a terminal. Restarting the bridge can also help.',
       severity: 'error',
       badge: 'flapping',
+      // Re-running setup (npx) is the primary recovery: it re-registers this
+      // extension with the bridge (the common cause is the extension's origin
+      // missing from the bridge allowlist, which a bare "restart" does NOT fix).
+      // Restart/reload stay as secondary fallbacks.
       actions: [
-        { id: 'restart_service', label: 'Restart bridge', variant: 'primary' },
+        { id: 'copy_install_command', label: 'Copy setup command', variant: 'primary' },
+        { id: 'restart_service', label: 'Restart bridge', variant: 'secondary' },
         { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
       ],
       autoOpenDiagnostics: true,

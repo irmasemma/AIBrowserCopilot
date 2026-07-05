@@ -78,11 +78,16 @@ describe('deriveVerdict — Working requires a tool-path fact, never a pong', ()
 });
 
 describe('deriveVerdict — Flapping from bridge supersede RATE (not a lifetime count)', () => {
-  it(`supersededRecentCount ≥ ${FLAPPING_SUPERSEDE_THRESHOLD} → flapping, Restart bridge`, () => {
+  it(`supersededRecentCount ≥ ${FLAPPING_SUPERSEDE_THRESHOLD} → flapping, re-run setup primary + restart offered`, () => {
     const v = deriveVerdict(args({ api: { ...liveFacts, supersededRecentCount: FLAPPING_SUPERSEDE_THRESHOLD } }));
     expect(v.kind).toBe('flapping');
     expect(v.title).toBe('Connection keeps dropping');
-    expect(v.actions[0]?.label).toBe('Restart bridge');
+    // Primary action is now "copy setup command" (re-run npx) — the reliable
+    // fix for the origin-not-in-allowlist flapping loop; restart bridge stays
+    // as a secondary fallback so the recovery paths aren't lost.
+    expect(v.actions[0]?.id).toBe('copy_install_command');
+    expect(v.actions.map((a) => a.id)).toContain('restart_service');
+    expect(v.subtitle).toMatch(/setup/i);
   });
 
   it('a high CUMULATIVE supersededCount but FLAT recent rate + recent success → working, NOT flapping', () => {

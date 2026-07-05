@@ -159,14 +159,22 @@ export const ConnectionHeader: FunctionalComponent = () => {
           setFlash('Reloading extension…');
           setTimeout(() => chrome.runtime.reload(), 800);
           break;
-        case 'copy_install_command':
+        case 'copy_install_command': {
+          // Include the live extension ID so re-running setup re-registers THIS
+          // extension with the bridge (the fix for the "origin not in allowlist"
+          // flapping loop — a bare update without the id can't add the origin).
+          const extId = chrome.runtime?.id ?? '';
+          const installCommand = extId
+            ? `${INSTALL_COMMAND} --extension-id ${extId}`
+            : INSTALL_COMMAND;
           try {
-            await navigator.clipboard.writeText(INSTALL_COMMAND);
-            setFlash('Install command copied to clipboard');
+            await navigator.clipboard.writeText(installCommand);
+            setFlash('Setup command copied — paste it into a terminal and run it');
           } catch {
-            setFlash(`Copy failed — run: ${INSTALL_COMMAND}`);
+            setFlash(`Copy failed — run: ${installCommand}`);
           }
           break;
+        }
       }
     } finally {
       setTimeout(() => setBusyButton(null), 600);
