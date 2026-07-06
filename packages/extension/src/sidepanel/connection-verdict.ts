@@ -50,6 +50,15 @@ export interface ApiStateFacts {
   supersededRecentCount: number;
   /** Close code of the most recent relay close for OUR browserId (4002 = superseded). */
   lastRelayCloseCode: number | null;
+  /** Idempotent-tie (same-life reconnect) recurrence for OUR browserId within the
+   *  bridge's rolling ~60s window — a SEPARATE signal from `supersededRecentCount`
+   *  (docs/rca-2026-07-06-same-life-reconnect-storm.md §4 Phase 3). A same-life
+   *  reconnect storm looks "live" to every OTHER signal: liveness stays 'live'
+   *  (inbound frames keep arriving) and supersededRecentCount stays 0 (idempotent
+   *  ties are deliberately excluded — they aren't a different-identity replace).
+   *  Without this field the storm is invisible and the verdict would read a false
+   *  "Working" straight through it — the exact incident this field exists to catch. */
+  idempotentTieRecentCount: number;
   /** Did a real request for OUR browserId succeed within the recent window? */
   hadRecentSuccess: boolean;
   /** Did a real request for OUR browserId fail/timeout within the recent window? */
@@ -62,6 +71,7 @@ export type VerdictKind =
   | 'working' // proven by a real tool-path fact
   | 'untested' // connected, but no tool call has proven it yet this session
   | 'flapping' // the relay keeps getting replaced before a command can finish
+  | 'reconnect_storm' // same-life reconnect loop — invisible to Flapping by design
   | 'recovering' // 4002-terminal'd, waiting for the winner to die / SW to cycle
   | 'stale' // a previously-good connection went quiet
   | 'degraded' // heartbeats missing
@@ -136,6 +146,15 @@ export const FLAPPING_SUPERSEDE_THRESHOLD = 3;
 /** Secondary corroborator only (design §7.2.2): a single SW seeing this many
  *  reconnects also counts as flapping even if /api/state is briefly unavailable. */
 export const FLAPPING_RECONNECTS_THRESHOLD = 3;
+/** Reconnect-storm threshold (docs/rca-2026-07-06-same-life-reconnect-storm.md
+ *  §4 Phase 3): this many idempotent (same-life) ties for our browserId within
+ *  the bridge's rolling ~60s window means the SW is stuck reopening its own
+ *  socket every few seconds. Lower bar than Flapping's supersede threshold is
+ *  NOT appropriate here — idempotent ties are individually benign (Phase 2
+ *  preserves in-flight tool calls through them) — so this is set a little
+ *  looser than FLAPPING_SUPERSEDE_THRESHOLD to avoid flagging a couple of
+ *  ordinary transport blips as a "storm". */
+export const RECONNECT_STORM_TIE_THRESHOLD = 5;
 
 const INSTALL_COMMAND_ACTION: VerdictAction = {
   id: 'copy_install_command',
@@ -241,6 +260,9 @@ export function buildUpdateCommand(extId: string | null | undefined, mismatch: b
  *   1. Recovering (awaiting_sw_recovery) — must NEVER read "Connected".
  *   2. Flapping — bound to the bridge replace-rate; the storm is invisible to a
  *      single SW, so /api/state.supersededCount is primary.
+ *   2b. Reconnecting rapidly — same-life idempotent-tie storm rate, a SEPARATE
+ *      signal from Flapping's supersede rate (the two storm shapes are mutually
+ *      exclusive by identity, but both must be caught before a false "Working").
  *   3. Hard named failures (no bridge / protocol dead / setup) — actionable.
  *   4. Version mismatch.
  *   5. Stale — a previously-good link gone quiet.
@@ -304,6 +326,33 @@ export function deriveVerdict(args: DeriveVerdictArgs): Verdict {
         { id: 'copy_install_command', label: 'Copy setup command', variant: 'primary' },
         { id: 'restart_service', label: 'Restart bridge', variant: 'secondary' },
         { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
+      ],
+      autoOpenDiagnostics: true,
+    };
+  }
+
+  // ── 2b. Reconnecting rapidly — same-life idempotent-tie storm ───────────────
+  // Checked BEFORE "connected → Working" (step 7) is even reached: a same-life
+  // reconnect storm (docs/rca-2026-07-06-same-life-reconnect-storm.md) makes
+  // liveness stay 'live' (inbound frames keep arriving every few seconds) and
+  // supersededRecentCount stay 0 (idempotent ties are deliberately excluded
+  // from that signal), so without this check the panel would read a false
+  // "Working" straight through an active storm — the exact invisible-failure
+  // shape the incident proved. Own signal, own precedence tier: it must not be
+  // masked by (or double-count into) Flapping.
+  const reconnectingRapidly =
+    api !== null && api.idempotentTieRecentCount >= RECONNECT_STORM_TIE_THRESHOLD;
+  if (reconnectingRapidly) {
+    return {
+      kind: 'reconnect_storm',
+      title: 'Reconnecting rapidly',
+      subtitle:
+        'Your browser keeps reopening the same connection every few seconds. Tool calls may be failing while this continues — reloading the extension usually stops it.',
+      severity: 'warn',
+      badge: 'degraded',
+      actions: [
+        { id: 'reload_extension', label: 'Reload extension', variant: 'primary' },
+        { id: 'restart_service', label: 'Restart bridge', variant: 'secondary' },
       ],
       autoOpenDiagnostics: true,
     };
@@ -557,6 +606,7 @@ export function extractApiStateFacts(
     supersededCount: mine.supersededCount ?? 0,
     supersededRecentCount: mine.supersededRecentCount ?? 0,
     lastRelayCloseCode: mine.lastRelayCloseCode ?? null,
+    idempotentTieRecentCount: mine.idempotentTieRecentCount ?? 0,
     hadRecentSuccess,
     hadRecentFailure,
     hadRecentReplacedMidRequest,
@@ -573,6 +623,7 @@ export interface ApiStatePayload {
     supersededCount?: number;
     supersededRecentCount?: number;
     lastRelayCloseCode?: number | null;
+    idempotentTieRecentCount?: number;
   }>;
   recentActivity?: {
     requests?: Array<{

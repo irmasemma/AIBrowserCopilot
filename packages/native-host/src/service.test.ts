@@ -12,6 +12,8 @@ import {
   extractRawParam,
   supersededRecentCount,
   pruneSupersedeTimes,
+  sendToolRequest,
+  idempotentTieRecentCount,
   type FanOutResult,
   type FanOutError,
 } from './service.js';
@@ -334,6 +336,183 @@ describe('collision total order (gen, lifeUuid) — design §7.1', () => {
     expect(code).toBe(4002);
     expect(hiClosed).toBe(false);
     hi.close(); wss.close();
+  }, 10_000);
+});
+
+describe('Phase 2 — idempotent-tie reconnects must not kill in-flight tool calls (docs/rca-2026-07-06-same-life-reconnect-storm.md §4)', () => {
+  function makeServer(): { wss: WebSocketServer; port: number } {
+    const port = 20400 + Math.floor(Math.random() * 400);
+    const wss = new WebSocketServer({ host: '127.0.0.1', port });
+    wss.on('connection', (ws, req) => {
+      const qi = (req.url ?? '').indexOf('?');
+      const p = qi !== -1 ? new URLSearchParams(req.url!.slice(qi + 1)) : new URLSearchParams();
+      const genRaw = p.get('gen');
+      const gen = genRaw !== null && /^\d+$/.test(genRaw) ? Number(genRaw) : null;
+      handleExtension(
+        ws as unknown as Parameters<typeof handleExtension>[0],
+        p.get('browserId') || 'default',
+        p.get('role') === 'relay',
+        gen,
+        extractRawParam(req.url, 'lifeUuid'),
+      );
+    });
+    return { wss, port };
+  }
+  function waitFor<T>(p: Promise<T>, ms: number): Promise<T> {
+    return Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+  }
+  function onceServerInfo(ws: WebSocket): Promise<void> {
+    return new Promise((resolve) => {
+      ws.on('message', (d) => { try { if (JSON.parse(String(d)).type === 'server_info') resolve(); } catch { /* */ } });
+    });
+  }
+  // Relay client that auto-answers server_ping (proves liveness) but leaves
+  // tool_request handling to the individual test so it can control exactly
+  // when — or whether — a reply is sent.
+  function relay(port: number, id: string, gen: number, lifeUuid: string): WebSocket {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}?browserId=${id}&role=relay&gen=${gen}&lifeUuid=${lifeUuid}`);
+    ws.on('message', (d) => {
+      try {
+        const msg = JSON.parse(String(d));
+        if (msg.type === 'server_ping') ws.send(JSON.stringify({ type: 'server_pong', timestamp: Date.now() }));
+      } catch { /* ignore */ }
+    });
+    return ws;
+  }
+
+  it('pending request survives a same-identity reconnect: a LATE tool_response from the OLD socket still resolves', async () => {
+    const { wss, port } = makeServer();
+    const id = 'chrome:phase2-survive';
+    const a = relay(port, id, 900, 'life-a');
+    await waitFor(onceServerInfo(a), 3000);
+
+    // In-flight tool_request, routed to socket A (the only one connected).
+    const resultPromise = sendToolRequest('client-1', 1, 'list_tabs', {}, id);
+
+    let capturedId: string | undefined;
+    const gotToolRequest = new Promise<void>((resolve) => {
+      a.on('message', (d) => {
+        try {
+          const msg = JSON.parse(String(d));
+          if (msg.type === 'tool_request' && !capturedId) { capturedId = msg.id; resolve(); }
+        } catch { /* ignore */ }
+      });
+    });
+    await waitFor(gotToolRequest, 3000);
+
+    // Same-identity reconnect (idempotent tie) lands WHILE the request is
+    // still in flight on A. Must NOT terminate A or reject the pending request.
+    const b = relay(port, id, 900, 'life-a');
+    await waitFor(onceServerInfo(b), 4000);
+
+    // A is superseded but still open (grace window) with its handlers intact.
+    expect(a.readyState).toBe(WebSocket.OPEN);
+    a.send(JSON.stringify({ id: capturedId, type: 'tool_response', result: { content: [{ type: 'text', text: '[]' }] } }));
+
+    const result = (await waitFor(resultPromise, 3000)) as { type: string };
+    expect(result.type).toBe('tool_response');
+
+    a.close(); b.close(); wss.close();
+  }, 10_000);
+
+  it('new requests after a same-identity reconnect route to the NEW socket, never the graced old one', async () => {
+    const { wss, port } = makeServer();
+    const id = 'chrome:phase2-route-new';
+    const a = relay(port, id, 901, 'life-b');
+    await waitFor(onceServerInfo(a), 3000);
+
+    const b = relay(port, id, 901, 'life-b');
+    await waitFor(onceServerInfo(b), 4000);
+
+    let aSawToolRequest = false;
+    a.on('message', (d) => { try { if (JSON.parse(String(d)).type === 'tool_request') aSawToolRequest = true; } catch { /* ignore */ } });
+    const bGotIt = new Promise<void>((resolve) => {
+      b.on('message', (d) => {
+        try {
+          const msg = JSON.parse(String(d));
+          if (msg.type === 'tool_request') {
+            b.send(JSON.stringify({ id: msg.id, type: 'tool_response', result: { content: [] } }));
+            resolve();
+          }
+        } catch { /* ignore */ }
+      });
+    });
+
+    const resultPromise = sendToolRequest('client-2', 2, 'list_tabs', {}, id);
+    await waitFor(bGotIt, 3000);
+    await waitFor(resultPromise, 3000);
+
+    expect(aSawToolRequest).toBe(false);
+
+    a.close(); b.close(); wss.close();
+  }, 10_000);
+
+  it('INVERSE: a genuine different-identity supersede STILL terminates the old socket and rejects its pending request', async () => {
+    const { wss, port } = makeServer();
+    const id = 'chrome:phase2-genuine-supersede';
+    const lo = relay(port, id, 100, 'life-lo');
+    await waitFor(onceServerInfo(lo), 3000);
+
+    const resultPromise = sendToolRequest('client-3', 3, 'list_tabs', {}, id);
+    // Attach a handler to the rejection IMMEDIATELY (synchronously, in the
+    // same tick the promise is created) — indexBrowser rejects it as soon as
+    // the genuine supersede below lands, which can race ahead of a handler
+    // attached later via `expect(...).rejects` and trip Node's unhandled-
+    // rejection detector even though the assertion itself would pass.
+    const caughtRejection = resultPromise.catch((e: unknown) => e);
+    let loClosed = false; lo.on('close', () => { loClosed = true; });
+
+    // Strictly-higher identity arrives — a GENUINE supersede, not a tie. That
+    // SW life is gone and can never answer a request it never saw, so the
+    // old terminate-and-reject behavior must still apply here.
+    const hi = relay(port, id, 200, 'life-hi');
+    await waitFor(onceServerInfo(hi), 4000);
+
+    const err = await waitFor(caughtRejection, 3000);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe('browser_socket_replaced_mid_request');
+    await waitFor(new Promise<void>((res) => { if (loClosed) res(); else lo.on('close', () => res()); }), 2000);
+    expect(loClosed).toBe(true);
+
+    hi.close(); wss.close();
+  }, 10_000);
+
+  it('no socket leak after 50 rapid same-identity reconnects (bounded open-socket count)', async () => {
+    const { wss, port } = makeServer();
+    const id = 'chrome:phase2-no-leak';
+    const created: WebSocket[] = [];
+    for (let i = 0; i < 50; i++) {
+      const next = relay(port, id, 950, 'life-storm');
+      created.push(next);
+      await waitFor(onceServerInfo(next), 3000);
+    }
+    // Let any pending close handshakes from the rapid regrace-closes settle.
+    await new Promise((r) => setTimeout(r, 300));
+    const openCount = created.filter((w) => w.readyState === WebSocket.OPEN).length;
+    // Only the current incumbent (the last connection) should remain open —
+    // every earlier one was grace-closed (immediately on regrace, or at the
+    // 2.5s timeout). Never accumulates toward 50.
+    expect(openCount).toBeLessThanOrEqual(2);
+
+    created.forEach((w) => { try { w.close(); } catch { /* ignore */ } });
+    wss.close();
+  }, 30_000);
+
+  it('idempotent-tie RATE is tracked separately from the supersede RATE and decays like it', async () => {
+    const { wss, port } = makeServer();
+    const id = 'chrome:phase2-tie-rate';
+    expect(idempotentTieRecentCount(id)).toBe(0);
+
+    const a = relay(port, id, 960, 'life-rate');
+    await waitFor(onceServerInfo(a), 3000);
+    const b = relay(port, id, 960, 'life-rate');
+    await waitFor(onceServerInfo(b), 4000);
+
+    expect(idempotentTieRecentCount(id)).toBeGreaterThanOrEqual(1);
+    // Idempotent ties are NOT churn — must not pollute the different signal.
+    expect(supersededRecentCount(id)).toBe(0);
+
+    b.close(); wss.close();
   }, 10_000);
 });
 

@@ -5,6 +5,7 @@ import {
   buildUpdateCommand,
   extractApiStateFacts,
   FLAPPING_SUPERSEDE_THRESHOLD,
+  RECONNECT_STORM_TIE_THRESHOLD,
   type ApiStateFacts,
   type DeriveVerdictArgs,
 } from './connection-verdict';
@@ -17,6 +18,7 @@ const liveFacts: ApiStateFacts = {
   supersededCount: 0,
   supersededRecentCount: 0,
   lastRelayCloseCode: null,
+  idempotentTieRecentCount: 0,
   hadRecentSuccess: false,
   hadRecentFailure: false,
   hadRecentReplacedMidRequest: false,
@@ -117,6 +119,47 @@ describe('deriveVerdict — Flapping from bridge supersede RATE (not a lifetime 
     expect(
       deriveVerdict(args({ api: { ...liveFacts, hadRecentSuccess: true }, ctx: { reconnectsThisSession: 9 } })).kind,
     ).toBe('working');
+  });
+});
+
+describe('deriveVerdict — Reconnecting rapidly (same-life idempotent-tie storm, docs/rca-2026-07-06-same-life-reconnect-storm.md §4)', () => {
+  it(`idempotentTieRecentCount ≥ ${RECONNECT_STORM_TIE_THRESHOLD} → reconnect_storm, even though liveness is 'live' and supersededRecentCount is flat`, () => {
+    // THE regression this field exists to catch: a same-life reconnect storm
+    // looks healthy to every OTHER signal (inbound frames keep arriving, so
+    // liveness stays 'live'; idempotent ties are excluded from the supersede
+    // rate by design). Without this branch, `liveFacts` alone already proves
+    // "working" below — proving the storm signal must be checked BEFORE that.
+    const v = deriveVerdict(args({
+      api: { ...liveFacts, idempotentTieRecentCount: RECONNECT_STORM_TIE_THRESHOLD },
+    }));
+    expect(v.kind).toBe('reconnect_storm');
+    expect(v.title).toBe('Reconnecting rapidly');
+    expect(v.badge).not.toBe('working');
+  });
+
+  it('below the threshold → does not trip reconnect_storm (an occasional benign tie is not a storm)', () => {
+    const v = deriveVerdict(args({
+      api: { ...liveFacts, idempotentTieRecentCount: RECONNECT_STORM_TIE_THRESHOLD - 1 },
+    }));
+    expect(v.kind).not.toBe('reconnect_storm');
+    expect(v.kind).toBe('working');
+  });
+
+  it('with liveFacts alone (idempotentTieRecentCount 0) → working, NOT reconnect_storm (sanity/inverse)', () => {
+    const v = deriveVerdict(args({ api: liveFacts }));
+    expect(v.kind).toBe('working');
+  });
+
+  it('api === null → reconnect_storm cannot fire (no bridge facts to source the rate from)', () => {
+    const v = deriveVerdict(args({ api: null }));
+    expect(v.kind).not.toBe('reconnect_storm');
+  });
+
+  it('a real different-identity Flapping storm still wins its own verdict even if idempotent ties are also present', () => {
+    const v = deriveVerdict(args({
+      api: { ...liveFacts, supersededRecentCount: FLAPPING_SUPERSEDE_THRESHOLD, idempotentTieRecentCount: RECONNECT_STORM_TIE_THRESHOLD },
+    }));
+    expect(v.kind).toBe('flapping');
   });
 });
 
@@ -329,6 +372,18 @@ describe('extractApiStateFacts', () => {
     expect(facts?.supersededCount).toBe(5);
     expect(facts?.supersededRecentCount).toBe(2);
     expect(facts?.liveness).toBe('stale');
+  });
+
+  it('maps idempotentTieRecentCount for our browserId, defaulting to 0 when absent', () => {
+    const withCount = extractApiStateFacts(
+      mkPayload({ browsersExtra: { idempotentTieRecentCount: 7 } }),
+      'chrome:me',
+      now,
+    );
+    expect(withCount?.idempotentTieRecentCount).toBe(7);
+
+    const withoutField = extractApiStateFacts(mkPayload(), 'chrome:me', now);
+    expect(withoutField?.idempotentTieRecentCount).toBe(0);
   });
 
   it('detects recent success + the replaced-mid-request signature', () => {

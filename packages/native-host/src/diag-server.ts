@@ -209,6 +209,15 @@ export interface StateSource {
     /** Close code of the most recent relay close for this browserId (e.g. 4002
      *  = superseded/rejected), or null if none recorded. */
     lastRelayCloseCode: number | null;
+    /** Idempotent-tie (same-life reconnect) recurrence within the rolling ~60s
+     *  window — a SEPARATE signal from `supersededRecentCount` (docs/rca-2026-
+     *  07-06-same-life-reconnect-storm.md §4 Phase 3). A same-life reconnect
+     *  storm deliberately does NOT bump supersededRecentCount (it isn't a
+     *  different-identity replace) and liveness stays 'live' (inbound frames
+     *  keep arriving), so without this field the storm is invisible to every
+     *  other signal — the UI would read a false "Working" straight through an
+     *  active storm. Decays to 0 once the reconnects stop. */
+    idempotentTieRecentCount: number;
   }>;
   mcpClients: Array<{
     clientId: string;

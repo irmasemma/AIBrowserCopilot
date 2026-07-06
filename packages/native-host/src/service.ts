@@ -202,13 +202,27 @@ function indexBrowser(browserId: string, ws: WebSocket, idempotent = false): voi
   // life reopened its own socket after a transport blip (§7.1.1). That is NOT
   // churn — we must not bump the supersede/Flapping signal nor emit a scary
   // `replaced` warn for a benign reconnect (the caller already logged
-  // relay_reconnect_idempotent). We DO still terminate the old socket and fail
-  // its in-flight requests, because that socket is genuinely gone and the new
-  // life can't complete requests it never saw.
+  // relay_reconnect_idempotent).
+  //
+  // Phase 2 fix (docs/rca-2026-07-06-same-life-reconnect-storm.md §4): an
+  // idempotent tie must NOT terminate the old socket or reject in-flight
+  // requests. The old socket isn't dead — it's the SAME life, and a pending
+  // tool response can still land on it (pendingRequests resolves by request
+  // id off whichever socket's handler sees it — see the ws.on('message')
+  // wiring below). Re-index to the new socket immediately so NEW requests
+  // route correctly, then grace-close the old one after a short bounded
+  // window instead of an instant terminate.
+  //
+  // A genuine (different-identity) supersede is different: that SW life is
+  // truly gone and can never answer requests it never saw, so we keep the
+  // terminate-and-reject behavior for that case (the inverse this fix must
+  // preserve).
   const existing = browserSockets.get(browserId);
   if (existing && existing !== ws) {
     if (idempotent) {
       recordRelayClose(browserId, 1006);
+      bumpIdempotentTieCount(browserId);
+      scheduleIdempotentGraceClose(browserId, existing);
     } else {
       // §7.2.3: count the replace toward the per-browser churn signal and stamp
       // the close (the terminated socket is superseded by a new relay).
@@ -219,15 +233,19 @@ function indexBrowser(browserId: string, ws: WebSocket, idempotent = false): voi
         reason: 'new_socket_for_same_browserid',
         hint: 'Old socket was orphaned (likely Chrome MV3 SW eviction). Terminating it now.',
       });
-    }
-    try { existing.terminate(); } catch { /* noop */ }
-    // Also clear any pending requests routed to the old socket — they
-    // would never have completed (the new SW life knows nothing about them).
-    for (const [reqId, req] of pendingRequests) {
-      if (req.browserId === browserId) {
-        clearTimeout(req.timer);
-        pendingRequests.delete(reqId);
-        try { req.reject(new Error('browser_socket_replaced_mid_request')); } catch { /* ignore */ }
+      // The whole identity this browserId pointed to is gone — any socket
+      // still lingering in its idempotent-tie grace window belongs to that
+      // same dead life. Drop it now instead of letting it sit open.
+      dropGracedSocket(browserId, 'superseded_by_higher_identity');
+      try { existing.terminate(); } catch { /* noop */ }
+      // Also clear any pending requests routed to the old browserId — they
+      // would never have completed (the new SW life knows nothing about them).
+      for (const [reqId, req] of pendingRequests) {
+        if (req.browserId === browserId) {
+          clearTimeout(req.timer);
+          pendingRequests.delete(reqId);
+          try { req.reject(new Error('browser_socket_replaced_mid_request')); } catch { /* ignore */ }
+        }
       }
     }
   }
@@ -339,6 +357,11 @@ export function extractRawParam(url: string | undefined, name: string): string {
 // "Related symptom: connection drops during agent runs".
 const SERVER_PING_INTERVAL_MS = 20_000;
 
+// Phase 3 observability threshold (docs/rca-2026-07-06-same-life-reconnect-storm.md):
+// a browser socket that closes faster than this after connecting is flagged
+// as a "flash close" — the signature of a self-sustaining reconnect storm.
+const FLASH_CLOSE_THRESHOLD_MS = 250;
+
 // Health probes from the native-host-helper use a synthetic browserId
 // `helper-probe`. Treat them differently from real extension connections
 // so they don't pollute the (much smaller) real-browser event stream.
@@ -413,6 +436,105 @@ export function supersededRecentCount(browserId: string): number {
 }
 function recordRelayClose(browserId: string, code: number): void {
   browserLastRelayClose.set(browserId, { at: Date.now(), code });
+}
+
+// ── Phase 2 fix (docs/rca-2026-07-06-same-life-reconnect-storm.md §4) ──────
+// Idempotent-tie reconnects (same SW life reopening its own socket) must NOT
+// kill in-flight tool requests. `pendingRequests` resolves by request id off
+// WHICHEVER socket's message handler sees the matching id first (see the
+// `ws.on('message', ...)` wiring in handleExtension's accept()) — it is not
+// keyed to socket identity. So as long as the OLD socket stays open and wired,
+// a late tool_response it delivers still reaches the MCP caller. Instead of
+// `.terminate()`ing the old socket immediately (the old destructive behavior,
+// kept ONLY for genuine different-identity supersedes below), we re-index to
+// the new socket immediately (new requests route correctly) and give the old
+// one a short bounded grace window to finish delivering any in-flight reply.
+//
+// Bound: at most ONE graced socket per browserId at a time. A reconnect that
+// lands while a previous grace is still pending immediately closes that
+// older graced socket — this is what keeps 50 rapid same-identity reconnects
+// from accumulating 50 open sockets (never more than incumbent + 1 graced).
+const gracedSockets = new Map<string, { ws: WebSocket; timer: ReturnType<typeof setTimeout> }>();
+const IDEMPOTENT_TIE_GRACE_MS = 2_500;
+
+function closeGracedSocket(ws: WebSocket, reason: string): void {
+  try {
+    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+      ws.close(1000, reason);
+    }
+  } catch { /* noop */ }
+}
+
+/**
+ * Retire `ws` (the just-superseded old socket for `browserId`) with a short
+ * grace period instead of an instant terminate. Never leaks a timer: the
+ * timer either fires (closing the socket) or is cleared — by a subsequent
+ * regrace (immediate close, bound enforcement) or by the socket closing on
+ * its own first (the `once('close', ...)` below). Never double-closes: both
+ * the natural-close listener and the timer check `gracedSockets` ownership
+ * before acting, and `closeGracedSocket` itself checks readyState.
+ */
+function scheduleIdempotentGraceClose(browserId: string, ws: WebSocket): void {
+  const prior = gracedSockets.get(browserId);
+  if (prior) {
+    clearTimeout(prior.timer);
+    gracedSockets.delete(browserId);
+    if (prior.ws !== ws) closeGracedSocket(prior.ws, 'superseded_idempotent_regrace');
+  }
+
+  const timer = setTimeout(() => {
+    gracedSockets.delete(browserId);
+    closeGracedSocket(ws, 'superseded_idempotent');
+    bridgeLog().info('bridge.browser.idempotent_grace_closed', {
+      browserId,
+      reason: 'grace_window_expired',
+    });
+  }, IDEMPOTENT_TIE_GRACE_MS);
+  gracedSockets.set(browserId, { ws, timer });
+
+  ws.once('close', () => {
+    const g = gracedSockets.get(browserId);
+    if (g && g.ws === ws) {
+      clearTimeout(g.timer);
+      gracedSockets.delete(browserId);
+    }
+  });
+}
+
+/** Immediately drop any graced socket for `browserId` — used when a GENUINE
+ *  (different-identity) supersede arrives: that identity's whole life is
+ *  gone, so a still-open graced socket from an earlier idempotent tie of the
+ *  SAME (now-superseded) life must not linger either. */
+function dropGracedSocket(browserId: string, reason: string): void {
+  const g = gracedSockets.get(browserId);
+  if (!g) return;
+  clearTimeout(g.timer);
+  gracedSockets.delete(browserId);
+  closeGracedSocket(g.ws, reason);
+}
+
+// ── Idempotent-tie RECURRENCE RATE (Phase 3 observability) ─────────────────
+// Separate signal from `supersededRecentCount` (which deliberately EXCLUDES
+// idempotent ties — they are not a different-identity replace). A same-life
+// reconnect storm looks "live" to every other signal (liveness stays 'live',
+// supersededRecentCount stays 0) — this is the dedicated rate signal so the
+// UI can say "Reconnecting rapidly" instead of a false "Working".
+const browserIdempotentTieTimes = new Map<string, number[]>();
+
+function bumpIdempotentTieCount(browserId: string): void {
+  const now = Date.now();
+  const times = browserIdempotentTieTimes.get(browserId) ?? [];
+  times.push(now);
+  pruneSupersedeTimes(times, now);
+  browserIdempotentTieTimes.set(browserId, times);
+}
+
+// Exported for unit tests + /api/state.
+export function idempotentTieRecentCount(browserId: string): number {
+  const times = browserIdempotentTieTimes.get(browserId);
+  if (!times) return 0;
+  pruneSupersedeTimes(times, Date.now());
+  return times.length;
 }
 
 /**
@@ -616,6 +738,25 @@ export function handleExtension(
 
   ws.on('close', (code: number) => {
     clearInterval(serverPingTimer);
+    // Phase 3 observability (docs/rca-2026-07-06-same-life-reconnect-storm.md):
+    // flag a socket that lived under 250ms. Deliberately OUTSIDE the
+    // current-incumbent guard below — the whole storm signature is sockets
+    // that get superseded (by an idempotent tie or a genuine supersede)
+    // within milliseconds of connecting, and a superseded socket fails the
+    // `browserSockets.get(browserId) === ws` check by design (it's already
+    // been overwritten). If we only checked inside that guard we'd never see
+    // the exact pattern this event exists to catch.
+    if (!isProbe) {
+      const lifetimeMs = Date.now() - connectedAt;
+      if (lifetimeMs < FLASH_CLOSE_THRESHOLD_MS) {
+        bridgeLog().warn('bridge.browser.flash_close', {
+          browserId,
+          lifetimeMs,
+          code,
+          hint: 'This socket closed almost immediately after connecting. If this repeats every few seconds, the extension is likely stuck in a same-life reconnect storm — see docs/rca-2026-07-06-same-life-reconnect-storm.md.',
+        });
+      }
+    }
     if (browserSockets.get(browserId) === ws) {
       if (!isProbe) {
         // Record the close for /api/state observability + the extension's
@@ -855,7 +996,10 @@ function resolveSocket(target: string): WebSocket | null {
 }
 
 // ── Send tool request to browser extension ────────────────────────────────
-async function sendToolRequest(
+// Exported for tests only (Phase 2 pending-request-survives-reconnect specs
+// need to drive a real tool_request/tool_response round-trip against the
+// real WS + indexBrowser collision logic — no mocking, per repo law).
+export async function sendToolRequest(
   clientId: string,
   originalId: string | number | null,
   tool: string,
@@ -1749,6 +1893,7 @@ export function startServer(port: number): void {
               supersededRecentCount: supersededRecentCount(browserId),
               lastRelayClosedAt: lastClose ? new Date(lastClose.at).toISOString() : null,
               lastRelayCloseCode: lastClose ? lastClose.code : null,
+              idempotentTieRecentCount: idempotentTieRecentCount(browserId),
             };
           }),
           mcpClients: Array.from(mcpClientRegistry.entries()).map(([clientId, info]) => ({

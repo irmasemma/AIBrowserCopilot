@@ -135,12 +135,47 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
   // total order regardless of the lock.
   let releaseRelayLock: (() => void) | null = null;
 
+  // ── Phase 3 observability: close-initiator (docs/rca-2026-07-06-same-life-
+  // reconnect-storm.md §4) ────────────────────────────────────────────────
+  // relay-client's `disconnect()` deliberately leaves onclose wired (the
+  // server_info-timeout and heartbeat-onDead callers rely on the REAL close
+  // event to drive recovery — see relay-client.ts). That means when THIS
+  // module calls `relay?.disconnect()`, the resulting `onClose` fires later,
+  // asynchronously, indistinguishable from a genuine remote close unless we
+  // record WHY we asked for it right before making the call. `discard()` is
+  // the opposite case — it nulls onclose BEFORE closing, so no `ext.ws.close`
+  // ever fires for it at all; that path is logged separately at the discard
+  // call site (`ext.relay.discarded`) in `teardownRelay()`.
+  //
+  // Cleared at the top of every `openRelay()` so a disconnect() whose close
+  // event never fires (some WebSocket implementations don't reliably fire
+  // close after error) can't mislabel an unrelated LATER close.
+  let pendingCloseInitiator: 'self_server_info_timeout' | 'self_heartbeat_dead' | null = null;
+
   const listeners = new Set<(ctx: ConnectionContext) => void>();
 
   function dispatch(event: ConnectionEvent): void {
     const prev = context;
     context = transition(context, event);
     if (context !== prev) {
+      // Phase 3 observability (docs/rca-2026-07-06-same-life-reconnect-
+      // storm.md §4): log the state-machine transition itself, gated on the
+      // STATE field actually changing — NOT on `context !== prev`, which is
+      // true on nearly every dispatch (transition() spreads a new object for
+      // e.g. every HEARTBEAT_OK while already 'connected', to bump
+      // lastVerifiedAt-adjacent fields). Logging unconditionally would flood
+      // extension.log with a line per heartbeat on a perfectly healthy
+      // connection; gating on `prev.state !== context.state` keeps this to
+      // genuine transitions only.
+      if (prev.state !== context.state) {
+        void logRecord({
+          event: 'ext.state.transition',
+          lvl: 'info',
+          trigger: event.type,
+          fromState: prev.state,
+          toState: context.state,
+        });
+      }
       persistContext(context);
       for (const listener of listeners) {
         listener(context);
@@ -185,7 +220,7 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
    * single re-entrancy-safe place that derives "close the old one" from
    * state (`relay !== null`) rather than a hand-rolled boolean flag.
    */
-  function teardownRelay(): void {
+  function teardownRelay(reason: string): void {
     heartbeat?.stop();
     heartbeat = null;
     backoffTimer.cancel();
@@ -202,13 +237,22 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
     // bridge would then route tool_request frames to a socket the extension
     // had forgotten about, causing silent 10s timeouts.
     if (relay !== null) {
+      // Phase 3 observability: discard() nulls onclose BEFORE closing, so no
+      // `ext.ws.close` will ever fire for this socket — log the
+      // self-initiated discard HERE, the only place it's knowable.
+      void logRecord({
+        event: 'ext.relay.discarded',
+        lvl: 'info',
+        initiator: 'self_discard',
+        reason,
+      });
       try { relay.discard(); } catch { /* ignore */ }
       relay = null;
     }
   }
 
-  function stopAll(): void {
-    teardownRelay();
+  function stopAll(reason = 'stop_all'): void {
+    teardownRelay(reason);
   }
 
   // Release the narrowly-held relay Web Lock, if any. Idempotent.
@@ -358,7 +402,10 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
         reason: 'reconnect_before_old_close',
       });
     }
-    teardownRelay();
+    // A fresh attempt starts: any not-yet-fired disconnect() from a PRIOR
+    // generation can no longer be trusted to label the next close we see.
+    pendingCloseInitiator = null;
+    teardownRelay('openRelay_replace');
 
     // Generation token (RCA 2026-07-06 §4 item 2): every callback below
     // captures `myGen` and no-ops if a NEWER openRelay() call has since
@@ -386,6 +433,7 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
           // disconnect() (not discard()) — this relies on the real onclose
           // firing to dispatch WS_CLOSE and scheduleBackoff(). Do not change
           // this call to discard()/nulled-handlers; see relay-client.ts.
+          pendingCloseInitiator = 'self_server_info_timeout';
           relay?.disconnect();
         }, SERVER_INFO_TIMEOUT_MS);
       },
@@ -479,11 +527,20 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
           serverInfoTimer = null;
         }
         stopLogFlushTimer();
+        // Phase 3 observability: distinguish who initiated this close. This
+        // callback only ever fires for `disconnect()` (initiator known via
+        // `pendingCloseInitiator`, set right before the call) or a genuine
+        // remote close (bridge, network, or the browser itself) — `discard()`
+        // never reaches here at all (handlers nulled before close; see
+        // `ext.relay.discarded` in teardownRelay()).
+        const initiator = pendingCloseInitiator ?? 'remote';
+        pendingCloseInitiator = null;
         void logRecord({
           event: 'ext.ws.close',
           lvl: code === 1000 ? 'info' : 'warn',
           code,
           reason,
+          initiator,
         });
         heartbeat?.stop();
         heartbeat = null;
@@ -627,6 +684,7 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
         // disconnect() (not discard()) — inverse-case guard: relies on the
         // real onclose to dispatch WS_CLOSE and scheduleBackoff(). See
         // relay-client.ts and the RCA's naive-fix warning.
+        pendingCloseInitiator = 'self_heartbeat_dead';
         relay?.disconnect();
       },
     });
@@ -647,12 +705,12 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
       // stopAll() already discards and nulls `relay` — nothing left to do
       // here (dead code removed per RCA 2026-07-06 §4 item 6: the old
       // `if (relay) { ...; r.disconnect(); }` below this could never run).
-      stopAll();
+      stopAll('manager_disconnect');
       dispatch({ type: 'DISCONNECT' });
     },
 
     retry(): void {
-      stopAll();
+      stopAll('manager_retry');
       dispatch({ type: 'CONNECT' });
       refreshUrl().then(() => openRelay());
     },
@@ -717,7 +775,7 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
           newGen: relayGenTimestamp,
           hint: 'No live relay for this browserId; minting fresh identity and reconnecting.',
         });
-        stopAll();
+        stopAll('reconcile_recovery_rechallenge');
         await refreshUrl();
         // refreshUrl() mutates `context.diagnosticReason` via setDiagnostic; TS
         // narrows the closure `context` to the literal from the outer `if` and
@@ -737,7 +795,7 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
       //   - connected/degraded/reconnecting: persisted state is lying after SW resume
       //   - disconnected: the sidepanel fast-poll case — server was down, came back,
       //     but context stayed 'disconnected' because no reconnect was ever dispatched
-      stopAll();
+      stopAll('reconcile_dead_relay');
       await refreshUrl();
 
       // If discovery found a live server (diagnostic === 'connecting'), try to reconnect

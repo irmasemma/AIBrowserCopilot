@@ -20,6 +20,7 @@ const liveFacts: ApiStateFacts = {
   supersededCount: 0,
   supersededRecentCount: 0,
   lastRelayCloseCode: null,
+  idempotentTieRecentCount: 0,
   hadRecentSuccess: false,
   hadRecentFailure: false,
   hadRecentReplacedMidRequest: false,
