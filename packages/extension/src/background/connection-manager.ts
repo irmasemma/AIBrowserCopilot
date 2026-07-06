@@ -103,6 +103,20 @@ function persistContext(ctx: ConnectionContext): void {
 export function createConnectionManager(options: ConnectionManagerOptions = {}): ConnectionManager {
   let context: ConnectionContext = createInitialContext();
   let relay: Relay | null = null;
+  // ── Relay callback generation token (RCA 2026-07-06 §4 item 2) ──────────
+  // Bumped every time openRelay() creates a NEW relay instance. Every
+  // callback wired to a given instance captures the generation value at
+  // creation time and no-ops if it is no longer current when the callback
+  // actually fires. This makes a stale callback structurally inert
+  // regardless of which close path produced it (discard vs disconnect vs a
+  // future bug reintroducing the same shape) — the callback bodies mutate
+  // SHARED state (`relay`, `context`, `heartbeat`) by closure, so a late
+  // callback from a superseded instance would otherwise stomp on the live
+  // one's state (e.g. nulling `relay` out from under the newer, live
+  // attempt). This is DISTINCT from the (gen,lifeUuid) relay IDENTITY above
+  // — that one is per-SW-life and sent to the bridge; this one is per
+  // openRelay() call and never leaves this module.
+  let relayCallGeneration = 0;
   let heartbeat: HeartbeatMonitor | null = null;
   const backoffTimer = createBackoffTimer();
   let serverInfoTimer: ReturnType<typeof setTimeout> | null = null;
@@ -160,7 +174,18 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
     }
   }
 
-  function stopAll(): void {
+  /**
+   * Tear down everything associated with the CURRENT relay attempt: heartbeat,
+   * backoff timer, log-flush timer, the relay Web Lock, the server_info
+   * timer, and the relay itself (via `discard()`, never `disconnect()` — see
+   * relay-client.ts). Shared by `stopAll()` and `openRelay()`'s pre-replace
+   * step so BOTH paths get the identical guarantee (RCA 2026-07-06 §4 item
+   * 5): no serverInfoTimer leak on the direct openRelay() path, no stray
+   * onclose from a socket this module has already forgotten about, and a
+   * single re-entrancy-safe place that derives "close the old one" from
+   * state (`relay !== null`) rather than a hand-rolled boolean flag.
+   */
+  function teardownRelay(): void {
     heartbeat?.stop();
     heartbeat = null;
     backoffTimer.cancel();
@@ -177,9 +202,13 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
     // bridge would then route tool_request frames to a socket the extension
     // had forgotten about, causing silent 10s timeouts.
     if (relay !== null) {
-      try { relay.disconnect(); } catch { /* ignore */ }
+      try { relay.discard(); } catch { /* ignore */ }
       relay = null;
     }
+  }
+
+  function stopAll(): void {
+    teardownRelay();
   }
 
   // Release the narrowly-held relay Web Lock, if any. Idempotent.
@@ -316,29 +345,37 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
   }
 
   function openRelay(): void {
-    // CRITICAL: close any pre-existing relay BEFORE creating a new one.
-    // Without this, retry()/reconcile()/backoff cycles silently leak WS
-    // connections — the old WS stays open at the OS level (bridge still
-    // sees it as "connected"), but the extension's JS has lost its reference
-    // so nothing handles incoming tool_request frames on it. Result: bridge
-    // sends tool_request to socket A, but extension is listening on socket B
-    // — tool times out at 10s with no log entry. Single root cause of the
-    // recurring "Chrome didn't answer within 10 seconds" issue.
-    if (relay !== null) {
+    // Unified teardown (RCA 2026-07-06 §4 item 5): the SAME path stopAll()
+    // uses, so this direct-replace step also gets discard() (not
+    // disconnect()) plus the heartbeat/backoff-timer/log-flush-timer/lock/
+    // serverInfoTimer cleanup — previously only stopAll() cleaned those up,
+    // leaving a serverInfoTimer leak on this path.
+    const wasReplacing = relay !== null;
+    if (wasReplacing) {
       void logRecord({
         event: 'ext.ws.replacing_relay',
         lvl: 'warn',
         reason: 'reconnect_before_old_close',
       });
-      try { relay.disconnect(); } catch { /* ignore */ }
-      relay = null;
     }
+    teardownRelay();
+
+    // Generation token (RCA 2026-07-06 §4 item 2): every callback below
+    // captures `myGen` and no-ops if a NEWER openRelay() call has since
+    // superseded it. Structurally prevents a stale callback — from ANY close
+    // path — from mutating shared state (`relay`, `context`, `heartbeat`) out
+    // from under the current, live attempt.
+    const myGen = ++relayCallGeneration;
+    const isStale = () => myGen !== relayCallGeneration;
+
     void logRecord({ event: 'ext.ws.connect.attempt', url: currentUrl });
     relay = createRelay({
       onOpen() {
+        if (isStale()) return;
         void logRecord({ event: 'ext.ws.open', url: currentUrl });
         // Wait for server_info before dispatching WS_OPEN
         serverInfoTimer = setTimeout(() => {
+          if (isStale()) return;
           serverInfoTimer = null;
           void logRecord({
             event: 'ext.ws.server_info_timeout',
@@ -346,11 +383,15 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
             timeoutMs: SERVER_INFO_TIMEOUT_MS,
             url: currentUrl,
           });
+          // disconnect() (not discard()) — this relies on the real onclose
+          // firing to dispatch WS_CLOSE and scheduleBackoff(). Do not change
+          // this call to discard()/nulled-handlers; see relay-client.ts.
           relay?.disconnect();
         }, SERVER_INFO_TIMEOUT_MS);
       },
 
       onServerInfo(info: ServerInfo) {
+        if (isStale()) return;
         // server_info reached → the open attempt is decided; release the lock so
         // a competing life isn't narrowed out longer than necessary.
         releaseLock();
@@ -420,16 +461,18 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
         // without waiting for a reconnect.
         startLogFlushTimer();
         dispatch({ type: 'WS_OPEN' });
-        startHeartbeat();
+        startHeartbeat(myGen);
       },
 
       onPong(timestamp: number) {
+        if (isStale()) return;
         heartbeat?.receivePong(timestamp);
         context = { ...context, lastVerifiedAt: Date.now() };
         dispatch({ type: 'HEARTBEAT_OK' });
       },
 
       onClose(code: number, reason: string) {
+        if (isStale()) return;
         releaseLock();
         if (serverInfoTimer !== null) {
           clearTimeout(serverInfoTimer);
@@ -505,6 +548,7 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
       },
 
       onError(_error: Event) {
+        if (isStale()) return;
         // WebSocket onerror events deliberately carry no diagnostic detail
         // (browser security). Logging the type tag is the most we can do.
         void logRecord({
@@ -530,6 +574,7 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
       },
 
       onToolRequest(id: string, tool: string, params: Record<string, unknown>) {
+        if (isStale()) return;
         void logRecord({
           event: 'ext.tool_request.received',
           requestId: id,
@@ -540,6 +585,7 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
       },
 
       onToolScan(tools) {
+        if (isStale()) return;
         options.onToolScan?.(tools);
       },
     });
@@ -549,12 +595,20 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
     relay.connect(withRelayRole(currentUrl));
   }
 
-  function startHeartbeat(): void {
+  // `gen` ties this heartbeat's callbacks to the relay generation that
+  // started it (same generation-token discipline as the relay callbacks in
+  // openRelay() — see the field comment on `relayCallGeneration`). Without
+  // this, a heartbeat interval tick that was already queued the instant a
+  // NEWER relay superseded this one could still fire onMiss()/onDead() and
+  // call `relay?.disconnect()` on the new, live relay.
+  function startHeartbeat(gen: number): void {
     heartbeat = createHeartbeatMonitor(DEFAULT_HEARTBEAT_CONFIG, {
       sendPing() {
+        if (gen !== relayCallGeneration) return;
         relay?.sendPing(Date.now());
       },
       onMiss() {
+        if (gen !== relayCallGeneration) return;
         void logRecord({
           event: 'ext.heartbeat.miss',
           lvl: 'warn',
@@ -563,12 +617,16 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
         dispatch({ type: 'HEARTBEAT_MISS' });
       },
       onDead() {
+        if (gen !== relayCallGeneration) return;
         void logRecord({
           event: 'ext.heartbeat.dead',
           lvl: 'warn',
           missedCount: heartbeat?.getMissedCount() ?? 0,
         });
         dispatch({ type: 'HEARTBEAT_MISS' });
+        // disconnect() (not discard()) — inverse-case guard: relies on the
+        // real onclose to dispatch WS_CLOSE and scheduleBackoff(). See
+        // relay-client.ts and the RCA's naive-fix warning.
         relay?.disconnect();
       },
     });
@@ -586,13 +644,11 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
     },
 
     disconnect(): void {
+      // stopAll() already discards and nulls `relay` — nothing left to do
+      // here (dead code removed per RCA 2026-07-06 §4 item 6: the old
+      // `if (relay) { ...; r.disconnect(); }` below this could never run).
       stopAll();
       dispatch({ type: 'DISCONNECT' });
-      if (relay) {
-        const r = relay;
-        relay = null;
-        r.disconnect();
-      }
     },
 
     retry(): void {
@@ -607,6 +663,25 @@ export function createConnectionManager(options: ConnectionManagerOptions = {}):
       if (relay !== null && relay.isConnected()) {
         // Relay alive in memory — send a ping to confirm and update lastVerifiedAt
         relay.sendPing(Date.now());
+        return;
+      }
+
+      // ── CONNECTING-aware guard (RCA 2026-07-06 §4 item 4 / defect 2) ──────
+      // A connect attempt is already in flight. reconcile() previously
+      // treated anything short of OPEN as "dead" and tore it down via
+      // stopAll()+openRelay() — including a socket mid-handshake. That gave
+      // the 5s side-panel fast-poll and the 30s alarm a SECOND, uncoordinated
+      // reconnect driver racing openRelay()'s own backoff cycle: exactly the
+      // storm shape in the RCA. Wait instead — bounded by relay-client's own
+      // CONNECTING-phase timeout, so this can never hang forever either.
+      // Single-flight is derived from state (`relay.isConnecting()`), not a
+      // hand-rolled boolean flag.
+      if (relay !== null && relay.isConnecting()) {
+        void logRecord({
+          event: 'ext.reconcile.connecting_in_flight',
+          lvl: 'info',
+          hint: 'A connect attempt is already CONNECTING; waiting instead of tearing it down (bounded by the relay-client CONNECTING-phase timeout).',
+        });
         return;
       }
 
