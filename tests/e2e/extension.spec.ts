@@ -183,10 +183,8 @@ test('4. Side panel shows tools view when connected', async () => {
     expect(count).toBeGreaterThan(0);
   }
 
-  // Check upgrade button
-  const upgradeBtn = await page.getByText('Upgrade to Pro').count();
-  console.log('Has upgrade button:', upgradeBtn > 0);
-  expect(upgradeBtn).toBeGreaterThan(0);
+  // No "Upgrade to Pro" button anymore — every tool is now tier:'free'
+  // (ToolsTab renders "All tools are free"), so the Pro upsell was removed.
 
   // Check support links
   const reportProblem = await page.getByText('Report a Problem').count();
@@ -315,9 +313,12 @@ test('8. Manifest is valid and has correct permissions', async () => {
   console.log('Version:', manifest.version);
   console.log('Permissions:', manifest.permissions);
 
-  expect(manifest.name).toBe('AgentHub');
+  // Name carries the branded suffix ("AgentHub — AI Chat + MCP for …"); assert
+  // the brand prefix rather than an exact string so store-copy tweaks don't break this.
+  expect(manifest.name).toContain('AgentHub');
   expect(manifest.manifest_version).toBe(3);
-  expect(manifest.permissions).toContain('activeTab');
+  // Note: 'activeTab' is intentionally NOT requested — the extension uses
+  // 'tabs' + 'scripting' + 'debugger' instead. Don't re-add it here.
   expect(manifest.permissions).toContain('tabs');
   expect(manifest.permissions).toContain('sidePanel');
   expect(manifest.permissions).toContain('storage');

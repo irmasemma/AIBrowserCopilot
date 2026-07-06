@@ -1,6 +1,7 @@
 # E2E test catalog
 
-All e2e specs live in `tests/e2e/`. **25 spec files, ~344 test cases.**
+All e2e specs live in `tests/e2e/`. **28 spec files, 353 test cases** (349 in the
+`chromium-extension` project + 4 in `real-edge-via-cdp`).
 
 Browser legend: **Chromium** = Playwright's bundled Chromium (unpacked extension, throwaway profile); **Real Edge (CDP)** = attaches over CDP to an Edge you start yourself; **Real install** = installs into / hijacks a real browser profile (kills the running browser); **Live bridge** = talks to an already-connected real browser.
 
@@ -37,6 +38,65 @@ specs should follow the same pattern.
 | What it does | Loads the unpacked extension in headed Chromium, serves a Threads-style feed (8 posts) on 127.0.0.1, then starts a real Claude (haiku) session and asks it to export the posts. Claude drives MCP itself: `list_tabs` → `take_screenshot` → `scroll_page` → `get_page_content`. |
 | Asserts | Claude exits clean, ≥1 agenthub MCP tool was called, and **≥5 posts exported with non-empty text** (got 8). Content values not checked. |
 | Substitutions | Bundled Chromium (Chrome Dev 151 won't load unpacked — verified); fixture feed (live `@tech.mom_us` is login-walled); no `npx` installer (uses :7483 fallback). |
+
+## Soak the whole suite — loop every spec
+
+To soak-test **stability across the whole suite** (shake out flaky specs, races,
+and leaks by running everything many times), loop all specs instead of just the
+dedicated threads soak. Playwright's `--repeat-each=N` runs every selected test N
+times in one session and fails on the first flake.
+
+Coverage note: one command can only loop **one project**. The
+`chromium-extension` project is 25 of the 28 files (349 cases); the remaining
+3 files / 4 cases are the `real-edge-via-cdp` project, which attaches to a real
+Edge and is looped separately (see below). So "loop everything" = the
+chromium-extension soak **plus** an optional real-edge soak.
+
+```bash
+# Loop the chromium-extension suite (25 files) 20× — excludes the 60-min threads
+# soak case so the loop doesn't balloon (see note).
+npm run test:e2e:soak
+#   ⇒ playwright test --project=chromium-extension --grep-invert=soak --repeat-each=20
+
+# Pick your own iteration count:
+npx playwright test --project=chromium-extension --grep-invert=soak --repeat-each=50
+
+# Include the 60-min threads soak too (each iteration adds ~60 min!):
+npm run test:e2e:soak:all
+
+# Also soak the 4 real-edge cases (start Edge first, separate terminal):
+npm run edge:debug
+npx playwright test --project=real-edge-via-cdp --repeat-each=20
+```
+
+Timed loop (run the whole suite repeatedly until a wall-clock budget elapses),
+if you'd rather bound by duration than by iteration count:
+
+```powershell
+# PowerShell — soak for 2 hours
+$end = (Get-Date).AddHours(2)
+while ((Get-Date) -lt $end) { npm run test:e2e:soak; if ($LASTEXITCODE -ne 0) { break } }
+```
+
+```bash
+# bash — soak for 2 hours (headless Linux: wrap with xvfb-run, Chromium is headed)
+end=$((SECONDS+7200))
+while [ $SECONDS -lt $end ]; do npm run test:e2e:soak || break; done
+```
+
+**Notes / caveats:**
+- `--grep-invert=soak` drops the single 60-min `threads-soak-two-browser` case so a
+  20× loop doesn't balloon to ~20 h on that one spec. Use `test:e2e:soak:all` to
+  include it.
+- The `real-edge-via-cdp` project's 4 cases are **not** in these loops — they attach
+  to a real Edge you must start first (`npm run edge:debug`) and run via
+  `npm run test:real-edge`.
+- Several `chromium-extension` specs are **real-install** flows (`install-and-connect`,
+  `install-and-chat`, `install-flow`, `install-lifecycle`) that hijack/kill the real
+  browser profile — expect them to disrupt any Edge/Chrome you're using while the
+  loop runs. Add `--grep-invert="soak|install"` to skip both soak and install specs
+  for an unattended, non-disruptive soak.
+- `workers: 1` is pinned globally (see `playwright.config.ts`), so the loop is serial.
 
 ## Soak: `threads-soak-two-browser.spec.ts`
 

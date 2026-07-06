@@ -13,13 +13,19 @@
  */
 import { test, expect, chromium, type BrowserContext, type Page } from '@playwright/test';
 import path from 'path';
+import { startFixtureServer, type FixtureServer } from './helpers/fixture-server';
 
 const extensionPath = path.resolve(__dirname, '../../packages/extension/dist/chrome-mv3');
-const stressFixture = (name: string) => path.resolve(__dirname, `fixtures/stress/${name}`);
 
 let context: BrowserContext;
 let extensionId: string;
 let extPage: Page;
+let fixtures: FixtureServer;
+
+// Serve stress fixtures over http://127.0.0.1 (a REQUIRED host permission) so
+// chrome.scripting.executeScript can access them; file:// only has the optional
+// <all_urls> grant. See helpers/fixture-server.ts.
+const stressFixture = (name: string) => fixtures.url(`stress/${name}`);
 
 // ============================================================
 // TYPE DEFINITIONS
@@ -42,6 +48,7 @@ interface FormField {
 // ============================================================
 
 test.beforeAll(async () => {
+  fixtures = await startFixtureServer();
   context = await chromium.launchPersistentContext('', {
     headless: false,
     args: [
@@ -68,6 +75,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await context?.close();
+  await fixtures?.close();
 });
 
 // ============================================================
@@ -569,7 +577,7 @@ test.describe('Form 01 — Plain HTML5', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-01-plain.html')}`);
+    await page.goto(stressFixture('form-01-plain.html'));
     await page.waitForTimeout(500);
     tabId = await getTabId('Form 01');
     expect(tabId).toBeGreaterThan(0);
@@ -727,7 +735,7 @@ test.describe('Form 02 — React 18 Controlled', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-02-react.html')}`);
+    await page.goto(stressFixture('form-02-react.html'));
     // React via CDN needs extra time to boot
     await page.waitForTimeout(3000);
     tabId = await getTabId('Form 02');
@@ -835,7 +843,7 @@ test.describe('Form 03 — Vue 3 Reactive', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-03-vue.html')}`);
+    await page.goto(stressFixture('form-03-vue.html'));
     // Vue via CDN needs time to mount
     await page.waitForTimeout(3000);
     tabId = await getTabId('Form 03');
@@ -933,7 +941,7 @@ test.describe.serial('Form 04 — Multi-step Wizard', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-04-wizard.html')}`);
+    await page.goto(stressFixture('form-04-wizard.html'));
     await page.waitForTimeout(500);
     tabId = await getTabId('Form 04');
     expect(tabId).toBeGreaterThan(0);
@@ -1048,7 +1056,7 @@ test.describe.serial('Form 05 — Dynamic Repeatable Fields', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-05-dynamic.html')}`);
+    await page.goto(stressFixture('form-05-dynamic.html'));
     await page.waitForTimeout(500);
     tabId = await getTabId('Form 05');
     expect(tabId).toBeGreaterThan(0);
@@ -1167,7 +1175,7 @@ test.describe('Form 06 — Inline Edit Table', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-06-inline-edit.html')}`);
+    await page.goto(stressFixture('form-06-inline-edit.html'));
     await page.waitForTimeout(500);
     tabId = await getTabId('Form 06');
     expect(tabId).toBeGreaterThan(0);
@@ -1256,7 +1264,7 @@ test.describe.serial('Form 07 — Autocomplete / Typeahead', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-07-autocomplete.html')}`);
+    await page.goto(stressFixture('form-07-autocomplete.html'));
     await page.waitForTimeout(500);
     tabId = await getTabId('Form 07');
     expect(tabId).toBeGreaterThan(0);
@@ -1384,7 +1392,7 @@ test.describe('Form 08 — Shadow DOM', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-08-shadow-dom.html')}`);
+    await page.goto(stressFixture('form-08-shadow-dom.html'));
     await page.waitForTimeout(1000);
     tabId = await getTabId('Form 08');
     expect(tabId).toBeGreaterThan(0);
@@ -1539,7 +1547,7 @@ test.describe('Form 09 — Lit Element', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-09-lit.html')}`);
+    await page.goto(stressFixture('form-09-lit.html'));
     // Lit via CDN needs extra load time
     await page.waitForTimeout(3000);
     tabId = await getTabId('Form 09');
@@ -1798,7 +1806,7 @@ test.describe('Form 10 — ARIA Widgets', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-10-aria.html')}`);
+    await page.goto(stressFixture('form-10-aria.html'));
     await page.waitForTimeout(500);
     tabId = await getTabId('Form 10');
     expect(tabId).toBeGreaterThan(0);
@@ -2056,7 +2064,7 @@ test.describe('Form 11 — Iframes', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-11-iframes.html')}`);
+    await page.goto(stressFixture('form-11-iframes.html'));
     await page.waitForTimeout(1000);
     tabId = await getTabId('Form 11');
     expect(tabId).toBeGreaterThan(0);
@@ -2149,7 +2157,7 @@ test.describe('Form 12 — Hidden Fields', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-12-hidden.html')}`);
+    await page.goto(stressFixture('form-12-hidden.html'));
     await page.waitForTimeout(500);
     tabId = await getTabId('Form 12');
     expect(tabId).toBeGreaterThan(0);
@@ -2251,7 +2259,7 @@ test.describe.serial('Form 13 — DOM Mutations', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-13-mutations.html')}`);
+    await page.goto(stressFixture('form-13-mutations.html'));
     await page.waitForTimeout(500);
     tabId = await getTabId('Form 13');
     expect(tabId).toBeGreaterThan(0);
@@ -2362,7 +2370,7 @@ test.describe('Form 14 — Conflicting Selectors', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-14-conflicting.html')}`);
+    await page.goto(stressFixture('form-14-conflicting.html'));
     await page.waitForTimeout(500);
     tabId = await getTabId('Form 14');
     expect(tabId).toBeGreaterThan(0);
@@ -2488,7 +2496,7 @@ test.describe.serial('Form 15 — Typeform', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-15-typeform.html')}`);
+    await page.goto(stressFixture('form-15-typeform.html'));
     await page.waitForTimeout(1000);
     tabId = await getTabId('Form 15');
     expect(tabId).toBeGreaterThan(0);
@@ -2613,7 +2621,7 @@ test.describe('Form 16 — React Hook Form', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-16-rhf.html')}`);
+    await page.goto(stressFixture('form-16-rhf.html'));
     await page.waitForTimeout(3000); // React via CDN
     tabId = await getTabId('Form 16');
     expect(tabId).toBeGreaterThan(0);
@@ -2760,7 +2768,7 @@ test.describe('Form 17 — Nested Fields', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-17-nested.html')}`);
+    await page.goto(stressFixture('form-17-nested.html'));
     await page.waitForTimeout(3000); // React CDN
     tabId = await getTabId('Form 17');
     expect(tabId).toBeGreaterThan(0);
@@ -2883,7 +2891,7 @@ test.describe('Form 18 — Angular-Style', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-18-angular.html')}`);
+    await page.goto(stressFixture('form-18-angular.html'));
     await page.waitForTimeout(500);
     tabId = await getTabId('Form 18');
     expect(tabId).toBeGreaterThan(0);
@@ -3011,7 +3019,7 @@ test.describe('Form 19 — Svelte-Style Reactive', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-19-svelte.html')}`);
+    await page.goto(stressFixture('form-19-svelte.html'));
     await page.waitForTimeout(500);
     tabId = await getTabId('Form 19');
     expect(tabId).toBeGreaterThan(0);
@@ -3127,7 +3135,7 @@ test.describe('Form 20 — Rich Text Editor', () => {
 
   test.beforeAll(async () => {
     page = await context.newPage();
-    await page.goto(`file://${stressFixture('form-20-richtext.html')}`);
+    await page.goto(stressFixture('form-20-richtext.html'));
     await page.waitForTimeout(500);
     tabId = await getTabId('Form 20');
     expect(tabId).toBeGreaterThan(0);
