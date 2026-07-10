@@ -75,7 +75,8 @@ export function deriveHeader(args: {
 }
 
 export const ConnectionHeader: FunctionalComponent = () => {
-  const [showDiag, setShowDiag] = useState(false);
+  // Default to expanded for this release — user can still collapse manually.
+  const [showDiag, setShowDiag] = useState(true);
   const [busyButton, setBusyButton] = useState<ActionButton['id'] | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());

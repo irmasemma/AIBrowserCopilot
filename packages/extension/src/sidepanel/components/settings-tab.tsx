@@ -21,6 +21,11 @@ interface McpStatus {
 
 const PROVIDER_ORDER: ProviderId[] = ['openai', 'anthropic', 'gemini'];
 
+// AI Provider Keys section is hidden for this release (Chat tab is hidden
+// too — see entrypoints/sidepanel/main.tsx). Underlying storage/logic is
+// untouched; this only gates rendering.
+const SHOW_PROVIDER_KEYS = false;
+
 interface ApiKeySectionProps {
   provider: ProviderId;
 }
@@ -137,21 +142,23 @@ export const SettingsTab: FunctionalComponent = () => {
 
   return (
     <div class="px-3 py-3 space-y-3 text-sm">
-      <section class="bg-white border border-card-border rounded-lg p-4">
-        <h3 class="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
-          AI Provider Keys
-        </h3>
-        <p class="text-xs text-neutral-500 mb-3">
-          Used by the Chat tab. Stored locally on this device only — never sent to our servers.
-        </p>
-        <div class="space-y-5 divide-y divide-neutral-100">
-          {PROVIDER_ORDER.map((p, i) => (
-            <div key={p} class={i === 0 ? '' : 'pt-5'}>
-              <ApiKeySection provider={p} />
-            </div>
-          ))}
-        </div>
-      </section>
+      {SHOW_PROVIDER_KEYS && (
+        <section class="bg-white border border-card-border rounded-lg p-4">
+          <h3 class="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
+            AI Provider Keys
+          </h3>
+          <p class="text-xs text-neutral-500 mb-3">
+            Used by the Chat tab. Stored locally on this device only — never sent to our servers.
+          </p>
+          <div class="space-y-5 divide-y divide-neutral-100">
+            {PROVIDER_ORDER.map((p, i) => (
+              <div key={p} class={i === 0 ? '' : 'pt-5'}>
+                <ApiKeySection provider={p} />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section class="bg-white border border-card-border rounded-lg p-4">
         <h3 class="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
@@ -159,7 +166,7 @@ export const SettingsTab: FunctionalComponent = () => {
         </h3>
         <p class="text-xs text-neutral-500 mb-2">
           Lets external AI tools (Claude Code, Cursor, etc.) drive your browser through this
-          extension. Independent from the Chat tab — you can use either or both.
+          extension.
         </p>
         <div class="flex items-center gap-2 mb-2">
           <span class="text-xs text-neutral-500">Status:</span>

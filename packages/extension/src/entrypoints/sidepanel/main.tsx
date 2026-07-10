@@ -25,11 +25,14 @@ const TabStrip = ({
   mcpAttention: boolean;
 }) => {
   const tabs: Array<{ id: TabId; label: string }> = [
-    { id: 'chat', label: 'Chat' },
-    { id: 'tools', label: 'Tools' },
-    // "MCP" sits between Tools and Settings — all connection/bridge/install
-    // status now lives on this tab instead of at the top of the shell.
+    // Chat tab is temporarily hidden from the tab strip for the CWS release
+    // (known bug — see chat-tab.tsx). The tab's content/logic is untouched
+    // and still mounted in App(); it's just unreachable via this nav.
+    // { id: 'chat', label: 'Chat' },
+    // MCP is first and is the default active tab for this release; Tools
+    // moved after it. Order swap only — no behavior change.
     { id: 'mcp', label: 'MCP' },
+    { id: 'tools', label: 'Tools' },
     { id: 'settings', label: 'Settings' },
   ];
   return (
@@ -171,7 +174,9 @@ const ToolsTab = () => {
 export const App = () => {
   const connectionContext = useStore((s) => s.connectionContext);
   const [setupComplete, setSetupComplete] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabId>('chat');
+  // MCP is the default active tab for this release (Chat tab hidden — see
+  // TabStrip above).
+  const [activeTab, setActiveTab] = useState<TabId>('mcp');
 
   useEffect(() => {
     initStoreFromStorage();
@@ -217,8 +222,8 @@ export const App = () => {
   // First-launch onboarding: only relevant if the user has never connected MCP
   // and the helper isn't installed yet. This boolean is UNCHANGED (it reads
   // discovery outputs read-only); it now only switches the MCP tab's CONTENT
-  // (SetupWizard vs live status) — it never blanks the app anymore. Chat works
-  // without MCP, so first-launch lands on Chat.
+  // (SetupWizard vs live status) — it never blanks the app anymore. MCP is
+  // the default/first tab for this release, so first-launch lands here.
   const needsSetup = !setupComplete && (
     diagnosticReason === 'helper_unavailable' ||
     (state === 'disconnected' && !lastConnectedAt && !diagnosticReason)

@@ -103,7 +103,11 @@ afterEach(() => {
 });
 
 describe('App shell — MCP relocation', () => {
-  it('chat-only brand-new state: lands on Chat, MCP tab hosts the SetupWizard, no top-level ConnectionHeader', async () => {
+  // Chat tab is hidden from the tab strip for this release (CWS release —
+  // known bug in chat-tab.tsx) and MCP is now the default/first tab, so
+  // these two cases land directly on the (now-active, non-hidden) MCP panel
+  // instead of Chat. See entrypoints/sidepanel/main.tsx TabStrip/activeTab.
+  it('brand-new state: lands on MCP, which hosts the SetupWizard, no top-level ConnectionHeader', async () => {
     // helper_unavailable + setupComplete:false → needsSetup === true.
     store.setupComplete = undefined;
     useStore.getState().setConnectionContext({
@@ -116,14 +120,14 @@ describe('App shell — MCP relocation', () => {
     await act(async () => { render(<App />, container); });
     await flush();
 
-    // Active tab is Chat.
+    // Active tab is MCP.
     const selected = container.querySelector('[role="tab"][aria-selected="true"]');
-    expect(selected?.textContent).toContain('Chat');
+    expect(selected?.textContent).toContain('MCP');
 
-    // The MCP panel exists, is hidden (Chat is active), and hosts the SetupWizard.
+    // The MCP panel exists, is active (not hidden), and hosts the SetupWizard.
     const mcpPanel = container.querySelector<HTMLElement>('[data-testid="mcp-panel"]');
     expect(mcpPanel).not.toBeNull();
-    expect(mcpPanel!.className).toContain('hidden');
+    expect(mcpPanel!.className).not.toContain('hidden');
     expect(mcpPanel!.textContent).toContain('Welcome to AgentHub'); // SetupWizard heading
 
     // needsSetup content mode shows the wizard, NOT the ConnectionHeader.
@@ -138,7 +142,7 @@ describe('App shell — MCP relocation', () => {
     expect(container.querySelector('[data-testid="connection-header"]')).toBeNull();
   });
 
-  it('engaged state: the ConnectionHeader renders INSIDE the (hidden) MCP panel, never above the tablist', async () => {
+  it('engaged state: the ConnectionHeader renders INSIDE the (active) MCP panel, never above the tablist', async () => {
     // setupComplete:true → needsSetup === false → McpTab renders live status.
     store.setupComplete = true;
     useStore.getState().setConnectionContext({
@@ -151,13 +155,13 @@ describe('App shell — MCP relocation', () => {
     await act(async () => { render(<App />, container); });
     await flush();
 
-    // Chat is still the default landing tab.
+    // MCP is the default landing tab.
     const selected = container.querySelector('[role="tab"][aria-selected="true"]');
-    expect(selected?.textContent).toContain('Chat');
+    expect(selected?.textContent).toContain('MCP');
 
     const mcpPanel = container.querySelector<HTMLElement>('[data-testid="mcp-panel"]');
     expect(mcpPanel).not.toBeNull();
-    expect(mcpPanel!.className).toContain('hidden'); // Chat active → MCP hidden
+    expect(mcpPanel!.className).not.toContain('hidden'); // MCP active → not hidden
 
     // The relocated ConnectionHeader is present and lives inside the MCP panel.
     const header = container.querySelector('[data-testid="connection-header"]');
