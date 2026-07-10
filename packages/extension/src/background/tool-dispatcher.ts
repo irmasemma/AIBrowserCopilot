@@ -616,6 +616,27 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
   async get_page_content(params) {
     const tab = await getTab(params.tab_id as number | undefined);
     const format = (params.format as string) ?? 'text';
+    // Pagination (AD-40 / Threads infinite-scroll incident): a page can accumulate
+    // hundreds of KB of text (infinite-scroll feeds) — returning it verbatim is what
+    // blew a real MCP client's 200k-token context window (403,154 chars in one tool
+    // result). offset/max_chars let the model page through instead of always getting
+    // everything from byte 0. Default max_chars mirrors TOOL_RESULT_MAX_CHARS (the
+    // same-value backstop cap dispatchTool applies to EVERY tool's output below), so
+    // an unpaginated call already comes back pre-windowed instead of relying solely
+    // on the backstop's generic truncation marker.
+    const offset = Math.max(0, Math.trunc((params.offset as number) ?? 0));
+    const maxChars = Math.max(1, Math.trunc((params.max_chars as number) ?? TOOL_RESULT_MAX_CHARS));
+    // Clamp the EFFECTIVE window unconditionally (not just when max_chars is
+    // omitted) so `windowed + scrollInfo + paginationMarker` can never itself
+    // exceed TOOL_RESULT_MAX_CHARS, for ANY offset/max_chars combination.
+    // Without this, the outer capToolResult choke point (below) would
+    // silently overwrite this handler's own accurate, page-relative
+    // continuation marker with its generic one — which reports the CAP as the
+    // continuation offset instead of the true `windowEnd`, sending the model
+    // backwards on every call past the first window. RESULT_OVERHEAD_RESERVE
+    // is generous headroom for scrollInfo + paginationMarker (both well under
+    // 300 chars in practice).
+    const effectiveMaxChars = Math.min(maxChars, TOOL_RESULT_MAX_CHARS - RESULT_OVERHEAD_RESERVE);
 
     const content = await executeContentScript(tab.id!, () => {
       if (document.contentType?.includes('pdf') || location.protocol === 'chrome:') {
@@ -628,9 +649,17 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
       throw Object.assign(new Error('Page has no extractable content (PDF, chrome:// page, or blank)'), { code: 'CONTENT_UNAVAILABLE' });
     }
 
-    const result = format === 'html'
+    const full = format === 'html'
       ? await executeContentScript(tab.id!, () => document.body?.innerHTML ?? '')
       : content;
+
+    const total = full.length;
+    const windowed = full.slice(offset, offset + effectiveMaxChars);
+    const windowEnd = offset + windowed.length;
+    const remaining = Math.max(0, total - windowEnd);
+    const paginationMarker = remaining > 0
+      ? `\n\n[Showing chars ${offset}-${windowEnd} of ${total}. ${remaining} more chars available — call again with offset=${windowEnd}.]`
+      : '';
 
     // AD-22: Append scroll state so AI knows there's content below the fold
     const scrollInfo = await executeContentScript(tab.id!, () => {
@@ -643,7 +672,7 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
       return `\n\n--- Scroll Position ---\nViewing: ${Math.round(scrollTop)}-${Math.round(viewBottom)} of ${pageHeight}px (${pct}%)\nMore content below: ${moreBelow ? 'yes' : 'no'}`;
     });
 
-    return { content: [{ type: 'text', text: result + scrollInfo }] };
+    return { content: [{ type: 'text', text: windowed + scrollInfo + paginationMarker }] };
   },
 
   async take_screenshot(params) {
@@ -1260,7 +1289,14 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
 
     const extractResult = result?.[0]?.result;
     if (!extractResult?.bestRegion) {
-      throw Object.assign(new Error('No structured data detected on page'), { code: 'CONTENT_UNAVAILABLE' });
+      throw Object.assign(
+        new Error(
+          'No structured data detected: no HTML tables and no consistent repeating card/list ' +
+          'pattern found on this page. Try `snapshot` for an accessibility-tree view, or ' +
+          '`get_page_content` (with offset for pagination) to read the raw text.',
+        ),
+        { code: 'CONTENT_UNAVAILABLE' },
+      );
     }
 
     // Format output based on requested format
@@ -1332,6 +1368,91 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
 // never logged.
 export const TOOL_DISPATCH_TIMEOUT_MS = 25_000;
 
+// Hard ceiling for any single `content[].text` field any tool handler returns.
+// Same choke-point pattern as TOOL_DISPATCH_TIMEOUT_MS (root guard, close to
+// where the unbounded string is actually created) — this is the SIZE analogue
+// of that TIME guard. Root incident: a Threads (infinite-scroll) page accumulated
+// hundreds of KB after repeated scroll_page calls; get_page_content returned it
+// verbatim (403,154 chars in one tool result), which alone exceeded the MCP
+// client's 200k-TOKEN context budget and killed the session. `snapshot`
+// (accessibility-tree dump) has the identical unbounded-on-accumulated-DOM shape
+// and is capped by the same mechanism even though it hasn't caused an incident yet.
+// 80,000 chars ≈ 20k tokens at ~4 chars/token — generous for a single tool result
+// while leaving the model most of a 200k-token budget for everything else.
+// A matching backstop lives in packages/native-host/src/service.ts
+// (`TOOL_RESULT_MAX_CHARS`) — that copy MUST be kept in sync manually, since the
+// extension and native-host packages don't share a build.
+export const TOOL_RESULT_MAX_CHARS = 80_000;
+
+// Headroom reserved when a handler (currently only get_page_content) builds
+// its own bounded, page-relative output ahead of the capToolResult choke
+// point below. get_page_content clamps its window to
+// `TOOL_RESULT_MAX_CHARS - RESULT_OVERHEAD_RESERVE` so that its own
+// windowed text plus scrollInfo plus its accurate pagination marker can
+// never exceed TOOL_RESULT_MAX_CHARS — i.e. capToolResult should never need
+// to touch a well-formed get_page_content response. 1000 chars is generous:
+// scrollInfo and the pagination marker are both well under 300 chars in
+// practice, even with very large page-size numbers.
+const RESULT_OVERHEAD_RESERVE = 1000;
+
+/** Truncate a single text field to `cap` chars, appending an explicit,
+ * actionable marker — never a silent cut. A payload at or under `cap` passes
+ * through byte-identical (no marker, no mutation); this is load-bearing for
+ * callers that diff/hash tool output. Exactly-at-cap is defined as NOT
+ * truncated (`<=`, not `<`) — kept consistent with the bridge-side backstop
+ * in service.ts so the two choke points never disagree at the boundary.
+ *
+ * The marker is deliberately tool-agnostic — it fires for EVERY tool's
+ * oversized output (snapshot, extract_data, etc.), not just
+ * get_page_content, so it must not claim an `offset` param those tools
+ * don't have. get_page_content's own handler builds its own accurate,
+ * page-relative "call again with offset=N" marker BEFORE this generic one
+ * ever runs (see RESULT_OVERHEAD_RESERVE) — this text is the fallback for
+ * every other tool, and for the rare case get_page_content's own output
+ * still needs trimming.
+ *
+ * KEEP THIS STRING IDENTICAL to `truncateText` in
+ * packages/native-host/src/service.ts — that copy MUST be kept in sync
+ * manually, since the extension and native-host packages don't share a
+ * build. */
+function truncateText(text: string, cap: number): string {
+  if (text.length <= cap) return text;
+  return (
+    text.slice(0, cap) +
+    `\n\n[TRUNCATED: content was ${text.length} chars, showing first ${cap}. ` +
+    `If this tool supports pagination (e.g. get_page_content's offset param), ` +
+    `use it to continue; otherwise narrow your request (e.g. a selector).]`
+  );
+}
+
+/** Walk whatever a tool handler returned and cap every `content[].text`
+ * field. This is the SINGLE choke point for the size invariant — individual
+ * handlers must never truncate their own output; they just return whatever
+ * they naturally produce and this catches it uniformly (mirrors how
+ * `withTimeout` is the single choke point for the time invariant). Non-object
+ * results, or results without a `content` array (defensive — every handler
+ * in `tools` currently returns `{ content: [...] }`), pass through untouched.
+ * Exported for tests. */
+export function capToolResult(result: unknown, cap: number = TOOL_RESULT_MAX_CHARS): unknown {
+  if (!result || typeof result !== 'object') return result;
+  const r = result as { content?: unknown };
+  if (!Array.isArray(r.content)) return result;
+
+  return {
+    ...r,
+    content: r.content.map((item: unknown) => {
+      if (
+        item && typeof item === 'object' &&
+        (item as { type?: unknown }).type === 'text' &&
+        typeof (item as { text?: unknown }).text === 'string'
+      ) {
+        return { ...(item as object), text: truncateText((item as { text: string }).text, cap) };
+      }
+      return item;
+    }),
+  };
+}
+
 /**
  * Race a promise against a timeout. If `p` doesn't settle within `ms`, reject
  * with a TOOL_TIMEOUT error. The underlying Chrome/Playwright call cannot be
@@ -1392,7 +1513,10 @@ export const dispatchTool = async (
   });
 
   try {
-    const result = await withTimeout(handler(params), timeoutMs, toolName);
+    const rawResult = await withTimeout(handler(params), timeoutMs, toolName);
+    // Size choke point (see TOOL_RESULT_MAX_CHARS doc comment): applied uniformly
+    // to EVERY handler's output here, not copy-pasted into each handler.
+    const result = capToolResult(rawResult);
     entry.status = 'success';
     entry.duration = Date.now() - startTime;
     await logActivity(entry);

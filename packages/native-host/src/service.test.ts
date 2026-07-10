@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import {
   parseBrand,
@@ -14,6 +16,7 @@ import {
   pruneSupersedeTimes,
   sendToolRequest,
   idempotentTieRecentCount,
+  TOOL_RESULT_MAX_CHARS_FOR_TESTS,
   type FanOutResult,
   type FanOutError,
 } from './service.js';
@@ -983,5 +986,129 @@ describe('mergeFanOutListTabs — tool_error envelope handling', () => {
     expect(payload.errors).toEqual([
       { browserId: 'chrome:B', error: 'list_tabs failed: chrome.tabs unavailable' },
     ]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Bridge-side backstop size cap (AD-40 / Threads infinite-scroll incident).
+// This is the LAST hop before the MCP client — it must never trust a single
+// extension build to have already capped its own output. Same cap value and
+// marker format as the extension-side primary cap in tool-dispatcher.ts
+// (TOOL_RESULT_MAX_CHARS), duplicated because the two packages don't share a
+// build. Imported (not hardcoded) so the boundary tests can't silently drift
+// from the real constant.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('translateExtensionResponse — size backstop cap', () => {
+  const CAP = TOOL_RESULT_MAX_CHARS_FOR_TESTS;
+
+  it('a success payload strictly under the cap passes through byte-identical', () => {
+    const text = 'x'.repeat(CAP - 1);
+    const translated = translateExtensionResponse({
+      type: 'tool_response',
+      result: { content: [{ type: 'text', text }] },
+    });
+    expect(translated.content[0].text).toBe(text);
+    expect(translated.content[0].text).not.toContain('TRUNCATED');
+  });
+
+  it('a payload exactly at the cap is NOT truncated (boundary is <=, consistent with the extension side)', () => {
+    const text = 'x'.repeat(CAP);
+    const translated = translateExtensionResponse({
+      type: 'tool_response',
+      result: { content: [{ type: 'text', text }] },
+    });
+    expect(translated.content[0].text).toBe(text);
+    expect(translated.content[0].text).not.toContain('TRUNCATED');
+  });
+
+  it('a payload over the cap is truncated with a marker stating the ORIGINAL size', () => {
+    const originalSize = CAP + 50_000;
+    const text = 'x'.repeat(originalSize);
+    const translated = translateExtensionResponse({
+      type: 'tool_response',
+      result: { content: [{ type: 'text', text }] },
+    });
+    expect(translated.content[0].text!.length).toBeLessThan(originalSize);
+    expect(translated.content[0].text).toContain(
+      `TRUNCATED: content was ${originalSize} chars, showing first ${CAP}`,
+    );
+  });
+
+  it('caps even a legacy/unrecognised-shape fallback response (defense-in-depth for old extension builds)', () => {
+    // translateExtensionResponse's fallback path JSON.stringifies whatever it
+    // doesn't recognise — this must ALSO be capped, since an old/misbehaving
+    // extension build could still hand the bridge an oversized blob this way.
+    const hugeLegacyPayload = { someField: 'y'.repeat(CAP + 10_000) };
+    const translated = translateExtensionResponse(hugeLegacyPayload);
+    expect(translated.content[0].text!.length).toBeLessThan(JSON.stringify(hugeLegacyPayload).length);
+    expect(translated.content[0].text).toContain('TRUNCATED');
+  });
+});
+
+describe('mergeFanOutListTabs — size backstop cap', () => {
+  const CAP = TOOL_RESULT_MAX_CHARS_FOR_TESTS;
+
+  it('caps the merged tabs payload when it exceeds the backstop', () => {
+    // Fabricate a single browser whose list_tabs text is already oversized —
+    // simulates many tabs across many profiles, or a misbehaving extension.
+    const hugeText = JSON.stringify(
+      Array.from({ length: 5000 }, (_, i) => ({ id: `chrome:a:${i}`, title: 'x'.repeat(50), url: 'https://example.com/' + i })),
+    );
+    expect(hugeText.length).toBeGreaterThan(CAP);
+
+    const results: Array<FanOutResult | FanOutError> = [
+      { browserId: 'chrome:A', ok: true, response: { result: { content: [{ type: 'text', text: hugeText }] } } },
+    ];
+    // mergeFanOutListTabs expects each per-browser text to be a JSON array of
+    // tabs (it concatenates them) — feed it one enormous array directly via a
+    // single "browser" response whose text IS that array, then assert the
+    // merged payload's OWN serialized text is capped regardless.
+    const merged = mergeFanOutListTabs(results);
+    expect(merged.content[0].text.length).toBeLessThanOrEqual(CAP + 500);
+    expect(merged.content[0].text).toContain('TRUNCATED');
+  });
+
+  it('a small merged payload passes through unchanged (inverse case)', () => {
+    const results: Array<FanOutResult | FanOutError> = [
+      { browserId: 'chrome:A', ok: true, response: { result: { content: [{ type: 'text', text: '[{"id":"chrome:a:1","title":"t","url":"u"}]' }] } } },
+    ];
+    const merged = mergeFanOutListTabs(results);
+    expect(merged.content[0].text).not.toContain('TRUNCATED');
+    const payload = JSON.parse(merged.content[0].text);
+    expect(payload.tabs).toHaveLength(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Cross-package constant parity. TOOL_RESULT_MAX_CHARS is duplicated (not
+// imported) between this package and the extension package because they
+// don't share a build — see the "KEEP THIS VALUE IN SYNC" comment above the
+// local const. That manual-sync comment is unenforceable by the compiler; a
+// silent drift between the two would mean the bridge's backstop cap and the
+// extension's primary cap disagree at the boundary. Read the extension
+// source directly (no import — cross-package imports aren't wired up) and
+// regex-extract the numeric literal, handling the `80_000` numeric-separator
+// syntax, so this test can never itself get stale by hardcoding 80000 a
+// third time.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('TOOL_RESULT_MAX_CHARS — parity with the extension package', () => {
+  it('matches packages/extension/src/background/tool-dispatcher.ts exactly', () => {
+    const extensionSourcePath = join(
+      __dirname,
+      '..',
+      '..',
+      'extension',
+      'src',
+      'background',
+      'tool-dispatcher.ts',
+    );
+    const source = readFileSync(extensionSourcePath, 'utf8');
+    const match = source.match(/export const TOOL_RESULT_MAX_CHARS = ([\d_]+);/);
+    expect(match, 'expected to find "export const TOOL_RESULT_MAX_CHARS = <N>;" in tool-dispatcher.ts').not.toBeNull();
+
+    const extensionValue = Number(match![1].replace(/_/g, ''));
+    expect(extensionValue).toBe(TOOL_RESULT_MAX_CHARS_FOR_TESTS);
   });
 });

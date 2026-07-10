@@ -8,12 +8,15 @@ import type {
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
+const ANTHROPIC_BETA = 'context-management-2025-06-27';
 const DEFAULT_MAX_TOKENS = 4096;
 
+type CacheControl = { type: 'ephemeral' };
+
 type ContentBlock =
-  | { type: 'text'; text: string }
-  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
-  | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean };
+  | { type: 'text'; text: string; cache_control?: CacheControl }
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown>; cache_control?: CacheControl }
+  | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean; cache_control?: CacheControl };
 
 interface AnthropicWireMessage {
   role: 'user' | 'assistant';
@@ -117,36 +120,110 @@ const parseResponse = (data: AnthropicResponse): ProviderCallResult => {
   return { assistantText, toolCalls, finishReason };
 };
 
+// Sticky, session-lifetime flag: once we've learned (via a live 400) that the
+// configured API key/org/model combination doesn't support the
+// context-management beta, stop sending it for the rest of this browser
+// session. This repo cannot reliably verify per-model beta support ahead of
+// time (see models.ts — multiple user-selectable Anthropic models, and beta
+// support can vary by model/account), so the robust approach is: try with the
+// beta on, detect the specific failure, fall back once, then remember the
+// fallback so every subsequent call in this session skips straight to the
+// no-beta shape instead of re-triggering the 400 round-trip every time.
+let contextManagementDisabled = false;
+
+/** Detect a 400 caused specifically by the context-management beta, as
+ * opposed to any other invalid_request_error (malformed tool schema, bad
+ * model id, etc.) — those must keep propagating unchanged, never get
+ * swallowed into a silent retry. */
+const isContextManagementError = (data: AnthropicResponse | undefined): boolean => {
+  const msg = data?.error?.message ?? '';
+  return /context[_-]management/i.test(msg);
+};
+
+const buildRequestBody = (
+  wire: AnthropicWireMessage[],
+  system: string | undefined,
+  wireTools: AnthropicTool[],
+  model: string,
+  includeContextManagement: boolean,
+): Record<string, unknown> => {
+  const body: Record<string, unknown> = {
+    model,
+    max_tokens: DEFAULT_MAX_TOKENS,
+    messages: wire,
+  };
+  if (includeContextManagement) {
+    // Context editing (beta): server-side clears old tool_result content
+    // before the model sees the prompt, so long agentic loops don't
+    // monotonically grow the request until it exceeds the model's context
+    // window. See docs reference: context-management-2025-06-27.
+    body.context_management = { edits: [{ type: 'clear_tool_uses_20250919' }] };
+  }
+  if (system) {
+    body.system = [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
+  }
+  if (wireTools.length > 0) body.tools = wireTools;
+  return body;
+};
+
+const buildRequestHeaders = (apiKey: string, includeContextManagement: boolean): Record<string, string> => {
+  const headers: Record<string, string> = {
+    'x-api-key': apiKey,
+    'anthropic-version': ANTHROPIC_VERSION,
+    'anthropic-dangerous-direct-browser-access': 'true',
+    'content-type': 'application/json',
+  };
+  if (includeContextManagement) headers['anthropic-beta'] = ANTHROPIC_BETA;
+  return headers;
+};
+
 export const callAnthropic = async (args: ProviderCallArgs): Promise<ProviderCallResult> => {
   const { apiKey, model, messages, tools, signal } = args;
 
   const { system, wire } = buildWire(messages);
   const wireTools: AnthropicTool[] = toAnthropicTools(tools);
 
-  const body: Record<string, unknown> = {
-    model,
-    max_tokens: DEFAULT_MAX_TOKENS,
-    messages: wire,
+  // Prompt caching: mark the system prompt and the last content block of the
+  // last message as cache breakpoints. Both are prefix-stable across calls
+  // within a conversation (system is a static const; the last message grows
+  // by appending, never mutating earlier content), so the shared prefix is
+  // served from cache on every follow-up round-trip.
+  if (wire.length > 0) {
+    const lastMessage = wire[wire.length - 1];
+    const lastBlock = lastMessage.content[lastMessage.content.length - 1];
+    if (lastBlock) lastBlock.cache_control = { type: 'ephemeral' };
+  }
+
+  const doFetch = async (
+    includeContextManagement: boolean,
+  ): Promise<{ response: Response; data: AnthropicResponse }> => {
+    const response = await fetch(ANTHROPIC_URL, {
+      method: 'POST',
+      headers: buildRequestHeaders(apiKey, includeContextManagement),
+      body: JSON.stringify(buildRequestBody(wire, system, wireTools, model, includeContextManagement)),
+      signal,
+    });
+    const data = (await response.json()) as AnthropicResponse;
+    return { response, data };
   };
-  if (system) body.system = system;
-  if (wireTools.length > 0) body.tools = wireTools;
 
-  const response = await fetch(ANTHROPIC_URL, {
-    method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': ANTHROPIC_VERSION,
-      'anthropic-dangerous-direct-browser-access': 'true',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
+  const attemptedContextManagement = !contextManagementDisabled;
+  let { response, data } = await doFetch(attemptedContextManagement);
 
-  const data = (await response.json()) as AnthropicResponse;
+  if (!response.ok && attemptedContextManagement && response.status === 400 && isContextManagementError(data)) {
+    // Retry the SAME request once, without context_management in the body
+    // and without the anthropic-beta header — and remember the decision for
+    // the rest of the session so we don't pay this round-trip again.
+    contextManagementDisabled = true;
+    ({ response, data } = await doFetch(false));
+  }
+
   if (!response.ok) {
     const msg = data?.error?.message ?? `Anthropic request failed (${response.status})`;
-    throw new Error(msg);
+    throw Object.assign(new Error(msg), {
+      status: response.status,
+      errorType: data?.error?.type,
+    });
   }
 
   return parseResponse(data);
@@ -154,6 +231,14 @@ export const callAnthropic = async (args: ProviderCallArgs): Promise<ProviderCal
 
 // Exposed for tests
 export const _internal = { buildWire, parseResponse };
+
+/** Test-only: reset the module-level "context_management unsupported" sticky
+ * flag so each test starts from a clean slate. Real callers never call this
+ * — the flag is meant to persist for the life of the browser session once
+ * it's set. */
+export const _resetContextManagementDisabledForTest = (): void => {
+  contextManagementDisabled = false;
+};
 
 export const anthropicClient: ProviderClient = {
   id: 'anthropic',

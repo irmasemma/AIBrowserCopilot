@@ -33,6 +33,64 @@ import { resolveInstallDir } from './shared/install-dir.js';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
+// Backstop cap for any single `content[].text` field reaching the MCP client.
+// Mirrors `TOOL_RESULT_MAX_CHARS` in packages/extension/src/background/
+// tool-dispatcher.ts (root guard, close to where the unbounded string is
+// created) the same way `REQUEST_TIMEOUT_MS` (30s, here) mirrors
+// `TOOL_DISPATCH_TIMEOUT_MS` (25s, extension) for TIME. This is the last hop
+// before the MCP client and must never trust a single extension build to have
+// already capped its own output — old extension builds, other future client
+// types, etc. KEEP THIS VALUE IN SYNC WITH tool-dispatcher.ts's
+// TOOL_RESULT_MAX_CHARS manually — the two packages don't share a build.
+const TOOL_RESULT_MAX_CHARS = 80_000;
+
+/** Test-only re-export so service.test.ts's boundary tests derive the cap
+ * from the real constant instead of hardcoding 80_000 a second time. */
+export const TOOL_RESULT_MAX_CHARS_FOR_TESTS = TOOL_RESULT_MAX_CHARS;
+
+/** Truncate a single text field to `cap` chars, appending an explicit,
+ * actionable marker — never a silent cut. A payload at or under `cap` passes
+ * through byte-identical; exactly-at-cap is NOT truncated (`<=`), kept
+ * consistent with the extension-side primary cap so the two choke points
+ * never disagree at the boundary.
+ *
+ * This marker fires for EVERY tool that reaches the bridge oversized, not
+ * just get_page_content, so the wording must not claim an `offset` param
+ * that most tools (snapshot, extract_data, ...) don't have.
+ *
+ * KEEP THIS STRING IDENTICAL to `truncateText` in
+ * packages/extension/src/background/tool-dispatcher.ts — that copy MUST be
+ * kept in sync manually, since the extension and native-host packages don't
+ * share a build. */
+function truncateText(text: string, cap: number): string {
+  if (text.length <= cap) return text;
+  return (
+    text.slice(0, cap) +
+    `\n\n[TRUNCATED: content was ${text.length} chars, showing first ${cap}. ` +
+    `If this tool supports pagination (e.g. get_page_content's offset param), ` +
+    `use it to continue; otherwise narrow your request (e.g. a selector).]`
+  );
+}
+
+/** Walk a translated/merged MCP tool result and cap every `content[].text`
+ * field. Single choke point for the size invariant on the bridge side —
+ * called from both `translateExtensionResponse` and `mergeFanOutListTabs` so
+ * neither can ship an unbounded payload to an MCP client, regardless of what
+ * the extension build on the other end of the WS did or didn't do. */
+function capResponseContent<T extends { content: Array<{ type: string; text?: string; [k: string]: unknown }> }>(
+  result: T,
+  cap: number = TOOL_RESULT_MAX_CHARS,
+): T {
+  return {
+    ...result,
+    content: result.content.map(item =>
+      item.type === 'text' && typeof item.text === 'string'
+        ? { ...item, text: truncateText(item.text, cap) }
+        : item,
+    ),
+  };
+}
+
 /** Ring buffer of recent activity for the diag UI's timeline. Populated
  *  by handleMcpMessage's tools/call path and sendToolRequest. */
 const recentActivity = new RecentActivity();
@@ -1399,10 +1457,10 @@ export function mergeFanOutListTabs(results: Array<FanOutResult | FanOutError>):
   // decide how to surface that.
   const allFailed = results.length > 0 && errors.length === results.length;
 
-  return {
+  return capResponseContent({
     content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
     ...(allFailed ? { isError: true as const } : {}),
-  };
+  });
 }
 
 /**
@@ -1418,8 +1476,20 @@ export function mergeFanOutListTabs(results: Array<FanOutResult | FanOutError>):
  * That was the "tools return empty" symptom from §21 of the 2026-06-04
  * postdownloader session log. Both shapes now map to a well-formed MCP
  * tool result with `content` populated.
+ *
+ * Wraps `translateExtensionResponseRaw` with the size backstop cap
+ * (`capResponseContent`) so every exit path — tool_error, rpc error, success,
+ * and the legacy fallback — gets capped in one place instead of at each
+ * return statement.
  */
 export function translateExtensionResponse(response: unknown): {
+  content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+  isError?: boolean;
+} {
+  return capResponseContent(translateExtensionResponseRaw(response));
+}
+
+function translateExtensionResponseRaw(response: unknown): {
   content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
   isError?: boolean;
 } {

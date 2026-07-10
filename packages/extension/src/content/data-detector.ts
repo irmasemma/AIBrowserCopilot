@@ -96,6 +96,59 @@ function extractTables(
 }
 
 /**
+ * Group `container`'s children by a signature and score each group with the
+ * SAME structural-consistency + text-density heuristic. `byTagOnly` swaps the
+ * grouping key from `tag+className` to `tag` alone — see the fallback-pass
+ * comment in `findRepeatingPatterns` for why. Extracted so both passes share
+ * identical scoring and can never drift apart.
+ */
+function scoreGroupsInContainer(
+  container: Element,
+  byTagOnly: boolean,
+  out: PatternCandidate[],
+  seen: Set<Element>,
+): void {
+  const children = Array.from(container.children);
+  if (children.length < 3) return;
+
+  const groups = new Map<string, Element[]>();
+  for (const child of children) {
+    const key = byTagOnly ? child.tagName : `${child.tagName}|${child.className}`;
+    const group = groups.get(key);
+    if (group) group.push(child);
+    else groups.set(key, [child]);
+  }
+
+  for (const [key, items] of groups) {
+    if (items.length < 3) continue;
+
+    // Structural consistency: check that items have similar child counts
+    const childCounts = items.map(item => item.children.length);
+    const avgChildren = childCounts.reduce((a, b) => a + b, 0) / childCounts.length;
+    const variance = childCounts.reduce((sum, c) => sum + (c - avgChildren) ** 2, 0) / childCounts.length;
+    const consistency = avgChildren > 0 ? 1 / (1 + Math.sqrt(variance) / avgChildren) : 0;
+
+    // Data density: average text length per item
+    const avgText = items.reduce((sum, item) => sum + (item.textContent?.trim().length ?? 0), 0) / items.length;
+    const density = Math.min(avgText / 100, 1); // Normalize to 0-1
+
+    const score = items.length * consistency * density;
+
+    if (score > 2) {
+      const [tag, cls] = key.split('|');
+      out.push({
+        container,
+        items,
+        tag: tag!,
+        className: byTagOnly ? '' : (cls ?? ''),
+        score,
+      });
+      seen.add(container);
+    }
+  }
+}
+
+/**
  * Find repeating sibling patterns (card grids, lists, etc.).
  */
 function findRepeatingPatterns(maxRows: number, includeLinks: boolean): PatternCandidate[] {
@@ -105,47 +158,26 @@ function findRepeatingPatterns(maxRows: number, includeLinks: boolean): PatternC
   // Look for containers with many same-tag, same-class children
   const containers = document.querySelectorAll('ul, ol, div, section, main, article');
 
+  // Pass 1: group by exact tag+className. Works for classic markup where
+  // sibling cards share a literal class name (Bootstrap, hand-written CSS).
   for (const container of containers) {
     if (seen.has(container)) continue;
+    scoreGroupsInContainer(container, false, candidates, seen);
+  }
 
-    const children = Array.from(container.children);
-    if (children.length < 3) continue;
-
-    // Group children by tag+class signature
-    const groups = new Map<string, Element[]>();
-    for (const child of children) {
-      const key = `${child.tagName}|${child.className}`;
-      const group = groups.get(key);
-      if (group) group.push(child);
-      else groups.set(key, [child]);
-    }
-
-    for (const [key, items] of groups) {
-      if (items.length < 3) continue;
-
-      // Structural consistency: check that items have similar child counts
-      const childCounts = items.map(item => item.children.length);
-      const avgChildren = childCounts.reduce((a, b) => a + b, 0) / childCounts.length;
-      const variance = childCounts.reduce((sum, c) => sum + (c - avgChildren) ** 2, 0) / childCounts.length;
-      const consistency = avgChildren > 0 ? 1 / (1 + Math.sqrt(variance) / avgChildren) : 0;
-
-      // Data density: average text length per item
-      const avgText = items.reduce((sum, item) => sum + (item.textContent?.trim().length ?? 0), 0) / items.length;
-      const density = Math.min(avgText / 100, 1); // Normalize to 0-1
-
-      const score = items.length * consistency * density;
-
-      if (score > 2) {
-        const [tag] = key.split('|');
-        candidates.push({
-          container,
-          items,
-          tag: tag!,
-          className: key.split('|')[1] ?? '',
-          score,
-        });
-        seen.add(container);
-      }
+  // Pass 2 (fallback): if pass 1 found nothing, retry grouping by TAG ONLY,
+  // ignoring className. Meta-property sites (Facebook/Instagram/Threads) use
+  // atomic/utility CSS (stylex) where classNames are often near-unique per
+  // element instance rather than shared identically across sibling cards —
+  // exact tag+className grouping then collapses every group to size 1 and
+  // never reaches the `items.length < 3` threshold, so structured data that's
+  // visibly there (e.g. a Threads feed) is reported as "not found". Reuses
+  // the IDENTICAL consistency+density scoring — only the grouping KEY
+  // changes, not the quality bar, so this can't loosen what counts as a
+  // repeating pattern, only widen how candidates are grouped.
+  if (candidates.length === 0) {
+    for (const container of containers) {
+      scoreGroupsInContainer(container, true, candidates, seen);
     }
   }
 

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { useStore } from '../store.js';
 import {
   buildInitialMessages,
+  isContextLengthError,
   runChat,
   type CanonicalMessage,
   type ToolCallEvent,
@@ -306,7 +307,16 @@ export const ChatTab: FunctionalComponent<ChatTabProps> = ({ onOpenSettings, isA
       }
     } catch (err) {
       if (!isLive()) return;
-      const message = err instanceof Error ? err.message : 'Unknown error';
+      // The chat engine already retried once (pruning old tool results) if
+      // this was a context-length error — a survivor here means the retry
+      // also failed. Show a friendly, actionable message instead of the raw
+      // API string. Any other kind of error is shown as-is; we never want to
+      // swallow or reword a real failure.
+      const message = isContextLengthError(err)
+        ? 'This conversation has grown too large for the model to process. Start a new conversation to continue.'
+        : err instanceof Error
+          ? err.message
+          : 'Unknown error';
       setEntries((prev) => [
         ...prev,
         { id: crypto.randomUUID(), kind: 'error', text: message },
