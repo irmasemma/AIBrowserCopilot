@@ -19,6 +19,7 @@ _bmad-output/
 
 # CWS upload artifacts (rebuilt per release — never commit)
 packages/extension/dist/*.zip
+packages/extension/dist/agenthub-extension-v*/
 packages/native-host/bin/bundle.cjs
 
 # Generated version files — source of truth is each package's package.json.
