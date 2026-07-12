@@ -15,9 +15,9 @@ export default defineConfig({
   srcDir: 'src',
   outDir: 'dist',
   manifest: {
-    name: 'AgentHub — AI Chat + MCP for Claude, Cursor, ChatGPT',
+    name: 'AgentHub — Browser MCP for Claude Code & Cursor',
     version,
-    description: 'Let AI control your real Chrome — your tabs, sessions, logins. Chat sidebar + MCP for Claude, Cursor, and ChatGPT.',
+    description: 'AgentHub — Browser MCP for Claude Code, Cursor & Claude Desktop. Automate your real Chrome via MCP tools.',
     permissions: ['tabs', 'sidePanel', 'nativeMessaging', 'storage', 'scripting', 'debugger', 'alarms'],
     host_permissions: [
       'https://api.openai.com/*',
