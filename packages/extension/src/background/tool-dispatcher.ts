@@ -144,6 +144,298 @@ const SNAPSHOT_REF_INJECTOR = `(() => {
 // Playwright default (~30s) — same "no unbounded locator op" rule as click/press.
 const FIELD_OPTS = { timeout: 8_000 };
 
+// ── Ref-liveness classification (corrected Fix B) ───────────────────────────
+//
+// THE INVARIANT: `data-ai-ref` is a positional attribute stamped onto live
+// DOM nodes at snapshot time (see SNAPSHOT_REF_INJECTOR above). ANY DOM
+// mutation between snapshot and action can destroy the node a ref points to —
+// our own diag dashboard's 1.5s poll does this, and so does ordinary SPA
+// re-rendering (Google Analytics, React/Angular apps). When that happens,
+// `page.locator('[data-ai-ref="eN"]')` resolves to zero elements and the
+// existing bounded 8s `.click()`/`.press()`/`.fill()` throws a generic
+// Playwright timeout with no distinguishing errorCode.
+//
+// THE ONE HARD RULE: classification runs ONLY inside a catch block, AFTER the
+// real, unmodified, full-budget auto-waiting action has already thrown.
+// Playwright auto-waits for the target to attach/become-actionable across the
+// ENTIRE timeout window; a bare `locator.count()` does NOT wait at all.
+// Running count() BEFORE the action (or using it to shorten the wait) would
+// misclassify a legitimately-slow-but-successful render (attaches at +300ms,
+// async fetch resolving at +2s, etc. — well inside the 8s budget) as an
+// instant, incorrect failure. Every helper below is therefore only ever
+// called from a `catch`, never before or in place of the real action.
+
+type ClassifiedCode = 'REF_STALE' | 'CLICK_NOT_ACTIONABLE' | 'AMBIGUOUS_REF';
+
+/** Minimal identity fingerprint for an element, from the same accessible-name
+ * text the ref-injector writes into its YAML lines (`- button "Save" [ref=e12]`). */
+interface RefFingerprint {
+  role: string;
+  name: string;
+}
+
+/** Per-tab fingerprints handed out by the MOST RECENT snapshot/ref-injection.
+ * Replaced wholesale on every injector run (never merged) because the injector
+ * itself wipes and reassigns every `data-ai-ref` from scratch each time. A tab
+ * with no entry yields `undefined` lookups; every caller treats that as
+ * "nothing to verify against" and degrades to a plain REF_STALE, never a crash. */
+const refFingerprintCache = new Map<number, Map<string, RefFingerprint>>();
+
+/** Parse the ref-injector's output lines into a ref → fingerprint map. Single
+ * source of truth for the line format, shared by the cache-populating snapshot
+ * and the stale-ref retry so they can never drift apart. */
+function parseRefFingerprints(refLines: string): Map<string, RefFingerprint> {
+  const out = new Map<string, RefFingerprint>();
+  if (!refLines) return out;
+  const LINE_RE = /^- (\S+) "((?:[^"\\]|\\.)*)" \[ref=(e\d+)\]/;
+  for (const line of refLines.split('\n')) {
+    const m = LINE_RE.exec(line);
+    if (!m) continue;
+    const [, role, name, ref] = m;
+    out.set(ref, { role, name });
+  }
+  return out;
+}
+
+/** Loose match for the case-4 identity-warning comparison (evaluateHandle's
+ * probe exposes `text`, not `role`/`name`, so this compares on accessible text
+ * tolerantly and never false-alarms when there's nothing to compare). */
+function fingerprintsRoughlyMatch(
+  expected: RefFingerprint,
+  actual: { role?: string; text?: string },
+): boolean {
+  if (!actual.text) return true;
+  return expected.name === actual.text || expected.name.startsWith(actual.text.slice(0, 40));
+}
+
+/** Post-hoc, INSTANT classification of why a bounded locator action just
+ * failed. MUST be called only from a catch block (see the invariant above).
+ * Returns null if the check itself couldn't complete (page navigated/closed) —
+ * callers MUST fall back to the original error, never invent a new failure. */
+async function classifyLocatorFailure(
+  locator: { count(): Promise<number> },
+): Promise<ClassifiedCode | null> {
+  try {
+    const count = await locator.count();
+    if (count === 0) return 'REF_STALE';
+    if (count === 1) return 'CLICK_NOT_ACTIONABLE';
+    return 'AMBIGUOUS_REF';
+  } catch {
+    return null;
+  }
+}
+
+/** Wrap a classified failure as an Error carrying the existing `{code}`
+ * convention (see TAB_NOT_FOUND / DOMAIN_BLOCKED / CONTENT_UNAVAILABLE) so
+ * redaction.ts's redactError() emits `errorCode` like every other tool
+ * failure. `cause` preserves the original error for local debugging (redaction
+ * ignores it). */
+function toClassifiedError(code: ClassifiedCode, original: unknown): Error {
+  const message = original instanceof Error ? original.message : String(original);
+  // Prefix the machine code into the MESSAGE so it survives the bridge's
+  // translateExtensionResponse (which forwards only error.message, not .code)
+  // and reaches the MCP client's response text — letting the caller distinguish
+  // REF_STALE (re-snapshot & retry) from CLICK_NOT_ACTIONABLE (blocked/wait).
+  // The `code` property is still set for logs/activity + the ext→bridge frame.
+  return Object.assign(new Error(`${code}: ${message}`), { code, cause: original });
+}
+
+/** Sentinel thrown by performFieldAction to mean "a validation branch already
+ * pushed its own result; the caller should `continue`, not treat this as a
+ * real action failure." Preserves the original inline switch's bare-`continue`
+ * control flow. */
+const FIELD_SKIPPED = Symbol('field-skipped');
+
+/** The exact body of fill_form's original inline switch, extracted verbatim so
+ * it can be replayed against a freshly re-resolved locator on a stale-ref retry
+ * without duplicating logic. `fieldResults`/`fieldId` are used only by the
+ * validation branches that push a failure directly (matching the original's
+ * `continue` via FIELD_SKIPPED). */
+async function performFieldAction(
+  locator: { selectOption: Function; check: Function; uncheck: Function; setInputFiles: Function; fill: Function },
+  effectiveType: string,
+  detected: { multiple: boolean },
+  field: { values?: string[]; checked?: boolean },
+  valueStr: string,
+  fieldId: string,
+  fieldResults: Array<{ field: string; success: boolean; error?: string; errorCode?: string }>,
+): Promise<void> {
+  switch (effectiveType) {
+    case 'select': {
+      const opts = field.values ?? (valueStr ? [valueStr] : []);
+      if (opts.length === 0) {
+        fieldResults.push({ field: fieldId, success: false, error: 'select requires `value` or `values`' });
+        throw FIELD_SKIPPED;
+      }
+      await locator.selectOption(detected.multiple ? opts : opts[0], FIELD_OPTS);
+      break;
+    }
+    case 'checkbox': {
+      const truthy = field.checked ?? /^(true|on|yes|1|checked)$/i.test(valueStr);
+      if (truthy) await locator.check(FIELD_OPTS);
+      else await locator.uncheck(FIELD_OPTS);
+      break;
+    }
+    case 'radio': {
+      if (field.checked === false) {
+        fieldResults.push({ field: fieldId, success: false, error: 'radio cannot be unchecked; check a sibling radio instead' });
+        throw FIELD_SKIPPED;
+      }
+      await locator.check(FIELD_OPTS);
+      break;
+    }
+    case 'file':
+      await locator.setInputFiles(field.values ?? valueStr, FIELD_OPTS);
+      break;
+    default:
+      await locator.fill(valueStr, FIELD_OPTS);
+      break;
+  }
+}
+
+/** Called ONLY from click_element's catch, after the real 8s `.click()` has
+ * already thrown. Classifies; for a REF_STALE ref-based click, attempts exactly
+ * one identity-verified re-resolve-and-retry (unique role+name match to the
+ * snapshot fingerprint — NEVER by index) before giving up. Returns normally iff
+ * the retry recovered; otherwise throws a classified error, or the untouched
+ * original if classification itself failed. */
+async function classifyAndMaybeRetryClick(opts: {
+  page: Page;
+  tabId: number;
+  locator: { count(): Promise<number> };
+  ref: string | null;
+  originalError: unknown;
+}): Promise<void> {
+  const code = await classifyLocatorFailure(opts.locator);
+  if (code === null) throw opts.originalError; // diagnostic itself failed — never invent a new failure
+
+  if (code !== 'REF_STALE' || !opts.ref) {
+    throw toClassifiedError(code, opts.originalError);
+  }
+
+  const expected = refFingerprintCache.get(opts.tabId)?.get(opts.ref);
+  if (!expected) throw toClassifiedError('REF_STALE', opts.originalError);
+
+  let retryRef: string | null = null;
+  try {
+    const refLines = (await opts.page.evaluate(SNAPSHOT_REF_INJECTOR)) as string;
+    const fresh = parseRefFingerprints(refLines);
+    refFingerprintCache.set(opts.tabId, fresh);
+    const matches = [...fresh.entries()].filter(
+      ([, fp]) => fp.role === expected.role && fp.name === expected.name,
+    );
+    if (matches.length === 1) retryRef = matches[0][0];
+  } catch {
+    // Re-injection failed (page mid-navigation/context destroyed) — fall to REF_STALE.
+  }
+
+  void logRecord({
+    event: 'ext.tool.dispatch.stale_ref_retry', lvl: 'warn', toolName: 'click_element',
+    originalRef: opts.ref, retryRef, outcome: retryRef ? 'attempting' : 'no_unique_match',
+  });
+
+  if (!retryRef) throw toClassifiedError('REF_STALE', opts.originalError);
+
+  try {
+    // NEVER retry by index — only by the freshly re-derived ref that uniquely
+    // matched the ORIGINAL element's role+name. This is what stops this retry
+    // from becoming the silent-wrong-click bug it's meant to guard against.
+    await opts.page.locator(`[data-ai-ref="${retryRef}"]`).click({ timeout: 8_000 });
+    void logRecord({ event: 'ext.tool.dispatch.stale_ref_retry', lvl: 'info', toolName: 'click_element', originalRef: opts.ref, retryRef, outcome: 'succeeded' });
+    return;
+  } catch {
+    void logRecord({ event: 'ext.tool.dispatch.stale_ref_retry', lvl: 'warn', toolName: 'click_element', originalRef: opts.ref, retryRef, outcome: 'retry_failed' });
+    throw toClassifiedError('REF_STALE', opts.originalError);
+  }
+}
+
+/** Same contract as classifyAndMaybeRetryClick, replaying `.press(key, opts)`. */
+async function classifyAndMaybeRetryPress(opts: {
+  page: Page;
+  tabId: number;
+  locator: { count(): Promise<number> };
+  ref: string;
+  key: string;
+  pressOpts: { timeout: number; noWaitAfter: boolean };
+  originalError: unknown;
+}): Promise<void> {
+  const code = await classifyLocatorFailure(opts.locator);
+  if (code === null) throw opts.originalError;
+  if (code !== 'REF_STALE') throw toClassifiedError(code, opts.originalError);
+
+  const expected = refFingerprintCache.get(opts.tabId)?.get(opts.ref);
+  if (!expected) throw toClassifiedError('REF_STALE', opts.originalError);
+
+  let retryRef: string | null = null;
+  try {
+    const refLines = (await opts.page.evaluate(SNAPSHOT_REF_INJECTOR)) as string;
+    const fresh = parseRefFingerprints(refLines);
+    refFingerprintCache.set(opts.tabId, fresh);
+    const matches = [...fresh.entries()].filter(
+      ([, fp]) => fp.role === expected.role && fp.name === expected.name,
+    );
+    if (matches.length === 1) retryRef = matches[0][0];
+  } catch { /* fall through to REF_STALE */ }
+
+  void logRecord({
+    event: 'ext.tool.dispatch.stale_ref_retry', lvl: 'warn', toolName: 'press_key',
+    originalRef: opts.ref, retryRef, outcome: retryRef ? 'attempting' : 'no_unique_match',
+  });
+  if (!retryRef) throw toClassifiedError('REF_STALE', opts.originalError);
+
+  try {
+    await opts.page.locator(`[data-ai-ref="${retryRef}"]`).press(opts.key, opts.pressOpts);
+    void logRecord({ event: 'ext.tool.dispatch.stale_ref_retry', lvl: 'info', toolName: 'press_key', originalRef: opts.ref, retryRef, outcome: 'succeeded' });
+    return;
+  } catch {
+    void logRecord({ event: 'ext.tool.dispatch.stale_ref_retry', lvl: 'warn', toolName: 'press_key', originalRef: opts.ref, retryRef, outcome: 'retry_failed' });
+    throw toClassifiedError('REF_STALE', opts.originalError);
+  }
+}
+
+/** Same contract as the click/press retries: one bounded, identity-verified
+ * replay on REF_STALE, never by index. Returns true iff the retry succeeded. */
+async function attemptStaleRefRetryForField(opts: {
+  page: Page;
+  tabId: number;
+  ref: string;
+  effectiveType: string;
+  detected: { tag: string; type: string; multiple: boolean; ce: boolean };
+  field: { values?: string[]; checked?: boolean };
+  valueStr: string;
+}): Promise<boolean> {
+  const expected = refFingerprintCache.get(opts.tabId)?.get(opts.ref);
+  if (!expected) return false;
+
+  let retryRef: string | null = null;
+  try {
+    const refLines = (await opts.page.evaluate(SNAPSHOT_REF_INJECTOR)) as string;
+    const fresh = parseRefFingerprints(refLines);
+    refFingerprintCache.set(opts.tabId, fresh);
+    const matches = [...fresh.entries()].filter(
+      ([, fp]) => fp.role === expected.role && fp.name === expected.name,
+    );
+    if (matches.length === 1) retryRef = matches[0][0];
+  } catch { /* fall through */ }
+
+  void logRecord({
+    event: 'ext.tool.dispatch.stale_ref_retry', lvl: 'warn', toolName: 'fill_form',
+    originalRef: opts.ref, retryRef, outcome: retryRef ? 'attempting' : 'no_unique_match',
+  });
+  if (!retryRef) return false;
+
+  try {
+    const retryLocator = opts.page.locator(`[data-ai-ref="${retryRef}"]`);
+    const dummyResults: Array<{ field: string; success: boolean; error?: string; errorCode?: string }> = [];
+    await performFieldAction(retryLocator, opts.effectiveType, opts.detected, opts.field, opts.valueStr, `ref=${opts.ref}`, dummyResults);
+    void logRecord({ event: 'ext.tool.dispatch.stale_ref_retry', lvl: 'info', toolName: 'fill_form', originalRef: opts.ref, retryRef, outcome: 'succeeded' });
+    return true;
+  } catch {
+    void logRecord({ event: 'ext.tool.dispatch.stale_ref_retry', lvl: 'warn', toolName: 'fill_form', originalRef: opts.ref, retryRef, outcome: 'retry_failed' });
+    return false;
+  }
+}
+
 // Service-worker-safe binary → base64 (no Node Buffer in MV3). Chunked to
 // avoid blowing the call stack on large (multi-hundred-KB) screenshots.
 const bytesToBase64 = (bytes: Uint8Array): string => {
@@ -166,6 +458,10 @@ const captureSnapshot = async (tabId: number): Promise<string> => {
       // not slowed.
       await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => { /* best-effort */ });
       const refLines = await page.evaluate(SNAPSHOT_REF_INJECTOR).catch(() => '') as string;
+      // Keep the identity cache in lockstep with every ref-minting event — this
+      // IS the snapshot, so it's the only correct place to record what each ref
+      // pointed to when minted (used by the stale-ref retry/identity checks).
+      refFingerprintCache.set(tabId, parseRefFingerprints(refLines));
       let aria = '';
       try {
         const body = page.locator('body');
@@ -510,18 +806,24 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
     const tab = await getTab(params.tab_id as number | undefined);
 
     const results = await withPlaywrightPage(tab.id!, async (page) => {
-      const fieldResults: Array<{ field: string; success: boolean; error?: string }> = [];
+      const fieldResults: Array<{ field: string; success: boolean; error?: string; errorCode?: string }> = [];
 
       for (const field of fields) {
         const fieldId = field.ref ? `ref=${field.ref}` :
           field.label || (field.role && field.name ? `${field.role}:${field.name}` : '') ||
           field.placeholder || field.selector || 'unknown';
 
+        // Hoisted ABOVE the try so the catch can inspect them for stale-ref
+        // classification/retry (corrected Fix B). Originally block-scoped inside
+        // the try, which would leave them invisible to the catch.
+        let locator: any;
+        let detected: { tag: string; type: string; multiple: boolean; ce: boolean } = { tag: '', type: '', multiple: false, ce: false };
+        let effectiveType = 'text';
+        const valueStr = field.value ?? '';
         try {
           // Build locator with strict preference order: ref > label > role+name >
           // placeholder > selector. role-only is REJECTED — it silently filled the
           // first matching element on the page (a real bug, not a feature).
-          let locator;
           if (field.ref) {
             // ref locators ignore the iframe parameter — refs are page-wide and
             // injected only in the top frame today (documented limitation).
@@ -556,7 +858,6 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
           // Auto-detect element type from the DOM. Only used when `field.type`
           // is not provided. This prevents the bug where omitting `type` for a
           // <select> caused locator.fill() to throw "element is not an input".
-          let detected: { tag: string; type: string; multiple: boolean; ce: boolean } = { tag: '', type: '', multiple: false, ce: false };
           if (!field.type) {
             try {
               detected = await locator.evaluate((el: Element) => ({
@@ -570,7 +871,7 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
             }
           }
 
-          const effectiveType =
+          effectiveType =
             field.type ??
             (detected.tag === 'SELECT' ? 'select' :
              detected.type === 'checkbox' ? 'checkbox' :
@@ -578,49 +879,41 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
              detected.type === 'file' ? 'file' :
              'text');
 
-          const valueStr = field.value ?? '';
-
-          switch (effectiveType) {
-            case 'select': {
-              const opts = field.values ?? (valueStr ? [valueStr] : []);
-              if (opts.length === 0) {
-                fieldResults.push({ field: fieldId, success: false, error: 'select requires `value` or `values`' });
-                continue;
-              }
-              await locator.selectOption(detected.multiple ? opts : opts[0], FIELD_OPTS);
-              break;
-            }
-            case 'checkbox': {
-              // Prefer explicit `checked`. Fallback: parse common truthy strings.
-              const truthy = field.checked ?? /^(true|on|yes|1|checked)$/i.test(valueStr);
-              if (truthy) await locator.check(FIELD_OPTS);
-              else await locator.uncheck(FIELD_OPTS);
-              break;
-            }
-            case 'radio': {
-              // Radios cannot be unchecked individually. `checked: false` is a
-              // user error — radios are selected by checking a different one.
-              if (field.checked === false) {
-                fieldResults.push({ field: fieldId, success: false, error: 'radio cannot be unchecked; check a sibling radio instead' });
-                continue;
-              }
-              await locator.check(FIELD_OPTS);
-              break;
-            }
-            case 'file':
-              await locator.setInputFiles(field.values ?? valueStr, FIELD_OPTS);
-              break;
-            default:
-              await locator.fill(valueStr, FIELD_OPTS);
-              break;
+          // UNCHANGED action dispatch, extracted verbatim into performFieldAction
+          // so the stale-ref retry can replay the SAME action against a freshly
+          // re-resolved locator. Behavior is byte-identical to the inline switch.
+          try {
+            await performFieldAction(locator, effectiveType, detected, field, valueStr, fieldId, fieldResults);
+          } catch (actionErr) {
+            if (actionErr === FIELD_SKIPPED) continue; // a validation branch already pushed a result
+            throw actionErr;
           }
 
           fieldResults.push({ field: fieldId, success: true });
         } catch (err) {
+          // Classify WHY the field action failed (stale ref vs. found-but-blocked
+          // vs. ambiguous) and, for a genuinely stale REF, attempt one bounded,
+          // identity-verified retry. Validation errors never reach here — they
+          // push their own result and `continue` via FIELD_SKIPPED above.
+          let errorCode: string | undefined;
+          if (locator) {
+            const code = await classifyLocatorFailure(locator).catch(() => null);
+            if (code) errorCode = code;
+            if (code === 'REF_STALE' && field.ref) {
+              const recovered = await attemptStaleRefRetryForField({
+                page, tabId: tab.id!, ref: field.ref, effectiveType, detected, field, valueStr,
+              }).catch(() => false);
+              if (recovered) {
+                fieldResults.push({ field: fieldId, success: true });
+                continue;
+              }
+            }
+          }
           fieldResults.push({
             field: fieldId,
             success: false,
             error: err instanceof Error ? err.message : String(err),
+            ...(errorCode ? { errorCode } : {}),
           });
         }
       }
@@ -674,16 +967,36 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
         new Promise<null>((res) => setTimeout(() => res(null), 1500)),
       ]);
 
-      // Bounded click. The original hang was the UNBOUNDED post-click element
-      // re-resolve (removed above), NOT the click itself — so we let the click
-      // wait for any post-click navigation, but BOUNDED to 8s. This leaves the
-      // page SETTLED for the snapshot below (and for the caller's next tool),
-      // unlike fire-and-forget which left the page mid-navigation. If the click
-      // genuinely can't complete in 8s it throws a clean, fast error. We never
-      // re-resolve the locator afterward — the element may already be gone.
-      await locator.click({ timeout: 8_000 });
+      // Case-4 (silent wrong-click) detection: compare the just-resolved element
+      // against the fingerprint recorded when this `ref` was minted by the last
+      // snapshot, and ANNOTATE — never block — a mismatch. This reuses the
+      // best-effort probe above, so it adds no latency and never gates the click.
+      let refIdentityWarning: string | undefined;
+      if (ref && element) {
+        const expected = refFingerprintCache.get(tab.id!)?.get(ref);
+        if (expected && !fingerprintsRoughlyMatch(expected, element as { text?: string })) {
+          refIdentityWarning =
+            `ref ${ref} resolved to an element whose identity looks different from the ` +
+            `last snapshot (expected ${expected.role} "${expected.name}"); clicked it anyway — ` +
+            `re-snapshot to confirm this was the intended target.`;
+        }
+      }
 
-      return element;
+      // Bounded click — UNCHANGED from today: same call, same 8s budget, same
+      // auto-wait semantics. A click that would succeed today succeeds
+      // identically here — nothing runs before it and nothing shortens it.
+      // NEW: only if it throws do we classify WHY (stale ref vs. found-but-
+      // blocked vs. ambiguous) and, for a genuinely stale ref, attempt one
+      // bounded, identity-verified retry. See classifyAndMaybeRetryClick.
+      try {
+        await locator.click({ timeout: 8_000 });
+      } catch (clickErr) {
+        await classifyAndMaybeRetryClick({ page, tabId: tab.id!, locator, ref, originalError: clickErr });
+        // Reaching here (no throw) means the bounded retry recovered — treat
+        // exactly like a normal successful click.
+      }
+
+      return { ...((element as object | null) ?? {}), refIdentityWarning };
     });
 
     // Always return a FRESH snapshot (best-effort) so the caller gets current
@@ -705,11 +1018,27 @@ const tools: Record<string, (params: Record<string, unknown>) => Promise<unknown
       // up to the default 30s (only the 25s dispatch cap would catch it).
       const pressOpts = { timeout: 8_000, noWaitAfter: true };
       if (ref) {
-        await page.locator(`[data-ai-ref="${ref}"]`).press(key, pressOpts);
+        const locator = page.locator(`[data-ai-ref="${ref}"]`);
+        // UNCHANGED action, unchanged budget. Classification runs only in the catch.
+        try {
+          await locator.press(key, pressOpts);
+        } catch (pressErr) {
+          await classifyAndMaybeRetryPress({ page, tabId: tab.id!, locator, ref, key, pressOpts, originalError: pressErr });
+        }
       } else if (selector) {
-        await page.locator(selector).press(key, pressOpts);
+        const locator = page.locator(selector);
+        try {
+          await locator.press(key, pressOpts);
+        } catch (pressErr) {
+          // No ref to retry against — classify and surface, same as
+          // click_element's selector/text branch.
+          const code = await classifyLocatorFailure(locator);
+          if (code === null) throw pressErr;
+          throw toClassifiedError(code, pressErr);
+        }
       } else {
-        // No target — fire as a global keyboard event on the page.
+        // No target — fire as a global keyboard event on the page. Nothing to
+        // classify; this path has no locator and can't go stale.
         await page.keyboard.press(key);
       }
     });

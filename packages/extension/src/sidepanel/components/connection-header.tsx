@@ -3,22 +3,26 @@ import { useState, useEffect, useMemo } from 'preact/hooks';
 import { StatusBadge } from './status-badge.js';
 import { DiagnosticsPanel } from './diagnostics-panel.js';
 import { useStore } from '../store.js';
-import { getDisplayState, type DiagnosticReason } from '../../shared/types.js';
+import { STALE_THRESHOLD_MS, type DiagnosticReason } from '../../shared/types.js';
+import { useApiState } from '../use-api-state.js';
+import { deriveVerdict, type ApiStateFacts, type Verdict, type VerdictAction } from '../connection-verdict.js';
 
-interface ActionButton {
-  id: 'start_service' | 'restart_service' | 'reconnect_now' | 'reload_extension' | 'copy_install_command';
-  label: string;
-  variant: 'primary' | 'secondary';
-}
+type ActionButton = VerdictAction;
 
 const INSTALL_COMMAND = 'npx agenthub-setup@latest --update';
 
 /**
- * Pure mapping from connection-context shape to a UI title + subtitle + buttons.
- * Centralised so tests can assert "this state shows that label and these buttons"
- * without rendering Preact.
+ * Thin adapter over the single shared verdict (`deriveVerdict`) so the header,
+ * the diagnostics panel, and the dashboard all agree (design §4 / §7.2). Kept as
+ * `deriveHeader` so existing tests/callers keep working; the new `api` /
+ * `quickCheckPassed` facts are optional and default to "no extra facts" → it
+ * behaves as the legacy client-only derivation when /api/state is unavailable.
  */
 export interface DerivedHeader {
+  /** The verdict kind — passed to DiagnosticsPanel so it knows whether a
+   *  version-mismatch callout should be primary (kind==='version_mismatch') or
+   *  demoted to a secondary note (another issue owns the headline). */
+  kind: Verdict['kind'];
   title: string;
   subtitle: string | null;
   /** When true, the title row should be styled red (broken) instead of amber. */
@@ -26,10 +30,12 @@ export interface DerivedHeader {
   buttons: ActionButton[];
   /** Auto-expand the diagnostics panel? Used when state has been broken too long. */
   autoOpenDiagnostics: boolean;
+  /** Verdict badge state — drives the StatusBadge so it agrees with the title. */
+  badge: Verdict['badge'];
 }
 
 export function deriveHeader(args: {
-  displayState: ReturnType<typeof getDisplayState>;
+  displayState?: string;
   state: string;
   diagnosticReason: DiagnosticReason | null;
   failureCount: number;
@@ -37,176 +43,59 @@ export function deriveHeader(args: {
   reconnectingSinceMs: number | null;
   versionStatus: 'ok' | 'outdated' | null;
   startedBy?: string;
+  reconnectsThisSession?: number;
+  lastVerifiedAt?: number;
+  api?: ApiStateFacts | null;
+  quickCheckPassed?: boolean;
 }): DerivedHeader {
-  const { displayState, state, diagnosticReason, failureCount, reconnectingSinceMs, versionStatus, startedBy } = args;
-
-  if (displayState === 'connected') {
-    return {
-      title: 'Connected',
-      subtitle: startedBy && startedBy !== 'unknown' ? `Bridge running — started by ${startedBy}` : 'Bridge running',
-      severity: 'ok',
-      buttons: [],
-      autoOpenDiagnostics: false,
-    };
-  }
-
-  if (displayState === 'stale') {
-    return {
-      title: 'Verifying connection…',
-      subtitle: 'Checking that the bridge is still responsive.',
-      severity: 'warn',
-      buttons: [{ id: 'reconnect_now', label: 'Check now', variant: 'secondary' }],
-      autoOpenDiagnostics: false,
-    };
-  }
-
-  if (displayState === 'degraded') {
-    return {
-      title: 'Connection unstable',
-      subtitle: 'Heartbeats are missing. Try restarting the service.',
-      severity: 'warn',
-      buttons: [
-        { id: 'restart_service', label: 'Restart service', variant: 'primary' },
-        { id: 'reconnect_now', label: 'Reconnect', variant: 'secondary' },
-      ],
-      autoOpenDiagnostics: false,
-    };
-  }
-
-  if (versionStatus === 'outdated') {
-    return {
-      title: 'Bridge is outdated',
-      subtitle: 'Re-run the installer to update.',
-      severity: 'warn',
-      buttons: [
-        { id: 'copy_install_command', label: 'Copy install command', variant: 'primary' },
-        { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
-      ],
-      autoOpenDiagnostics: false,
-    };
-  }
-
-  const reconnectingTooLong = (reconnectingSinceMs ?? 0) > 30_000;
-
-  // No bridge running.
-  if (diagnosticReason === 'no_lock_file' || diagnosticReason === 'bridge_not_started') {
-    return {
-      title: "Bridge isn't running",
-      subtitle: diagnosticReason === 'no_lock_file'
-        ? 'No AgentHub service was found. Start it to enable browser tools.'
-        : 'A bridge is registered but not currently running.',
-      severity: 'error',
-      buttons: [
-        { id: 'start_service', label: 'Start AgentHub service', variant: 'primary' },
-        { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
-      ],
-      autoOpenDiagnostics: reconnectingTooLong,
-    };
-  }
-
-  // Setup not finished.
-  if (diagnosticReason === 'helper_unavailable') {
-    return {
-      title: 'Setup incomplete',
-      subtitle: 'The native messaging helper isn\u2019t registered. Re-run the installer.',
-      severity: 'error',
-      buttons: [
-        { id: 'copy_install_command', label: 'Copy install command', variant: 'primary' },
-        { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
-      ],
-      autoOpenDiagnostics: true,
-    };
-  }
-
-  // Bridge alive but not speaking the protocol — likely zombie or wrong version.
-  if (diagnosticReason === 'server_not_responding' || diagnosticReason === 'protocol_timeout') {
-    return {
-      title: 'Bridge running but unresponsive',
-      subtitle: diagnosticReason === 'protocol_timeout'
-        ? 'The service accepted the connection but never spoke the protocol. Restart it.'
-        : 'The service isn\u2019t answering. Restart to recover.',
-      severity: 'error',
-      buttons: [
-        { id: 'restart_service', label: 'Restart service', variant: 'primary' },
-        { id: 'reconnect_now', label: 'Reconnect', variant: 'secondary' },
-        { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
-      ],
-      autoOpenDiagnostics: true,
-    };
-  }
-
-  if (diagnosticReason === 'was_connected') {
-    return {
-      title: 'Lost connection',
-      subtitle: startedBy && startedBy !== 'unknown'
-        ? `Reopen ${startedBy} to reconnect.`
-        : 'Reopen your AI tool to reconnect.',
-      severity: 'warn',
-      buttons: [
-        { id: 'reconnect_now', label: 'Reconnect now', variant: 'primary' },
-        { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
-      ],
-      autoOpenDiagnostics: reconnectingTooLong,
-    };
-  }
-
-  if (state === 'reconnecting') {
-    return {
-      title: reconnectingTooLong ? 'Bridge looks broken' : `Reconnecting (attempt ${failureCount})…`,
-      subtitle: reconnectingTooLong
-        ? 'Reconnect attempts have been failing — open diagnostics for details.'
-        : 'Trying to re-establish the connection.',
-      severity: reconnectingTooLong ? 'error' : 'warn',
-      buttons: reconnectingTooLong
-        ? [
-            { id: 'restart_service', label: 'Restart service', variant: 'primary' },
-            { id: 'reconnect_now', label: 'Reconnect', variant: 'secondary' },
-            { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
-          ]
-        : [],
-      autoOpenDiagnostics: reconnectingTooLong,
-    };
-  }
-
-  if (state === 'connecting') {
-    return {
-      title: 'Looking for bridge…',
-      subtitle: 'Finding the running AgentHub service.',
-      severity: 'warn',
-      buttons: [],
-      autoOpenDiagnostics: false,
-    };
-  }
-
+  const verdict = deriveVerdict({
+    ctx: {
+      state: args.state as never,
+      diagnosticReason: args.diagnosticReason,
+      failureCount: args.failureCount,
+      lastConnectedAt: args.lastConnectedAt,
+      reconnectsThisSession: args.reconnectsThisSession ?? 0,
+      lastVerifiedAt: args.lastVerifiedAt ?? 0,
+      versionStatus: args.versionStatus,
+    },
+    api: args.api ?? null,
+    quickCheckPassed: args.quickCheckPassed ?? false,
+    reconnectingSinceMs: args.reconnectingSinceMs,
+    staleThresholdMs: STALE_THRESHOLD_MS,
+  });
   return {
-    title: 'Not connected',
-    subtitle: 'Start the AgentHub service to enable browser tools.',
-    severity: 'error',
-    buttons: [
-      { id: 'start_service', label: 'Start AgentHub service', variant: 'primary' },
-      { id: 'reload_extension', label: 'Reload extension', variant: 'secondary' },
-    ],
-    autoOpenDiagnostics: false,
+    kind: verdict.kind,
+    title: verdict.title,
+    subtitle: verdict.subtitle,
+    severity: verdict.severity,
+    buttons: verdict.actions,
+    autoOpenDiagnostics: verdict.autoOpenDiagnostics,
+    badge: verdict.badge,
   };
 }
 
 export const ConnectionHeader: FunctionalComponent = () => {
-  const [showDiag, setShowDiag] = useState(false);
+  // Default to expanded for this release — user can still collapse manually.
+  const [showDiag, setShowDiag] = useState(true);
   const [busyButton, setBusyButton] = useState<ActionButton['id'] | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
 
   const connectionContext = useStore((s) => s.connectionContext);
-  const { state, serverInfo, failureCount, diagnosticReason, lastConnectedAt, versionStatus } = connectionContext;
-  const displayState = getDisplayState(connectionContext);
+  const { state, serverInfo, failureCount, diagnosticReason, lastConnectedAt, versionStatus, reconnectsThisSession, lastVerifiedAt } = connectionContext;
 
-  // Tick once a second so the "Reconnecting (attempt N)…" / "looks broken"
-  // labels become accurate without waiting for an external state update.
+  // Consume /api/state for OUR browserId — the truthful backing the header used
+  // to discard. `facts` carries liveness + supersededCount + recent request
+  // success/failure; `quickCheckPassed` flips true after an on-demand list_tabs.
+  const isHealthy = state === 'connected' || state === 'degraded';
+  const { facts, runQuickCheck, quickCheckPassed } = useApiState(serverInfo?.port, isHealthy);
+
+  // Tick once a second so the "Reconnecting (attempt N)…" / "looks broken" /
+  // recovering labels become accurate without waiting for an external update.
   useEffect(() => {
-    if (state !== 'reconnecting' && state !== 'connecting') return;
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [state]);
+  }, []);
 
   // Fire verify_connection on mount to wake SW and force reconciliation.
   useEffect(() => {
@@ -221,7 +110,6 @@ export const ConnectionHeader: FunctionalComponent = () => {
   const header = useMemo(
     () =>
       deriveHeader({
-        displayState,
         state,
         diagnosticReason,
         failureCount,
@@ -229,8 +117,12 @@ export const ConnectionHeader: FunctionalComponent = () => {
         reconnectingSinceMs,
         versionStatus,
         startedBy: serverInfo?.startedBy,
+        reconnectsThisSession,
+        lastVerifiedAt,
+        api: facts,
+        quickCheckPassed,
       }),
-    [displayState, state, diagnosticReason, failureCount, lastConnectedAt, reconnectingSinceMs, versionStatus, serverInfo?.startedBy],
+    [state, diagnosticReason, failureCount, lastConnectedAt, reconnectingSinceMs, versionStatus, serverInfo?.startedBy, reconnectsThisSession, lastVerifiedAt, facts, quickCheckPassed],
   );
 
   // Auto-expand diagnostics if the derived state demands it.
@@ -256,18 +148,34 @@ export const ConnectionHeader: FunctionalComponent = () => {
           await chrome.runtime.sendMessage({ type: 'verify_connection' }).catch(() => null);
           setFlash('Checking connection…');
           break;
+        case 'run_quick_check': {
+          // Fire a REAL list_tabs through the MCP dispatch path. Success is the
+          // tool-path fact that upgrades the headline to "Working" — never a pong.
+          setFlash('Running a quick check…');
+          const ok = await runQuickCheck();
+          setFlash(ok ? 'Quick check passed — tools are working.' : 'Quick check failed — tools aren’t responding.');
+          break;
+        }
         case 'reload_extension':
           setFlash('Reloading extension…');
           setTimeout(() => chrome.runtime.reload(), 800);
           break;
-        case 'copy_install_command':
+        case 'copy_install_command': {
+          // Include the live extension ID so re-running setup re-registers THIS
+          // extension with the bridge (the fix for the "origin not in allowlist"
+          // flapping loop — a bare update without the id can't add the origin).
+          const extId = chrome.runtime?.id ?? '';
+          const installCommand = extId
+            ? `${INSTALL_COMMAND} --extension-id ${extId}`
+            : INSTALL_COMMAND;
           try {
-            await navigator.clipboard.writeText(INSTALL_COMMAND);
-            setFlash('Install command copied to clipboard');
+            await navigator.clipboard.writeText(installCommand);
+            setFlash('Setup command copied — paste it into a terminal and run it');
           } catch {
-            setFlash(`Copy failed — run: ${INSTALL_COMMAND}`);
+            setFlash(`Copy failed — run: ${installCommand}`);
           }
           break;
+        }
       }
     } finally {
       setTimeout(() => setBusyButton(null), 600);
@@ -287,16 +195,29 @@ export const ConnectionHeader: FunctionalComponent = () => {
 
   return (
     <header class="border-b border-card-border bg-white" role="banner" data-testid="connection-header">
+      {/* Polite live region: announces the HEADER TITLE transition
+          (Working \u2192 Flapping \u2192 Recovering \u2192 \u2026) to screen readers. Previously
+          only the badge dot announced; the title itself was a silent button
+          (design \u00A77.2 / accessibility law). Visually hidden \u2014 the visible title
+          below renders the same text. */}
+      <span
+        role="status"
+        aria-live="polite"
+        class="sr-only"
+        data-testid="connection-header-live"
+      >
+        {`Connection status: ${header.title}`}
+      </span>
       <div class="flex items-center justify-between px-4 py-3">
         <span class="text-base font-semibold text-neutral-900 tracking-tight">AgentHub</span>
         <button
           class="flex items-center gap-1.5 cursor-pointer hover:opacity-80"
           onClick={() => setShowDiag(!showDiag)}
-          aria-label="Toggle connection diagnostics"
+          aria-label={`${header.title}. Toggle connection diagnostics`}
           aria-expanded={showDiag}
           title="Click for diagnostics"
         >
-          <StatusBadge state={displayState} compact />
+          <StatusBadge state={header.badge} compact />
           <span
             class={`text-xs font-medium ${header.severity === 'ok' ? statusLabel : titleColor}`}
             data-testid="connection-header-title"
@@ -340,7 +261,14 @@ export const ConnectionHeader: FunctionalComponent = () => {
         </div>
       )}
       {showDiag && (
-        <DiagnosticsPanel serverInfo={serverInfo} connectionContext={connectionContext} />
+        <DiagnosticsPanel
+          serverInfo={serverInfo}
+          connectionContext={connectionContext}
+          verdictTitle={header.title}
+          verdictSeverity={header.severity}
+          verdictKind={header.kind}
+          verdictActionIds={header.buttons.map((b) => b.id)}
+        />
       )}
     </header>
   );

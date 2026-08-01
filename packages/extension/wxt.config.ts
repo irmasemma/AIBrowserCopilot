@@ -1,13 +1,23 @@
 import { defineConfig } from 'wxt';
 import preact from '@preact/preset-vite';
+import { readFileSync } from 'node:fs';
+
+// Single source of truth for the extension version: package.json. Never hardcode
+// it here — a hand-maintained manifest version drifts from package.json (and from
+// the bridge/helper), which is exactly the silent version-skew class this repo
+// keeps hitting. chrome.runtime.getManifest().version (read by the diagnostics
+// version-skew check) therefore always matches package.json.
+const { version } = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf-8'),
+) as { version: string };
 
 export default defineConfig({
   srcDir: 'src',
   outDir: 'dist',
   manifest: {
-    name: 'AgentHub — AI Chat + MCP for Claude, Cursor, ChatGPT',
-    version: '0.5.15',
-    description: 'Let AI control your real Chrome — your tabs, sessions, logins. Chat sidebar + MCP for Claude, Cursor, and ChatGPT.',
+    name: 'AgentHub — Browser MCP for Claude Code & Cursor',
+    version,
+    description: 'AgentHub — Browser MCP for Claude Code, Cursor & Claude Desktop. Automate your real Chrome via MCP tools.',
     permissions: ['tabs', 'sidePanel', 'nativeMessaging', 'storage', 'scripting', 'debugger', 'alarms'],
     host_permissions: [
       'https://api.openai.com/*',

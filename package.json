@@ -13,7 +13,10 @@
     "typecheck": "npm run typecheck --workspaces",
     "test": "npm run test --workspaces --if-present",
     "edge:debug": "node scripts/launch-edge-debug.mjs",
-    "test:real-edge": "playwright test --project=real-edge-via-cdp"
+    "test:real-edge": "playwright test --project=real-edge-via-cdp",
+    "test:e2e": "playwright test --project=chromium-extension",
+    "test:e2e:soak": "playwright test --project=chromium-extension --grep-invert=soak --repeat-each=20",
+    "test:e2e:soak:all": "playwright test --project=chromium-extension --repeat-each=20"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

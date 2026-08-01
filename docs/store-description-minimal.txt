@@ -1,24 +1,54 @@
-AI browser automation — use the built-in chat or connect Claude Code, Cursor, and other MCP-compatible AI tools to automate your browser. Control data flow, stay private. Full MCP to your browser.
+SUMMARY — NOTE: the CWS Summary field is read-only, sourced from the manifest `description`
+(set in packages/extension/wxt.config.ts; changing it requires rebuild + re-zip).
+Current v0.5.19 manifest description (105/132 chars, store-safe, ships with the zip):
+AgentHub — Browser MCP for Claude Code, Cursor & Claude Desktop. Automate your real Chrome via MCP tools.
 
-Two ways to use it:
+Previous wording (119/132 chars), kept for reference:
+Let AI control your real Chrome — your tabs, sessions, logins. Connect Claude, Cursor, and other AI assistants via MCP.
 
-MCP integration: Connect external AI tools via Model Context Protocol (MCP) to bring AI to any website. Tested with Claude Code, Cursor, and Claude Desktop out of the box — works with any MCP-compatible client. Full list of tested clients on GitHub: github.com/irmasemma/AIBrowserCopilot
+DESCRIPTION (paste below into the CWS "Description" field):
 
-Built-in chat: Chat with OpenAI directly in the browser sidebar to automate tasks, read pages, fill forms.
+Let AI control your real Chrome — your tabs, sessions, logins. AgentHub connects Claude Code, Cursor, Claude Desktop, and any other MCP-compatible AI client to your actual browser, so your AI assistant can navigate, read, and act on real pages instead of a sandboxed copy.
 
-What you can do:
-• Read and extract page content
-• Fill forms and interact with pages
+HOW IT WORKS
+
+AgentHub exposes your browser as a set of MCP (Model Context Protocol) tools. Install the extension, then run one command in any terminal:
+
+npx agenthub-setup@latest
+
+The installer detects the AI tools already on your machine and registers the local bridge with each of them automatically. No manual config files to edit.
+
+WHAT YOUR AI CAN DO
+
+• List and read your open tabs
+• Navigate, go back, go forward
+• Read full page content and page metadata
+• Take an accessibility snapshot of the page
 • Take screenshots
-• Automate workflows without leaving your browser
+• Fill out forms — including React, Vue, and shadow DOM inputs
+• Read existing form values before changing them
+• Click elements, press keys, scroll the page
+• Extract tables and structured data from any page
 
-Privacy & control:
-• Your OpenAI API key (if using chat) stays local in your browser
-• Data goes directly to your chosen AI provider — never through AgentHub servers
-• Blocklist protects banking and email sites by default
-• Full control over which sites can use AI
+PRIVACY & CONTROL
 
-Use cases:
-• Research: summarize and extract from any website
-• Automation: fill forms, test sites, scrape data
-• Productivity: get AI help without context-switching
+• The bridge runs on your machine and listens only on localhost (127.0.0.1) — it isn't reachable from your network.
+• Page content, screenshots, and form data flow directly between your browser and the AI tool you connect. AgentHub doesn't operate a server that reads or stores your browsing data.
+• Site access is opt-in. AgentHub doesn't get broad access to every website by default — you grant it per site (or all sites, if you choose) and can revoke it any time.
+• A built-in blocklist keeps AI tools off banking and email domains by default.
+• Every tool call your AI makes is visible in the side panel's activity log, so nothing happens silently.
+• No account or sign-up required.
+
+WHO IT'S FOR
+
+Anyone using Claude Code, Cursor, Claude Desktop, or another MCP client who wants their AI assistant working inside their actual logged-in browser — research, QA, form-filling, data extraction — without copy-pasting page content back and forth.
+
+REQUIREMENTS
+
+• Chrome 120+ or Edge 120+
+• An MCP-compatible AI client (Claude Code, Cursor, Claude Desktop, or any other)
+• The debugger permission is required — AgentHub uses the Chrome DevTools Protocol for reliable screenshots
+
+OPEN SOURCE
+
+Full source available at github.com/irmasemma/AIBrowserCopilot

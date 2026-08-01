@@ -184,7 +184,7 @@ function defaultInstallDir(): string {
   return resolveInstallDir();
 }
 
-function indexBrowser(browserId: string, ws: WebSocket): void {
+function indexBrowser(browserId: string, ws: WebSocket, idempotent = false): void {
   // If the same browserId already has a socket, the old one is stale (e.g.
   // SW eviction left the previous WS in OPEN state from our side, but the
   // extension reconnected with a new socket). Tear it down so its
@@ -197,21 +197,55 @@ function indexBrowser(browserId: string, ws: WebSocket): void {
   // many `bridge.browser.connected` for the same browserId with no
   // corresponding disconnects, and the dashboard cannot tell that the
   // browser session actually churned.
+  //
+  // `idempotent` = the caller resolved an EXACT (gen,lifeUuid) tie: the SAME SW
+  // life reopened its own socket after a transport blip (§7.1.1). That is NOT
+  // churn — we must not bump the supersede/Flapping signal nor emit a scary
+  // `replaced` warn for a benign reconnect (the caller already logged
+  // relay_reconnect_idempotent).
+  //
+  // Phase 2 fix (docs/rca-2026-07-06-same-life-reconnect-storm.md §4): an
+  // idempotent tie must NOT terminate the old socket or reject in-flight
+  // requests. The old socket isn't dead — it's the SAME life, and a pending
+  // tool response can still land on it (pendingRequests resolves by request
+  // id off whichever socket's handler sees it — see the ws.on('message')
+  // wiring below). Re-index to the new socket immediately so NEW requests
+  // route correctly, then grace-close the old one after a short bounded
+  // window instead of an instant terminate.
+  //
+  // A genuine (different-identity) supersede is different: that SW life is
+  // truly gone and can never answer requests it never saw, so we keep the
+  // terminate-and-reject behavior for that case (the inverse this fix must
+  // preserve).
   const existing = browserSockets.get(browserId);
   if (existing && existing !== ws) {
-    bridgeLog().warn('bridge.browser.replaced', {
-      browserId,
-      reason: 'new_socket_for_same_browserid',
-      hint: 'Old socket was orphaned (likely Chrome MV3 SW eviction). Terminating it now.',
-    });
-    try { existing.terminate(); } catch { /* noop */ }
-    // Also clear any pending requests routed to the old socket — they
-    // would never have completed (the new SW life knows nothing about them).
-    for (const [reqId, req] of pendingRequests) {
-      if (req.browserId === browserId) {
-        clearTimeout(req.timer);
-        pendingRequests.delete(reqId);
-        try { req.reject(new Error('browser_socket_replaced_mid_request')); } catch { /* ignore */ }
+    if (idempotent) {
+      recordRelayClose(browserId, 1006);
+      bumpIdempotentTieCount(browserId);
+      scheduleIdempotentGraceClose(browserId, existing);
+    } else {
+      // §7.2.3: count the replace toward the per-browser churn signal and stamp
+      // the close (the terminated socket is superseded by a new relay).
+      bumpSupersededCount(browserId);
+      recordRelayClose(browserId, 1006);
+      bridgeLog().warn('bridge.browser.replaced', {
+        browserId,
+        reason: 'new_socket_for_same_browserid',
+        hint: 'Old socket was orphaned (likely Chrome MV3 SW eviction). Terminating it now.',
+      });
+      // The whole identity this browserId pointed to is gone — any socket
+      // still lingering in its idempotent-tie grace window belongs to that
+      // same dead life. Drop it now instead of letting it sit open.
+      dropGracedSocket(browserId, 'superseded_by_higher_identity');
+      try { existing.terminate(); } catch { /* noop */ }
+      // Also clear any pending requests routed to the old browserId — they
+      // would never have completed (the new SW life knows nothing about them).
+      for (const [reqId, req] of pendingRequests) {
+        if (req.browserId === browserId) {
+          clearTimeout(req.timer);
+          pendingRequests.delete(reqId);
+          try { req.reject(new Error('browser_socket_replaced_mid_request')); } catch { /* ignore */ }
+        }
       }
     }
   }
@@ -294,6 +328,26 @@ function parseQuery(url: string | undefined): URLSearchParams {
   return qi === -1 ? new URLSearchParams() : new URLSearchParams(url.slice(qi + 1));
 }
 
+/**
+ * Extract a query param's value as the RAW string from the URL — WITHOUT
+ * percent-decoding (URLSearchParams.get decodes). The total-order collision
+ * tiebreak (§7.1.4) compares lifeUuid byte-for-byte exactly as both sockets
+ * sent it, so we must not normalize/decode it. Returns '' if absent.
+ *   "...?a=1&lifeUuid=abc-DEF&b=2" , "lifeUuid" → "abc-DEF"
+ */
+export function extractRawParam(url: string | undefined, name: string): string {
+  if (!url) return '';
+  const qi = url.indexOf('?');
+  if (qi === -1) return '';
+  const query = url.slice(qi + 1);
+  for (const pair of query.split('&')) {
+    const eq = pair.indexOf('=');
+    const key = eq === -1 ? pair : pair.slice(0, eq);
+    if (key === name) return eq === -1 ? '' : pair.slice(eq + 1);
+  }
+  return '';
+}
+
 // ── Handle browser extension connection ───────────────────────────────────
 // Bridge sends server_ping every 20s. Each ping arrival in the extension
 // fires a WS onmessage event in the service worker, which counts as SW
@@ -302,6 +356,11 @@ function parseQuery(url: string | undefined): URLSearchParams {
 // with the SW (chicken-and-egg). See docs/multi-profile-tab-fanout-design.md
 // "Related symptom: connection drops during agent runs".
 const SERVER_PING_INTERVAL_MS = 20_000;
+
+// Phase 3 observability threshold (docs/rca-2026-07-06-same-life-reconnect-storm.md):
+// a browser socket that closes faster than this after connecting is flagged
+// as a "flash close" — the signature of a self-sustaining reconnect storm.
+const FLASH_CLOSE_THRESHOLD_MS = 250;
 
 // Health probes from the native-host-helper use a synthetic browserId
 // `helper-probe`. Treat them differently from real extension connections
@@ -322,6 +381,179 @@ const HELPER_PROBE_BROWSER_ID = 'helper-probe';
  */
 const browserLastSeen = new Map<string, number>();
 const pendingPongs = new Map<string, Array<(timestamp: number) => void>>();
+
+// ── Relay identity for the total-order collision rule (design §6.2/§7.1) ────
+// The current incumbent relay's declared identity, keyed by browserId. Stored
+// at accept() time alongside its socket so the NEXT colliding relay can be
+// compared against it by the strict lexicographic total order on
+// (gen, rawLifeUuid). `gen` is a number (Date.now() from the extension); a
+// missing/legacy gen is represented as `null` and ranks LOWEST. `rawLifeUuid`
+// is compared BYTE-FOR-BYTE as the raw query string — never re-parsed or
+// case-folded — so both racing sockets agree on the same winner (§7.1.4).
+interface RelayIdentity { gen: number | null; rawLifeUuid: string }
+const browserRelayIdentity = new Map<string, RelayIdentity>();
+
+// ── §7.2.3 observability — per-browser supersede/replace churn ─────────────
+// Count of relay_superseded + replaced events for a browserId (rolling, reset
+// when the browser fully disconnects). Drives the truthful "Flapping" UI and
+// is the cross-SW-life signal a single SW's reconnectsThisSession can't see.
+const browserSupersededCount = new Map<string, number>();
+// Timestamps (ms) of recent supersede events per browserId, for the RATE signal
+// the truthful "Flapping" UI binds to (design §7.2.2: replace-RATE, not a
+// lifetime count). The cumulative `browserSupersededCount` above is a monotone
+// scar — it only resets on a clean 1000 disconnect, so after a storm CONVERGES
+// (or after a few benign SW-overlap supersedes) it stays ≥ threshold forever and
+// the UI would lie "Connection keeps dropping" while tools work fine. A rolling
+// window decays to 0 once the supersedes stop, so the verdict self-heals.
+const browserSupersedeTimes = new Map<string, number[]>();
+const SUPERSEDE_WINDOW_MS = 60_000;
+// Most recent relay close for a browserId: when + the close code (4002 =
+// rejected/superseded). Consumed by the extension's guarded alarm retry and
+// the "Recovering" UI state.
+const browserLastRelayClose = new Map<string, { at: number; code: number }>();
+
+function bumpSupersededCount(browserId: string): void {
+  browserSupersededCount.set(browserId, (browserSupersededCount.get(browserId) ?? 0) + 1);
+  const now = Date.now();
+  const times = browserSupersedeTimes.get(browserId) ?? [];
+  times.push(now);
+  pruneSupersedeTimes(times, now);
+  browserSupersedeTimes.set(browserId, times);
+}
+// Drop timestamps older than the rolling window (mutates in place).
+// Exported for unit tests (the Flapping-rate window is the core of the §7.2.2 fix).
+export function pruneSupersedeTimes(times: number[], now: number): void {
+  const cutoff = now - SUPERSEDE_WINDOW_MS;
+  while (times.length > 0 && times[0] < cutoff) times.shift();
+}
+// Supersede events for a browserId within the rolling window — the RATE signal.
+// Exported for unit tests (asserts idempotent reconnects don't pollute the rate).
+export function supersededRecentCount(browserId: string): number {
+  const times = browserSupersedeTimes.get(browserId);
+  if (!times) return 0;
+  pruneSupersedeTimes(times, Date.now());
+  return times.length;
+}
+function recordRelayClose(browserId: string, code: number): void {
+  browserLastRelayClose.set(browserId, { at: Date.now(), code });
+}
+
+// ── Phase 2 fix (docs/rca-2026-07-06-same-life-reconnect-storm.md §4) ──────
+// Idempotent-tie reconnects (same SW life reopening its own socket) must NOT
+// kill in-flight tool requests. `pendingRequests` resolves by request id off
+// WHICHEVER socket's message handler sees the matching id first (see the
+// `ws.on('message', ...)` wiring in handleExtension's accept()) — it is not
+// keyed to socket identity. So as long as the OLD socket stays open and wired,
+// a late tool_response it delivers still reaches the MCP caller. Instead of
+// `.terminate()`ing the old socket immediately (the old destructive behavior,
+// kept ONLY for genuine different-identity supersedes below), we re-index to
+// the new socket immediately (new requests route correctly) and give the old
+// one a short bounded grace window to finish delivering any in-flight reply.
+//
+// Bound: at most ONE graced socket per browserId at a time. A reconnect that
+// lands while a previous grace is still pending immediately closes that
+// older graced socket — this is what keeps 50 rapid same-identity reconnects
+// from accumulating 50 open sockets (never more than incumbent + 1 graced).
+const gracedSockets = new Map<string, { ws: WebSocket; timer: ReturnType<typeof setTimeout> }>();
+const IDEMPOTENT_TIE_GRACE_MS = 2_500;
+
+function closeGracedSocket(ws: WebSocket, reason: string): void {
+  try {
+    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+      ws.close(1000, reason);
+    }
+  } catch { /* noop */ }
+}
+
+/**
+ * Retire `ws` (the just-superseded old socket for `browserId`) with a short
+ * grace period instead of an instant terminate. Never leaks a timer: the
+ * timer either fires (closing the socket) or is cleared — by a subsequent
+ * regrace (immediate close, bound enforcement) or by the socket closing on
+ * its own first (the `once('close', ...)` below). Never double-closes: both
+ * the natural-close listener and the timer check `gracedSockets` ownership
+ * before acting, and `closeGracedSocket` itself checks readyState.
+ */
+function scheduleIdempotentGraceClose(browserId: string, ws: WebSocket): void {
+  const prior = gracedSockets.get(browserId);
+  if (prior) {
+    clearTimeout(prior.timer);
+    gracedSockets.delete(browserId);
+    if (prior.ws !== ws) closeGracedSocket(prior.ws, 'superseded_idempotent_regrace');
+  }
+
+  const timer = setTimeout(() => {
+    gracedSockets.delete(browserId);
+    closeGracedSocket(ws, 'superseded_idempotent');
+    bridgeLog().info('bridge.browser.idempotent_grace_closed', {
+      browserId,
+      reason: 'grace_window_expired',
+    });
+  }, IDEMPOTENT_TIE_GRACE_MS);
+  gracedSockets.set(browserId, { ws, timer });
+
+  ws.once('close', () => {
+    const g = gracedSockets.get(browserId);
+    if (g && g.ws === ws) {
+      clearTimeout(g.timer);
+      gracedSockets.delete(browserId);
+    }
+  });
+}
+
+/** Immediately drop any graced socket for `browserId` — used when a GENUINE
+ *  (different-identity) supersede arrives: that identity's whole life is
+ *  gone, so a still-open graced socket from an earlier idempotent tie of the
+ *  SAME (now-superseded) life must not linger either. */
+function dropGracedSocket(browserId: string, reason: string): void {
+  const g = gracedSockets.get(browserId);
+  if (!g) return;
+  clearTimeout(g.timer);
+  gracedSockets.delete(browserId);
+  closeGracedSocket(g.ws, reason);
+}
+
+// ── Idempotent-tie RECURRENCE RATE (Phase 3 observability) ─────────────────
+// Separate signal from `supersededRecentCount` (which deliberately EXCLUDES
+// idempotent ties — they are not a different-identity replace). A same-life
+// reconnect storm looks "live" to every other signal (liveness stays 'live',
+// supersededRecentCount stays 0) — this is the dedicated rate signal so the
+// UI can say "Reconnecting rapidly" instead of a false "Working".
+const browserIdempotentTieTimes = new Map<string, number[]>();
+
+function bumpIdempotentTieCount(browserId: string): void {
+  const now = Date.now();
+  const times = browserIdempotentTieTimes.get(browserId) ?? [];
+  times.push(now);
+  pruneSupersedeTimes(times, now);
+  browserIdempotentTieTimes.set(browserId, times);
+}
+
+// Exported for unit tests + /api/state.
+export function idempotentTieRecentCount(browserId: string): number {
+  const times = browserIdempotentTieTimes.get(browserId);
+  if (!times) return 0;
+  pruneSupersedeTimes(times, Date.now());
+  return times.length;
+}
+
+/**
+ * Strict lexicographic total order on relay identity (gen, rawLifeUuid).
+ * Returns >0 if `a` strictly outranks `b`, <0 if strictly lower, 0 on EXACT
+ * tie (same gen AND byte-identical lifeUuid — the same SW life's own
+ * transport-blip reconnect, which must be idempotent, NOT 4002'd — §7.1.1).
+ * A null gen (legacy/no-gen relay) ranks below any numeric gen.
+ */
+function compareRelayIdentity(a: RelayIdentity, b: RelayIdentity): number {
+  if (a.gen !== b.gen) {
+    if (a.gen === null) return -1;
+    if (b.gen === null) return 1;
+    return a.gen > b.gen ? 1 : -1;
+  }
+  // Equal gen → byte-for-byte raw lifeUuid compare (stable on both sockets).
+  if (a.rawLifeUuid === b.rawLifeUuid) return 0;
+  return a.rawLifeUuid > b.rawLifeUuid ? 1 : -1;
+}
 
 function markBrowserAlive(browserId: string): void {
   browserLastSeen.set(browserId, Date.now());
@@ -383,15 +615,25 @@ const INCUMBENT_LIVENESS_TIMEOUT_MS = 1_500;
 // Production wiring calls this from the WebSocketServer 'connection' handler.
 // `isCanonicalRelay` = the connection declared `?role=relay`: it is the real
 // extension relay for this browserId (not a probe or a stale-client duplicate).
-// That IDENTITY — not a liveness guess — decides who wins a browserId collision.
-export function handleExtension(ws: WebSocket, browserId: string, isCanonicalRelay = false): void {
+// `gen` / `rawLifeUuid` form this relay's IDENTITY (design §7.1): the bridge
+// resolves a browserId collision by a STRICT total order on (gen, rawLifeUuid),
+// NOT a liveness guess. `gen` is null for legacy/no-gen extensions (ranks
+// lowest); `rawLifeUuid` is the raw query-param string, compared byte-for-byte.
+export function handleExtension(
+  ws: WebSocket,
+  browserId: string,
+  isCanonicalRelay = false,
+  gen: number | null = null,
+  rawLifeUuid = '',
+): void {
   const connectedAt = Date.now();
   const isProbe = browserId === HELPER_PROBE_BROWSER_ID;
+  const myIdentity: RelayIdentity = { gen, rawLifeUuid };
 
   // Register this socket and wire up all of its handlers. Invoked either
   // immediately (no browserId collision) or, on a collision, ONLY after we
   // have proven the incumbent socket is dead — see the collision guard below.
-  const accept = (): void => {
+  const accept = (idempotent = false): void => {
   // On the collision path, accept() runs after an async liveness probe — the
   // newcomer may have closed in the meantime (the stale clients that trigger
   // this path open very short-lived sockets). Never register a dead socket or
@@ -408,7 +650,13 @@ export function handleExtension(ws: WebSocket, browserId: string, isCanonicalRel
     bridgeLog().info('bridge.browser.connected', { browserId });
     browserRegistry.set(browserId, { connectedAt: new Date(connectedAt).toISOString() });
   }
-  indexBrowser(browserId, ws);
+  indexBrowser(browserId, ws, idempotent);
+  if (!isProbe) {
+    // Store THIS relay's identity alongside its socket so the next colliding
+    // relay can be compared by the total order. Probes never collide (dedicated
+    // browserId) so they don't participate.
+    browserRelayIdentity.set(browserId, myIdentity);
+  }
   ws.send(JSON.stringify(getServerInfo()));
 
   const serverPingTimer = setInterval(() => {
@@ -488,9 +736,35 @@ export function handleExtension(ws: WebSocket, browserId: string, isCanonicalRel
     } catch { /* ignore */ }
   });
 
-  ws.on('close', () => {
+  ws.on('close', (code: number) => {
     clearInterval(serverPingTimer);
+    // Phase 3 observability (docs/rca-2026-07-06-same-life-reconnect-storm.md):
+    // flag a socket that lived under 250ms. Deliberately OUTSIDE the
+    // current-incumbent guard below — the whole storm signature is sockets
+    // that get superseded (by an idempotent tie or a genuine supersede)
+    // within milliseconds of connecting, and a superseded socket fails the
+    // `browserSockets.get(browserId) === ws` check by design (it's already
+    // been overwritten). If we only checked inside that guard we'd never see
+    // the exact pattern this event exists to catch.
+    if (!isProbe) {
+      const lifetimeMs = Date.now() - connectedAt;
+      if (lifetimeMs < FLASH_CLOSE_THRESHOLD_MS) {
+        bridgeLog().warn('bridge.browser.flash_close', {
+          browserId,
+          lifetimeMs,
+          code,
+          hint: 'This socket closed almost immediately after connecting. If this repeats every few seconds, the extension is likely stuck in a same-life reconnect storm — see docs/rca-2026-07-06-same-life-reconnect-storm.md.',
+        });
+      }
+    }
     if (browserSockets.get(browserId) === ws) {
+      if (!isProbe) {
+        // Record the close for /api/state observability + the extension's
+        // guarded alarm retry. Only the CURRENT incumbent reaches here (a
+        // superseded socket was already overwritten in browserSockets).
+        recordRelayClose(browserId, code);
+        browserRelayIdentity.delete(browserId);
+      }
       unindexBrowser(browserId);
       browserLastSeen.delete(browserId);
       // Resolve any in-flight liveness probes as false — the WS is gone.
@@ -501,7 +775,18 @@ export function handleExtension(ws: WebSocket, browserId: string, isCanonicalRel
         // false. Actually safer: just leave them to timeout naturally.
       }
       pendingPongs.delete(browserId);
-      if (!isProbe) browserRegistry.delete(browserId);
+      if (!isProbe) {
+        browserRegistry.delete(browserId);
+        // A clean (1000) disconnect means the browser went away deliberately,
+        // not a storm — clear the rolling churn/close signal so a future
+        // session starts fresh. A non-1000 close (e.g. liveness-sweep 1011)
+        // keeps the signal so the guarded retry / Flapping UI can still see it.
+        if (code === 1000) {
+          browserSupersededCount.delete(browserId);
+          browserSupersedeTimes.delete(browserId);
+          browserLastRelayClose.delete(browserId);
+        }
+      }
       const event = isProbe ? 'bridge.probe.disconnected' : 'bridge.browser.disconnected';
       // Per-browser pending count: filter the global pending map by which
       // request was routed to this specific browser. Tier 3 #10 fix —
@@ -520,43 +805,99 @@ export function handleExtension(ws: WebSocket, browserId: string, isCanonicalRel
   });
   };
 
-  // ── Collision guard — decided by IDENTITY, not a liveness guess ─────────
-  // A second socket for an already-registered browserId has exactly two
-  // possible meanings, and we tell them apart by who DECLARED itself the
-  // canonical relay (`?role=relay`), not by pinging the incumbent:
+  // ── Collision rule — STRICT TOTAL ORDER on relay identity (design §7.1) ──
+  // A second socket for an already-registered browserId is resolved by IDENTITY,
+  // never a liveness guess. The newcomer's (gen, rawLifeUuid) is compared
+  // against the stored incumbent identity with a strict lexicographic total
+  // order:
   //
-  //   1. Newcomer IS the canonical relay → it is the real extension reconnecting
-  //      (a fresh MV3 service-worker life). A browser has exactly one canonical
-  //      relay, so the NEWEST one is by definition the current client. It WINS
-  //      unconditionally — accept it; indexBrowser() terminates the superseded
-  //      socket. No liveness check, so a stale-but-still-ponging old socket can
-  //      NEVER block a real reconnect. This is the fix for the v0.5.11 `4002`
-  //      reconnect loop (where a lingering live socket rejected the real client).
+  //   • strictly-HIGHER (gen,lifeUuid) → accept + supersede. indexBrowser()
+  //     terminates the old socket. A stale-but-still-ponging socket can NEVER
+  //     block a higher-identity reconnect (fixes the v0.5.11 4002 loop).
+  //   • EXACT TIE (same gen AND byte-identical lifeUuid) → idempotent accept,
+  //     NO 4002. This is the SAME SW life's own transport-blip reconnect
+  //     (lifeUuid is per-load, not per-socket) — rejecting it would break a
+  //     benign reconnect (§7.1.1).
+  //   • strictly-LOWER → reject with 4002, do NOT supersede the incumbent. The
+  //     extension treats 4002-on-relay as terminal (no backoff) so the loser
+  //     stops re-challenging → the storm converges in one cycle (§6.4).
   //
-  //   2. Newcomer is NOT a canonical relay → it's a legacy build with no marker,
-  //      or a stale-client health-probe using the real browserId. Here the
-  //      incumbent may be the LIVE relay, and terminating it would silently
-  //      break tool routing. So we keep the liveness guard: prove the incumbent
-  //      dead before replacing; if it's alive, reject the non-canonical newcomer
-  //      with 4002. This preserves the original protection for old clients.
+  // lifeUuid is compared BYTE-FOR-BYTE as the raw query string so both racing
+  // sockets compute the same winner (§7.1.4).
+  //
+  // Legacy/no-gen relays (incumbent and/or newcomer has gen===null): the total
+  // order can't strictly rank two null-gens, so we FALL BACK to the prior safe
+  // behavior — a canonical (role=relay) newcomer wins (newest-relay-wins, the
+  // v0.5.11 fix); a non-canonical newcomer goes through the liveness guard.
+  // This keeps old extensions no worse off than today.
   //
   // Probes (helper-probe) use a dedicated id that never collides — exempt.
   const existing = browserSockets.get(browserId);
   if (!isProbe && existing && existing !== ws && existing.readyState === WebSocket.OPEN) {
+    const incumbentIdentity = browserRelayIdentity.get(browserId);
+    const haveTotalOrder = isCanonicalRelay && gen !== null && incumbentIdentity !== undefined && incumbentIdentity.gen !== null;
+
+    if (haveTotalOrder) {
+      const cmp = compareRelayIdentity(myIdentity, incumbentIdentity!);
+      if (cmp > 0) {
+        // Newcomer strictly outranks the incumbent → supersede. (The churn
+        // counter is bumped once in indexBrowser when the old socket is
+        // terminated, so we don't double-count here.)
+        bridgeLog().info('bridge.browser.relay_superseded', {
+          browserId,
+          reason: 'higher_identity_total_order',
+          gen,
+          incumbentGen: incumbentIdentity!.gen,
+          hint: 'A strictly-higher (gen,lifeUuid) relay arrived. Total order: newcomer wins; the previous socket is closed by indexBrowser.',
+        });
+        accept();
+        return;
+      }
+      if (cmp === 0) {
+        // Exact tie: same SW life reconnecting after a transport blip. Idempotent
+        // accept — NOT a 4002, and NOT counted as churn (§7.1.1). Pass idempotent
+        // so indexBrowser does not bump the supersede/Flapping signal nor emit a
+        // `replaced` warn for this benign same-life reconnect.
+        bridgeLog().info('bridge.browser.relay_reconnect_idempotent', {
+          browserId,
+          reason: 'exact_identity_tie',
+          gen,
+          hint: 'Same (gen,lifeUuid) as the incumbent — this SW life reopened its own socket. Accepted idempotently; no 4002.',
+        });
+        accept(true);
+        return;
+      }
+      // cmp < 0 — newcomer is strictly lower-identity → reject, keep incumbent.
+      recordRelayClose(browserId, 4002);
+      bridgeLog().warn('bridge.browser.relay_rejected_lower_identity', {
+        browserId,
+        reason: 'lower_identity_total_order',
+        gen,
+        incumbentGen: incumbentIdentity!.gen,
+        hint: 'A strictly-lower (gen,lifeUuid) relay arrived while a higher incumbent is live. Rejected with 4002 (terminal for that identity); incumbent preserved.',
+      });
+      try { ws.close(4002, 'lower_identity_relay'); } catch { /* ignore */ }
+      return;
+    }
+
     if (isCanonicalRelay) {
-      // Newest canonical relay wins — no liveness check.
+      // Legacy/no-gen path: at least one side lacks a numeric gen, so we can't
+      // strictly rank. Preserve newest-canonical-relay-wins (v0.5.11 fix).
+      // (Churn counter bumped in indexBrowser on the terminate — no double count.)
       bridgeLog().info('bridge.browser.relay_superseded', {
         browserId,
-        reason: 'newer_canonical_relay',
-        hint: 'A newer role=relay socket arrived for this browser (fresh SW life). Newest relay wins; the previous socket is closed by indexBrowser.',
+        reason: 'newer_canonical_relay_legacy_no_gen',
+        hint: 'A newer role=relay socket arrived (legacy/no-gen). Newest relay wins; the previous socket is closed by indexBrowser.',
       });
       accept();
       return;
     }
+
     // Non-canonical newcomer: keep a live incumbent, reject the duplicate.
     proveLive(browserId, existing, INCUMBENT_LIVENESS_TIMEOUT_MS)
       .then((alive) => {
         if (alive) {
+          recordRelayClose(browserId, 4002);
           bridgeLog().warn('bridge.browser.duplicate_rejected', {
             browserId,
             reason: 'incumbent_live_newcomer_not_canonical_relay',
@@ -655,7 +996,10 @@ function resolveSocket(target: string): WebSocket | null {
 }
 
 // ── Send tool request to browser extension ────────────────────────────────
-async function sendToolRequest(
+// Exported for tests only (Phase 2 pending-request-survives-reconnect specs
+// need to drive a real tool_request/tool_response round-trip against the
+// real WS + indexBrowser collision logic — no mocking, per repo law).
+export async function sendToolRequest(
   clientId: string,
   originalId: string | number | null,
   tool: string,
@@ -1532,6 +1876,7 @@ export function startServer(port: number): void {
             if (ageSec !== null) {
               liveness = ageSec < 45 ? 'live' : 'stale';
             }
+            const lastClose = browserLastRelayClose.get(browserId);
             return {
               browserId,
               connectedAt: info.connectedAt,
@@ -1539,6 +1884,16 @@ export function startServer(port: number): void {
               lastSeenAt: lastSeenMs ? new Date(lastSeenMs).toISOString() : null,
               lastSeenAgeSec: ageSec,
               liveness,
+              // §7.2.3 observability — consumed by the truthful UI (Flapping
+              // state) and the extension's guarded alarm retry.
+              // `supersededCount` is the cumulative lifetime count (diagnostics
+              // only); `supersededRecentCount` is the rolling-window RATE the
+              // Flapping verdict binds to so it self-heals after convergence.
+              supersededCount: browserSupersededCount.get(browserId) ?? 0,
+              supersededRecentCount: supersededRecentCount(browserId),
+              lastRelayClosedAt: lastClose ? new Date(lastClose.at).toISOString() : null,
+              lastRelayCloseCode: lastClose ? lastClose.code : null,
+              idempotentTieRecentCount: idempotentTieRecentCount(browserId),
             };
           }),
           mcpClients: Array.from(mcpClientRegistry.entries()).map(([clientId, info]) => ({
@@ -1612,25 +1967,60 @@ export function startServer(port: number): void {
   // Don't let the watchdog itself keep the event loop alive.
   if (typeof listenWatchdog.unref === 'function') listenWatchdog.unref();
 
-  httpServer.on('error', (err: NodeJS.ErrnoException) => {
+  // Set once the port is bound. After a successful bind, a later server-level
+  // 'error' is NOT a lost-bind race and must not tear down a healthy bridge.
+  let didBind = false;
+  // Guards against handling the SAME listen error twice (it arrives on both
+  // `wss` — via ws's forwarder — and `httpServer`; see below).
+  let listenErrorHandled = false;
+
+  // CRITICAL: the listen-error handler MUST live on the WebSocketServer, not
+  // only on the http server.
+  //
+  // `ws` forwards the underlying http server's 'error' (and 'listening') events
+  // onto the WebSocketServer instance (ws/lib/websocket-server.js → addListeners:
+  // `error: this.emit.bind(this, 'error')`). Because `wss` is constructed BEFORE
+  // this point, ws's forwarder is the FIRST 'error' listener on httpServer. When
+  // listen() fails (EADDRINUSE), that forwarder re-emits 'error' on `wss`; if
+  // `wss` has no 'error' listener the re-emit THROWS synchronously inside
+  // httpServer's emit loop, which (a) aborts the loop so a handler attached only
+  // to httpServer never runs, and (b) surfaces as an uncaughtException. The
+  // uncaughtException handler below re-throws, so the bridge CRASH-LOOPS on every
+  // EADDRINUSE until the 5s watchdog kills it — observed in production as
+  // thousands of `bridge.lifecycle.uncaught` EADDRINUSE records, i.e. the exact
+  // ship-blocker this block was meant to fix. Attaching to `wss` is what actually
+  // catches the forwarded error; we keep the httpServer handler too as a
+  // belt-and-suspenders against future ws-forwarding changes.
+  const handleListenError = (err: NodeJS.ErrnoException, via: 'wss' | 'httpServer'): void => {
+    if (didBind) {
+      // Already serving — a late server error is not a bind race. Log, don't die.
+      bridgeLog().error('bridge.lifecycle.server_error_after_bind', { port, via, ...redactError(err) });
+      return;
+    }
+    if (listenErrorHandled) return;
+    listenErrorHandled = true;
     if (err.code === 'EADDRINUSE') {
       // A sibling bridge already owns the port (and therefore the lock).
       // registerCleanupHandlers() has NOT run yet, so exiting here leaves the
       // sibling's lock file untouched — which is exactly what we want.
       bridgeLog().warn('bridge.lifecycle.port_in_use', {
         port,
+        via,
         action: 'exiting_without_lock_cleanup',
         hint: 'Another bridge already holds this port; leaving the running instance’s lock file intact.',
       });
     } else {
-      bridgeLog().error('bridge.lifecycle.listen_failed', { port, ...redactError(err) });
+      bridgeLog().error('bridge.lifecycle.listen_failed', { port, via, ...redactError(err) });
     }
     clearTimeout(listenWatchdog);
     // eslint-disable-next-line n/no-process-exit
     process.exit(0);
-  });
+  };
+  wss.on('error', (err: NodeJS.ErrnoException) => handleListenError(err, 'wss'));
+  httpServer.on('error', (err: NodeJS.ErrnoException) => handleListenError(err, 'httpServer'));
 
   httpServer.on('listening', () => {
+    didBind = true;
     clearTimeout(listenWatchdog);
     // We own the port. Only NOW claim the lock file and register the cleanup
     // handlers that delete it on a clean exit.
@@ -1673,7 +2063,14 @@ export function startServer(port: number): void {
       handleMcpClient(ws);
     } else {
       // `role=relay` marks the canonical extension relay (see handleExtension).
-      handleExtension(ws, params.get('browserId') || 'default', params.get('role') === 'relay');
+      // `gen` / `lifeUuid` form the relay identity for the total-order collision
+      // rule. Parse gen as a number (null if absent/legacy). Read lifeUuid from
+      // the RAW query string (not via URLSearchParams, which percent-decodes) so
+      // the bridge compares the exact bytes both racing sockets sent (§7.1.4).
+      const genRaw = params.get('gen');
+      const gen = genRaw !== null && /^\d+$/.test(genRaw) ? Number(genRaw) : null;
+      const rawLifeUuid = extractRawParam(req.url, 'lifeUuid');
+      handleExtension(ws, params.get('browserId') || 'default', params.get('role') === 'relay', gen, rawLifeUuid);
     }
   });
 

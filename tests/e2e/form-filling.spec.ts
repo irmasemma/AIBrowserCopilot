@@ -6,20 +6,27 @@
  */
 import { test, expect, chromium, type BrowserContext, type Page } from '@playwright/test';
 import path from 'path';
+import { startFixtureServer, type FixtureServer } from './helpers/fixture-server';
 
 const extensionPath = path.resolve(__dirname, '../../packages/extension/dist/chrome-mv3');
-
-const fixturePath = (name: string) => path.resolve(__dirname, `fixtures/${name}`);
 
 let context: BrowserContext;
 let extensionId: string;
 let extPage: Page; // Extension page for running chrome.scripting calls
+let fixtures: FixtureServer;
+
+// Serve fixtures over http://127.0.0.1 (a REQUIRED host permission) so
+// chrome.scripting.executeScript can access them; file:// only has the
+// optional <all_urls> grant. See helpers/fixture-server.ts.
+const fixtureUrl = (name: string) => fixtures.url(name);
 
 // ==========================================
 // SETUP / TEARDOWN
 // ==========================================
 
 test.beforeAll(async () => {
+  fixtures = await startFixtureServer();
+
   context = await chromium.launchPersistentContext('', {
     headless: false,
     args: [
@@ -51,6 +58,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await context?.close();
+  await fixtures?.close();
 });
 
 // ==========================================
@@ -258,7 +266,7 @@ test.describe('form-simple.html', () => {
 
   test.beforeEach(async () => {
     page = await context.newPage();
-    await page.goto(`file://${fixturePath('form-simple.html')}`);
+    await page.goto(fixtureUrl('form-simple.html'));
     await page.waitForTimeout(500);
     tabId = await getTabId('Simple Forms');
   });
@@ -446,7 +454,7 @@ test.describe('form-react.html', () => {
 
   test.beforeEach(async () => {
     page = await context.newPage();
-    await page.goto(`file://${fixturePath('form-react.html')}`);
+    await page.goto(fixtureUrl('form-react.html'));
     await page.waitForTimeout(500);
     tabId = await getTabId('React');
   });
@@ -567,7 +575,7 @@ test.describe('form-vue.html', () => {
 
   test.beforeEach(async () => {
     page = await context.newPage();
-    await page.goto(`file://${fixturePath('form-vue.html')}`);
+    await page.goto(fixtureUrl('form-vue.html'));
     // Vue 3 CDN needs time to load and mount
     await page.waitForTimeout(2000);
     tabId = await getTabId('Vue Forms');
@@ -785,7 +793,7 @@ test.describe('form-edge-cases.html', () => {
 
   test.beforeEach(async () => {
     page = await context.newPage();
-    await page.goto(`file://${fixturePath('form-edge-cases.html')}`);
+    await page.goto(fixtureUrl('form-edge-cases.html'));
     await page.waitForTimeout(500);
     tabId = await getTabId('Edge Cases');
   });

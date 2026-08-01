@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Ref Liveness Fixture</title></head>
+<body>
+  <div id="host"></div>
+  <script>
+    // Query params control the scenario:
+    //   mode=late-render&delay=300|2000|7500   — target absent at load, node inserted after `delay`ms
+    //   mode=true-stale                         — target never appears
+    //   mode=toggle-visibility                  — SAME node, display:none then visible after 1000ms
+    //   mode=destroy-recreate&interval=1500     — like diag-page.ts: replaces #host innerHTML on a timer forever
+    const params = new URLSearchParams(location.search);
+    const mode = params.get('mode');
+    const delay = Number(params.get('delay') || 0);
+    const interval = Number(params.get('interval') || 1500);
+    const host = document.getElementById('host');
+
+    function renderTarget() {
+      // #target (button) drives the click/press/snapshot tests; #target-check
+      // (a real checkbox) drives the fill_form parity test (7a).
+      host.innerHTML = '<button id="target">Click Me</button>'
+        + '<input type="checkbox" id="target-check" aria-label="Target Check">';
+    }
+
+    if (mode === 'late-render') {
+      setTimeout(renderTarget, delay);
+    } else if (mode === 'true-stale') {
+      // never rendered
+    } else if (mode === 'toggle-visibility') {
+      renderTarget();
+      const btn = document.getElementById('target');
+      btn.style.display = 'none';
+      setTimeout(() => { btn.style.display = ''; }, 1000);
+    } else if (mode === 'destroy-recreate') {
+      renderTarget();
+      setInterval(renderTarget, interval); // mirrors diag-page.ts's innerHTML replace
+    } else if (mode === 'destroy-once') {
+      // Replace the node ONE time, then leave it stable — the deterministic
+      // self-heal case: the original ref goes stale, and the retry finds the
+      // stable recreated button by role+name and clicks it within budget.
+      // (destroy-recreate, by contrast, thrashes forever and can out-race even
+      // the retry — realistic, but not a deterministic assertion.)
+      renderTarget();
+      setTimeout(renderTarget, delay || 800);
+    } else if (mode === 'destroy-permanent') {
+      // Render so a snapshot can mint a ref, then remove the node permanently —
+      // the identity-verified retry finds NO role+name match and must surface
+      // REF_STALE (not a false recovery, not a pre-empted fast-fail).
+      renderTarget();
+      setTimeout(() => { host.innerHTML = ''; }, delay || 2000);
+    } else {
+      renderTarget(); // default: immediate render, for the happy-path/latency test
+    }
+
+    window.__clicked = false;
+    document.addEventListener('click', (e) => {
+      if ((e.target).id === 'target') window.__clicked = true;
+    });
+  </script>
+</body>
+</html>

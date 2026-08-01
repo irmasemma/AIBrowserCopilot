@@ -16,13 +16,23 @@
 
 import { test, expect, chromium, type BrowserContext, type Page } from '@playwright/test';
 import path from 'path';
+import { startFixtureServer, type FixtureServer } from './helpers/fixture-server';
 
 const extensionPath = path.resolve(__dirname, '../../packages/extension/dist/chrome-mv3');
-const fixturesPath = path.resolve(__dirname, 'fixtures');
 
 let context: BrowserContext;
+let fixtures: FixtureServer;
+
+// Serve local fixtures over http://127.0.0.1 (a REQUIRED host permission) instead
+// of file:// (only the optional <all_urls> grant), so content-script injection can
+// access them. Base is exposed as `fixturesUrl` for the goto calls below. Real
+// external-website tests (Wikipedia, HN, Product Hunt) are unaffected.
+let fixturesUrl: string;
 
 test.beforeAll(async () => {
+  fixtures = await startFixtureServer();
+  fixturesUrl = fixtures.origin;
+
   context = await chromium.launchPersistentContext('', {
     headless: false,
     args: [
@@ -38,6 +48,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await context?.close();
+  await fixtures?.close();
 });
 
 // ============================================================================
@@ -48,7 +59,7 @@ test.describe('Tool: read_form', () => {
 
   test('reads all fields from a standard HTML form', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/form-complex.html`);
+    await page.goto(`${fixturesUrl}/form-complex.html`);
     await page.waitForLoadState('domcontentloaded');
 
     // Execute the read_form content script logic.
@@ -161,7 +172,7 @@ test.describe('Tool: read_form', () => {
 
   test('detects fields NOT inside a <form> tag', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/form-complex.html`);
+    await page.goto(`${fixturesUrl}/form-complex.html`);
     await page.waitForLoadState('domcontentloaded');
 
     const result = await page.evaluate(() => {
@@ -228,7 +239,7 @@ test.describe('Tool: read_form', () => {
 
   test('reads form with all field types and returns structured JSON', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/form-complex.html`);
+    await page.goto(`${fixturesUrl}/form-complex.html`);
     await page.waitForLoadState('domcontentloaded');
 
     const result = await page.evaluate(() => {
@@ -268,7 +279,7 @@ test.describe('Tool: fill_form', () => {
 
   test('fills simple text inputs', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/form-complex.html`);
+    await page.goto(`${fixturesUrl}/form-complex.html`);
     await page.waitForLoadState('domcontentloaded');
 
     // Use Playwright fill (simulates real user typing with proper events)
@@ -294,7 +305,7 @@ test.describe('Tool: fill_form', () => {
 
   test('fills a dropdown (select)', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/form-complex.html`);
+    await page.goto(`${fixturesUrl}/form-complex.html`);
     await page.waitForLoadState('domcontentloaded');
 
     // Select by value
@@ -316,7 +327,7 @@ test.describe('Tool: fill_form', () => {
 
   test('fills checkboxes and radio buttons', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/form-complex.html`);
+    await page.goto(`${fixturesUrl}/form-complex.html`);
     await page.waitForLoadState('domcontentloaded');
 
     // Check a radio button
@@ -343,7 +354,7 @@ test.describe('Tool: fill_form', () => {
 
   test('fills a textarea', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/form-complex.html`);
+    await page.goto(`${fixturesUrl}/form-complex.html`);
     await page.waitForLoadState('domcontentloaded');
 
     const bioText = 'I am a software developer with 10 years of experience.\nI specialize in web technologies.';
@@ -356,7 +367,7 @@ test.describe('Tool: fill_form', () => {
 
   test('fills form fields by label text using getByLabel', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/form-complex.html`);
+    await page.goto(`${fixturesUrl}/form-complex.html`);
     await page.waitForLoadState('domcontentloaded');
 
     // Playwright getByLabel finds inputs associated with a <label>
@@ -376,7 +387,7 @@ test.describe('Tool: fill_form', () => {
 
   test('fills form fields by placeholder text using getByPlaceholder', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/form-complex.html`);
+    await page.goto(`${fixturesUrl}/form-complex.html`);
     await page.waitForLoadState('domcontentloaded');
 
     await page.getByPlaceholder('Enter your first name').fill('Bob');
@@ -393,7 +404,7 @@ test.describe('Tool: fill_form', () => {
 
   test('fills form by aria-label', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/form-complex.html`);
+    await page.goto(`${fixturesUrl}/form-complex.html`);
     await page.waitForLoadState('domcontentloaded');
 
     await page.getByLabel('Company Name').fill('Acme Corp');
@@ -405,7 +416,7 @@ test.describe('Tool: fill_form', () => {
 
   test('fills React-style controlled form and triggers validation', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/form-react.html`);
+    await page.goto(`${fixturesUrl}/form-react.html`);
     await page.waitForLoadState('domcontentloaded');
 
     // Submit button should start disabled
@@ -446,7 +457,7 @@ test.describe('Tool: fill_form', () => {
 
   test('simple dispatchEvent fill FAILS on React form (proving Playwright is needed)', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/form-react.html`);
+    await page.goto(`${fixturesUrl}/form-react.html`);
     await page.waitForLoadState('domcontentloaded');
 
     // This simulates the OLD fill_form approach: just set .value + dispatch
@@ -507,7 +518,7 @@ test.describe('Tool: fill_form', () => {
 
   test('fills entire complex form end-to-end and submits', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/form-complex.html`);
+    await page.goto(`${fixturesUrl}/form-complex.html`);
     await page.waitForLoadState('domcontentloaded');
 
     // Fill every field type in the form
@@ -566,7 +577,7 @@ test.describe('Tool: extract_data', () => {
 
   test('extracts data from a standard HTML table', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/data-extraction.html`);
+    await page.goto(`${fixturesUrl}/data-extraction.html`);
     await page.waitForLoadState('domcontentloaded');
 
     const tableData = await page.evaluate(() => {
@@ -595,7 +606,7 @@ test.describe('Tool: extract_data', () => {
 
   test('extracts data from table without thead (headers in first row)', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/data-extraction.html`);
+    await page.goto(`${fixturesUrl}/data-extraction.html`);
     await page.waitForLoadState('domcontentloaded');
 
     const tableData = await page.evaluate(() => {
@@ -625,7 +636,7 @@ test.describe('Tool: extract_data', () => {
 
   test('extracts links from table cells', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/data-extraction.html`);
+    await page.goto(`${fixturesUrl}/data-extraction.html`);
     await page.waitForLoadState('domcontentloaded');
 
     const tableData = await page.evaluate(() => {
@@ -657,7 +668,7 @@ test.describe('Tool: extract_data', () => {
 
   test('detects and extracts card grid layout (repeated div patterns)', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/data-extraction.html`);
+    await page.goto(`${fixturesUrl}/data-extraction.html`);
     await page.waitForLoadState('domcontentloaded');
 
     // Heuristic: find repeating sibling elements with same class structure
@@ -714,7 +725,7 @@ test.describe('Tool: extract_data', () => {
 
   test('detects and extracts list layout (ul/li patterns)', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/data-extraction.html`);
+    await page.goto(`${fixturesUrl}/data-extraction.html`);
     await page.waitForLoadState('domcontentloaded');
 
     const result = await page.evaluate(() => {
@@ -757,7 +768,7 @@ test.describe('Tool: extract_data', () => {
 
   test('detects article/blog repeating pattern', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/data-extraction.html`);
+    await page.goto(`${fixturesUrl}/data-extraction.html`);
     await page.waitForLoadState('domcontentloaded');
 
     const result = await page.evaluate(() => {
@@ -796,7 +807,7 @@ test.describe('Tool: extract_data', () => {
 
   test('detects pagination controls', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/data-extraction.html`);
+    await page.goto(`${fixturesUrl}/data-extraction.html`);
     await page.waitForLoadState('domcontentloaded');
 
     const result = await page.evaluate(() => {
@@ -833,7 +844,7 @@ test.describe('Tool: extract_data', () => {
 
   test('heuristic detection scores multiple data regions on a single page', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${fixturesPath}/data-extraction.html`);
+    await page.goto(`${fixturesUrl}/data-extraction.html`);
     await page.waitForLoadState('domcontentloaded');
 
     // This tests the overall heuristic: find ALL data regions on a page

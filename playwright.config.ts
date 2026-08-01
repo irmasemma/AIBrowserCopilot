@@ -1,7 +1,13 @@
 import { defineConfig } from '@playwright/test';
 import path from 'path';
+// Load .env (gitignored) so provider keys for install-and-chat.spec.ts can be
+// stored locally instead of passed inline each run. Env always wins over .env.
+import 'dotenv/config';
 
-const extensionPath = path.resolve(__dirname, 'packages/extension/dist');
+// WXT builds into <outDir>/chrome-mv3, so the unpacked extension (with its
+// manifest.json) lives in dist/chrome-mv3 — pointing at dist alone loads nothing.
+// Matches scripts/launch-edge-debug.mjs (the real-edge-via-cdp path).
+const extensionPath = path.resolve(__dirname, 'packages/extension/dist/chrome-mv3');
 
 export default defineConfig({
   testDir: './tests/e2e',

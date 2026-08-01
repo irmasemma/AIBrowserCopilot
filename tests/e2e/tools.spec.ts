@@ -1,13 +1,18 @@
 import { test, expect, chromium, type BrowserContext, type Page } from '@playwright/test';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { startFixtureServer, type FixtureServer } from './helpers/fixture-server';
 
 const extensionPath = path.resolve(__dirname, '../../packages/extension/dist/chrome-mv3');
-const testPagePath = path.resolve(__dirname, 'fixtures/test-page.html');
 
 let context: BrowserContext;
 let extensionId: string;
 let extPage: Page; // Extension page for running tools
+let fixtures: FixtureServer;
+// Serve the test page over http://127.0.0.1 (a REQUIRED host permission) instead
+// of file:// (only the optional <all_urls> grant), so content-script injection
+// can access it. See helpers/fixture-server.ts.
+let testPageUrl: string;
 
 // Helper: call dispatchTool from the service worker context via the extension page
 const callTool = async (toolName: string, params: Record<string, unknown> = {}): Promise<unknown> => {
@@ -27,6 +32,9 @@ const callTool = async (toolName: string, params: Record<string, unknown> = {}):
 };
 
 test.beforeAll(async () => {
+  fixtures = await startFixtureServer();
+  testPageUrl = fixtures.url('test-page.html');
+
   context = await chromium.launchPersistentContext('', {
     headless: false,
     args: [
@@ -74,6 +82,7 @@ test.afterAll(async () => {
     await extPage.close();
   }
   await context?.close();
+  await fixtures?.close();
 });
 
 // ==========================================
@@ -83,7 +92,7 @@ test.afterAll(async () => {
 test.describe('Tool: get_page_content', () => {
   test('extracts text content from a real page', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${testPagePath}`);
+    await page.goto(testPageUrl);
     await page.waitForTimeout(500);
 
     // Execute content script directly on the page (simulating what the tool does)
@@ -99,7 +108,7 @@ test.describe('Tool: get_page_content', () => {
 
   test('extracts HTML content from a real page', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${testPagePath}`);
+    await page.goto(testPageUrl);
     await page.waitForTimeout(500);
 
     const html = await page.evaluate(() => document.body?.innerHTML ?? '');
@@ -132,7 +141,7 @@ test.describe('Tool: get_page_content', () => {
 test.describe('Tool: take_screenshot', () => {
   test('captures screenshot of visible tab', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${testPagePath}`);
+    await page.goto(testPageUrl);
     await page.waitForTimeout(500);
 
     // Use extension context to capture (needs activeTab permission)
@@ -156,7 +165,7 @@ test.describe('Tool: list_tabs', () => {
   test('lists all open tabs', async () => {
     // Open a few tabs
     const page1 = await context.newPage();
-    await page1.goto(`file://${testPagePath}`);
+    await page1.goto(testPageUrl);
     const page2 = await context.newPage();
     await page2.goto('about:blank');
 
@@ -182,7 +191,7 @@ test.describe('Tool: list_tabs', () => {
 
   test('filters tabs by query', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${testPagePath}`);
+    await page.goto(testPageUrl);
     await page.waitForTimeout(500);
 
     const tabs = await extPage.evaluate(async () => {
@@ -205,7 +214,7 @@ test.describe('Tool: list_tabs', () => {
 test.describe('Tool: get_page_metadata', () => {
   test('extracts metadata from page with meta tags', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${testPagePath}`);
+    await page.goto(testPageUrl);
     await page.waitForTimeout(500);
 
     const metadata = await page.evaluate(() => {
@@ -239,7 +248,7 @@ test.describe('Tool: navigate', () => {
     await page.goto('about:blank');
     await page.waitForTimeout(300);
 
-    await page.goto(`file://${testPagePath}`);
+    await page.goto(testPageUrl);
     await page.waitForTimeout(500);
 
     const url = page.url();
@@ -255,7 +264,7 @@ test.describe('Tool: navigate', () => {
 test.describe('Tool: fill_form', () => {
   test('fills form fields with specified values', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${testPagePath}`);
+    await page.goto(testPageUrl);
     await page.waitForTimeout(500);
 
     // Simulate what fill_form content script does
@@ -294,7 +303,7 @@ test.describe('Tool: fill_form', () => {
 
   test('handles missing form fields gracefully', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${testPagePath}`);
+    await page.goto(testPageUrl);
     await page.waitForTimeout(500);
 
     const results = await page.evaluate(() => {
@@ -320,7 +329,7 @@ test.describe('Tool: fill_form', () => {
 test.describe('Tool: click_element', () => {
   test('clicks element by CSS selector', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${testPagePath}`);
+    await page.goto(testPageUrl);
     await page.waitForTimeout(500);
 
     // Simulate click_element content script
@@ -345,7 +354,7 @@ test.describe('Tool: click_element', () => {
 
   test('clicks element by visible text', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${testPagePath}`);
+    await page.goto(testPageUrl);
     await page.waitForTimeout(500);
 
     const result = await page.evaluate((targetText) => {
@@ -372,7 +381,7 @@ test.describe('Tool: click_element', () => {
 
   test('returns null for missing element', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${testPagePath}`);
+    await page.goto(testPageUrl);
     await page.waitForTimeout(500);
 
     const result = await page.evaluate(() => {
@@ -388,7 +397,7 @@ test.describe('Tool: click_element', () => {
 test.describe('Tool: extract_table', () => {
   test('extracts table data with headers and rows', async () => {
     const page = await context.newPage();
-    await page.goto(`file://${testPagePath}`);
+    await page.goto(testPageUrl);
     await page.waitForTimeout(500);
 
     const tableData = await page.evaluate(() => {

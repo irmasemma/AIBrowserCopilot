@@ -17,8 +17,15 @@ btn.addEventListener('click', () => {
   chrome.sidePanel.open({ windowId: chrome.windows.WINDOW_ID_CURRENT });
 });
 
+// Connection status is HIDDEN in the popup for now (not removed). The popup is
+// not tab-scoped, and connection/MCP status now lives in the side panel's MCP
+// tab; showing it here duplicated a signal that isn't relevant to every surface.
+// The status element and its live-update wiring below are kept intact — flip
+// this flag back to true to restore the popup indicator.
+const SHOW_CONNECTION_STATUS = false;
+
 const app = document.getElementById('app')!;
-app.appendChild(statusRow);
+if (SHOW_CONNECTION_STATUS) app.appendChild(statusRow);
 app.appendChild(btn);
 
 const getDiagnosticLabel = (reason?: string): string => {
@@ -76,3 +83,7 @@ chrome.storage.onChanged.addListener((changes) => {
     updateStatus(changes.connectionState.newValue.state ?? 'disconnected');
   }
 });
+
+// Marks this side-effect entrypoint as an ES module (no runtime effect) so it
+// can be side-effect-imported from the popup unit test under NodeNext.
+export {};

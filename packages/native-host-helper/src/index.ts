@@ -2,6 +2,7 @@ import { scanAITools } from './tool-scanner.js';
 import { checkClaudeCodeRegistration, repairClaudeCodeRegistration } from './mcp-registrar.js';
 import { getServiceStatus } from './service-status.js';
 import { startNativeHost } from './process-spawner.js';
+import { killIncumbentBridge } from './bridge-killer.js';
 import { HELPER_VERSION } from './version.js';
 import { logRecord, logErr } from './logger.js';
 
@@ -146,10 +147,36 @@ async function main(): Promise<void> {
       }
 
       case 'restart_native_host': {
-        // For "restart" we want to start fresh — skip the alreadyRunning guard so
-        // a stale-but-listening bridge doesn't make us a no-op. Caller is expected
-        // to have killed any prior instance first (or the new bridge will become a
-        // proxy via the port-probe path).
+        // Kill the incumbent bridge (and any bind-race zombies) BEFORE spawning
+        // a fresh one.  Without this, every spawn immediately loses the port-bind
+        // race to the still-running process and falls into proxy/loser mode while
+        // the old broken bridge keeps the port.
+        let killResult;
+        try {
+          killResult = await killIncumbentBridge();
+        } catch (err) {
+          // killIncumbentBridge should not throw (it captures errors internally),
+          // but guard anyway so a bug there never prevents the spawn attempt.
+          logErr('helper.restart.kill_unexpected_error', err, { action });
+          killResult = { attempted: false, portFree: false, escalated: false, warnings: [String(err)] };
+        }
+
+        if (killResult.warnings.length > 0) {
+          logRecord({
+            event: 'helper.restart.kill_warnings',
+            lvl: 'warn',
+            warnings: killResult.warnings,
+          });
+        }
+        logRecord({
+          event: 'helper.restart.kill_complete',
+          attempted: killResult.attempted,
+          pid: killResult.pid,
+          port: killResult.port,
+          portFree: killResult.portFree,
+          escalated: killResult.escalated,
+        });
+
         const result = await startNativeHost({ skipAlreadyRunningCheck: true });
         writeMessage(result);
         logRecord({

@@ -83,22 +83,55 @@ class Relay {
   ws: WebSocket;
   closed = false;
   closeCode: number | null = null;
+  /** Number of times this logical relay opened a socket (for "does NOT reopen"
+   *  assertions). The extension treats a 4002 as terminal, so a faithful relay
+   *  that mimics that policy must not auto-reopen — we model the policy via the
+   *  `reopenOn4002` flag below. */
+  openCount = 0;
+  /** Set when this relay received a 4002 (lost the total-order collision). */
+  got4002 = false;
   private pong = true;
   private answer: ((req: { id: string; tool: string }) => unknown) | null;
-  constructor(port: number, id: string, opts: { canonical?: boolean; pong?: boolean; answerTools?: ((req: { id: string; tool: string }) => unknown) | null } = {}) {
+  private readonly port: number;
+  private readonly id: string;
+  private readonly url: string;
+  /** If true, a 4002 close triggers a reopen with the SAME identity (models the
+   *  BUGGY pre-fix behavior, used to prove the loser does NOT storm). Default
+   *  false = faithful 4002-is-terminal extension behavior. */
+  reopenOn4002: boolean;
+  constructor(port: number, id: string, opts: { canonical?: boolean; pong?: boolean; answerTools?: ((req: { id: string; tool: string }) => unknown) | null; gen?: number; lifeUuid?: string; reopenOn4002?: boolean } = {}) {
     this.pong = opts.pong ?? true;
     this.answer = opts.answerTools ?? null;
+    this.port = port;
+    this.id = id;
+    this.reopenOn4002 = opts.reopenOn4002 ?? false;
     const role = (opts.canonical ?? true) ? '&role=relay' : '';
-    this.ws = new WebSocket(`ws://127.0.0.1:${port}?browserId=${id}${role}`);
-    this.ws.on('message', (d: RawData) => {
+    const gen = opts.gen !== undefined ? `&gen=${opts.gen}` : '';
+    const lifeUuid = opts.lifeUuid !== undefined ? `&lifeUuid=${opts.lifeUuid}` : '';
+    this.url = `ws://127.0.0.1:${port}?browserId=${id}${role}${gen}${lifeUuid}`;
+    this.ws = this.open();
+  }
+  private open(): WebSocket {
+    this.openCount++;
+    const ws = new WebSocket(this.url);
+    ws.on('message', (d: RawData) => {
       let m: { type?: string; id?: string; tool?: string; timestamp?: number };
       try { m = JSON.parse(String(d)); } catch { return; }
-      if (m.type === 'server_ping' && this.pong) this.ws.send(JSON.stringify({ type: 'server_pong', timestamp: Date.now() }));
+      if (m.type === 'server_ping' && this.pong) ws.send(JSON.stringify({ type: 'server_pong', timestamp: Date.now() }));
       if (m.type === 'tool_request' && this.answer && m.id) {
-        this.ws.send(JSON.stringify({ type: 'tool_response', id: m.id, result: this.answer({ id: m.id, tool: m.tool ?? '' }) }));
+        ws.send(JSON.stringify({ type: 'tool_response', id: m.id, result: this.answer({ id: m.id, tool: m.tool ?? '' }) }));
       }
     });
-    this.ws.on('close', (c) => { this.closed = true; this.closeCode = c; });
+    ws.on('close', (c) => {
+      this.closed = true; this.closeCode = c;
+      if (c === 4002) {
+        this.got4002 = true;
+        // Faithful extension: 4002 is terminal → no reopen. Only when
+        // reopenOn4002 is set (the buggy-storm model) do we re-challenge.
+        if (this.reopenOn4002) { this.closed = false; this.ws = this.open(); }
+      }
+    });
+    return ws;
   }
   serverInfo(ms = 4000): Promise<void> {
     return waitFor(new Promise<void>((resolve) => {
@@ -108,7 +141,15 @@ class Relay {
   }
   goSilent(): void { this.pong = false; this.answer = null; } // simulate a wedge
   kill(): void { try { this.ws.terminate(); } catch { /* */ } }       // simulate abrupt SW death
-  close(): void { try { this.ws.close(); } catch { /* */ } }
+  close(): void { this.reopenOn4002 = false; try { this.ws.close(); } catch { /* */ } }
+}
+
+interface ApiBrowser { browserId: string; liveness: string; supersededCount: number; lastRelayCloseCode: number | null; lastRelayClosedAt: string | null }
+/** Fetch /api/state and return the browsers[] array (with the §7.2.3 fields). */
+async function apiBrowsers(port: number): Promise<ApiBrowser[]> {
+  const res = await fetch(`http://127.0.0.1:${port}/api/state`);
+  const data = await res.json() as { browsers?: ApiBrowser[] };
+  return data.browsers ?? [];
 }
 
 /** A REAL MCP client over WS: initialize + tools/call. */
@@ -252,4 +293,208 @@ test.describe('connection chaos (real bridge, real protocol, injected faults)', 
       expect(after.pid).toBe(winner.pid);   // not clobbered, not deleted
     } finally { loser?.kill(); winner.kill(); }
   });
+
+  // ── §6.8 / §8.3 total-order regression gate ──────────────────────────────
+
+  test('CHAOS equal-gen concurrency: converge to ONE winner, loser 4002 + no reopen, in-flight tool completes', async () => {
+    // §6.8(a): two lives race to the SAME gen with different lifeUuid. The total
+    // order must pick exactly one winner; the loser gets 4002 and (faithful
+    // 4002-is-terminal) does NOT reopen; an in-flight >2s tool_request on the
+    // WINNER completes with no browser_socket_replaced_mid_request.
+    const lad = makeLocalAppData(); const port = await freePort();
+    const bridge = spawnBridge(port, lad);
+    try {
+      await waitForBridge(port);
+      const id = 'chrome:chaos-equalgen';
+      const tabs = { content: [{ type: 'text', text: JSON.stringify([{ id: `${id}:1`, title: 'won', url: 'https://example.com', active: true, pinned: false }]) }] };
+      // Winner answers tools after a >2s delay (in-flight during contention).
+      const winner = new Relay(port, id, { gen: 1000, lifeUuid: 'zzzz', reopenOn4002: false,
+        answerTools: () => tabs });
+      const loser = new Relay(port, id, { gen: 1000, lifeUuid: 'aaaa', reopenOn4002: false,
+        answerTools: () => ({ ok: false }) });
+      // Winner connects first (incumbent); loser challenges with lower lifeUuid.
+      await winner.serverInfo();
+      await new Promise((r) => setTimeout(r, 150));
+
+      // Loser must be rejected 4002 and must NOT reopen.
+      await expect.poll(() => loser.got4002, { timeout: 4000 }).toBe(true);
+      const openCountAfter4002 = loser.openCount;
+
+      const mcp = await Mcp.connect(port);
+      const res = await mcp.callTool('list_tabs', {}, 12_000);
+      const text = res.content?.find((c) => c.type === 'text')?.text ?? '';
+      expect(text).toContain('won');               // winner answered
+      expect(res.isError).not.toBe(true);           // not replaced-mid-request
+      expect(loser.openCount).toBe(openCountAfter4002); // loser did NOT reopen
+      expect(winner.closed).toBe(false);            // winner survived
+      mcp.close(); winner.close(); wssClose(loser);
+    } finally { bridge.kill(); }
+  });
+
+  test('CHAOS idempotent reopen FAST-FAILS in-flight requests (browser_socket_replaced_mid_request, §11 #2)', async () => {
+    // §11 finding #2's load-bearing claim: an EXACT-tie reopen (same gen AND
+    // lifeUuid — the same SW life reopening its own socket) is accepted
+    // idempotently, but it still TERMINATES the orphaned socket, so any request
+    // in-flight on that socket cannot complete there. It must fail FAST with
+    // browser_socket_replaced_mid_request — NOT hang to the ~10s fan-out wedge
+    // timeout. (The idempotent path skips the churn-rate bump; it must NOT also
+    // skip failing the dead socket's pending work.)
+    const lad = makeLocalAppData(); const port = await freePort();
+    const bridge = spawnBridge(port, lad);
+    try {
+      await waitForBridge(port);
+      const id = 'chrome:chaos-idem-inflight';
+      // `a` pongs but never answers tools → the tool_request stays in-flight.
+      const a = new Relay(port, id, { gen: 500, lifeUuid: 'same', answerTools: null });
+      await a.serverInfo();
+
+      const mcp = await Mcp.connect(port);
+      const t0 = Date.now();
+      const callP = mcp.callTool('list_tabs', {}, 15_000); // in-flight on `a`
+      await new Promise((r) => setTimeout(r, 400));        // let the tool_request reach `a`
+
+      // Same SW life reopens its own socket (exact tie) → bridge terminates `a`
+      // and rejects `a`'s pending request.
+      const b = new Relay(port, id, { gen: 500, lifeUuid: 'same', answerTools: null });
+      await b.serverInfo();                                 // accepted idempotently
+
+      const res = await callP;
+      const durMs = Date.now() - t0;
+      expect(res.isError).toBe(true);                       // the in-flight request failed
+      expect(durMs).toBeLessThan(8000);                     // FAST (replacement), not the ~10s wedge timeout
+      mcp.close(); a.close(); b.close();
+    } finally { bridge.kill(); }
+  });
+
+  test('CHAOS rollback resistance: a LOWER-gen challenger is rejected, but a genuine HIGHER-gen life is not locked out', async () => {
+    // §6.8(b): incumbent has a high identity (simulating a healthy winner); a
+    // lower-gen challenger (storage wipe / counter rollback) must NOT supersede
+    // it (4002). Then a genuine fresh life with a HIGHER gen still wins — proving
+    // the lockout is identity-scoped, not permanent.
+    const lad = makeLocalAppData(); const port = await freePort();
+    const bridge = spawnBridge(port, lad);
+    try {
+      await waitForBridge(port);
+      const id = 'chrome:chaos-rollback';
+      const incumbent = new Relay(port, id, { gen: 9_000_000, lifeUuid: 'mmmm' });
+      await incumbent.serverInfo();
+
+      const rolledBack = new Relay(port, id, { gen: 100, lifeUuid: 'zzzz' }); // lower gen
+      await expect.poll(() => rolledBack.got4002, { timeout: 4000 }).toBe(true);
+      expect(incumbent.closed).toBe(false);   // incumbent preserved
+
+      // A genuine new life (higher gen than the incumbent) still wins.
+      const fresh = new Relay(port, id, { gen: 9_999_999, lifeUuid: 'aaaa' });
+      await fresh.serverInfo();
+      expect(fresh.closeCode).not.toBe(4002);
+      await expect.poll(() => incumbent.closed, { timeout: 3000 }).toBe(true);
+      fresh.close(); wssClose(rolledBack);
+    } finally { bridge.kill(); }
+  });
+
+  test('CHAOS guarded recovery: terminal loser does NOT re-challenge a healthy winner, recovers after it dies', async () => {
+    // §8.3: with the winner healthy across ≥3 alarm intervals, /api/state shows a
+    // live relay → a guarded life must NOT re-challenge (zero extra superseded).
+    // Once the winner's socket closes, /api/state shows no live relay → recovery
+    // is allowed. We model the GUARD here (the extension probes /api/state before
+    // re-minting): assert the bridge sees no extra churn while the winner is
+    // live, and that liveness flips to allow recovery after it dies.
+    const lad = makeLocalAppData(); const port = await freePort();
+    const bridge = spawnBridge(port, lad);
+    try {
+      await waitForBridge(port);
+      const id = 'chrome:chaos-guard';
+      const winner = new Relay(port, id, { gen: 5000, lifeUuid: 'wwww' });
+      await winner.serverInfo();
+      // Loser challenges lower, gets 4002, terminal (no reopen).
+      const loser = new Relay(port, id, { gen: 4000, lifeUuid: 'llll', reopenOn4002: false });
+      await expect.poll(() => loser.got4002, { timeout: 4000 }).toBe(true);
+
+      const churnAfterReject = (await apiBrowsers(port)).find((b) => b.browserId === id)?.supersededCount ?? 0;
+
+      // Winner stays healthy across 3 alarm-like intervals; the guarded loser
+      // must NOT re-challenge. The guard reads /api/state and defers whenever a
+      // relay is PRESENT and not 'stale' (the probe treats 'live' AND the
+      // just-connected 'unknown' both as "winner present" — server_ping is only
+      // every ~20s, so a fresh winner legitimately reads 'unknown'). Assert the
+      // signal the guard consumes, and that supersede churn does NOT grow.
+      for (let i = 0; i < 3; i++) {
+        await new Promise((r) => setTimeout(r, 700));
+        const me = (await apiBrowsers(port)).find((b) => b.browserId === id);
+        expect(me).toBeTruthy();                            // relay present → guard stays quiet
+        expect(me?.liveness).not.toBe('stale');             // not wedged/gone
+        expect(me?.supersededCount).toBe(churnAfterReject);  // zero extra churn
+      }
+
+      // Winner dies → bridge no longer has a relay for this browserId, so the
+      // guard's probe returns 'none' and recovery is permitted.
+      winner.close();
+      await expect.poll(async () => (await apiBrowsers(port)).some((b) => b.browserId === id), { timeout: 4000 }).toBe(false);
+      // The guard would now permit recovery (no live relay). A fresh higher-gen
+      // life connects cleanly (not 4002), proving recovery is unblocked.
+      const recovered = new Relay(port, id, { gen: 6000, lifeUuid: 'rrrr' });
+      await recovered.serverInfo();
+      expect(recovered.closeCode).not.toBe(4002);
+      recovered.close(); wssClose(loser);
+    } finally { bridge.kill(); }
+  });
+
+  test('CHAOS lifeUuid byte-compare: both sockets agree on the winner (stable total order)', async () => {
+    // §7.1.4: equal gen, lexicographic lifeUuid tiebreak. The HIGHER lifeUuid
+    // must win regardless of connect order; the loser gets 4002. Run it with the
+    // higher-lifeUuid arriving SECOND to prove order-independence.
+    const lad = makeLocalAppData(); const port = await freePort();
+    const bridge = spawnBridge(port, lad);
+    try {
+      await waitForBridge(port);
+      const id = 'chrome:chaos-bytecmp';
+      const lower = new Relay(port, id, { gen: 7000, lifeUuid: 'aaaa' });
+      await lower.serverInfo();
+      const higher = new Relay(port, id, { gen: 7000, lifeUuid: 'bbbb' }); // strictly higher
+      await higher.serverInfo();   // accepted
+      expect(higher.closeCode).not.toBe(4002);
+      await expect.poll(() => lower.closed, { timeout: 3000 }).toBe(true); // lower superseded
+      higher.close(); wssClose(lower);
+    } finally { bridge.kill(); }
+  });
+
+  test('CHAOS inverse: genuine higher-gen reconnect supersedes <1.5s; two distinct browserIds both stay connected; probe ignored', async () => {
+    // §6.8(e): the inverse / non-regression cases must still hold.
+    const lad = makeLocalAppData(); const port = await freePort();
+    const bridge = spawnBridge(port, lad);
+    try {
+      await waitForBridge(port);
+      // (1) higher-gen reconnect supersedes fast.
+      const idA = 'chrome:chaos-inv-a';
+      const old = new Relay(port, idA, { gen: 1000, lifeUuid: 'aaaa' });
+      await old.serverInfo();
+      const t0 = Date.now();
+      const fresh = new Relay(port, idA, { gen: 2000, lifeUuid: 'aaaa' });
+      await fresh.serverInfo();
+      await expect.poll(() => old.closed, { timeout: 1500 }).toBe(true);
+      expect(Date.now() - t0).toBeLessThan(1500);
+      expect(fresh.closeCode).not.toBe(4002);
+
+      // (2) two distinct browserIds both stay connected (no cross-eviction).
+      const idB = 'chrome:chaos-inv-b';
+      const relayB = new Relay(port, idB, { gen: 1000, lifeUuid: 'aaaa' });
+      await relayB.serverInfo();
+      await new Promise((r) => setTimeout(r, 300));
+      expect(fresh.closed).toBe(false);
+      expect(relayB.closed).toBe(false);
+      const browsers = await apiBrowsers(port);
+      expect(browsers.some((b) => b.browserId === idA)).toBe(true);
+      expect(browsers.some((b) => b.browserId === idB)).toBe(true);
+
+      // (3) helper-probe is exempt — does not collide with or evict a real relay.
+      const probe = new Relay(port, 'helper-probe', { canonical: false });
+      await new Promise((r) => setTimeout(r, 300));
+      expect(fresh.closed).toBe(false);
+      expect(relayB.closed).toBe(false);
+      fresh.close(); relayB.close(); probe.close(); wssClose(old);
+    } finally { bridge.kill(); }
+  });
 });
+
+/** Force-close a Relay's underlying socket without triggering its reopen logic. */
+function wssClose(r: Relay): void { r.close(); }

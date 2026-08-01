@@ -1,10 +1,24 @@
 import type { FunctionalComponent } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import type { ServerInfo, ConnectionContext } from '../../shared/types.js';
+import { detectVersionSkew, buildUpdateCommand } from '../connection-verdict.js';
 
 export interface DiagnosticsPanelProps {
   serverInfo: ServerInfo | null;
   connectionContext: ConnectionContext;
+  /** Kept for back-compat / standalone tests. The visible echo was removed —
+   *  the header remains the single visible title so there is no duplicate. */
+  verdictTitle?: string;
+  verdictSeverity?: 'ok' | 'warn' | 'error';
+  /** The verdict kind — controls whether the version-mismatch callout is the
+   *  primary alarm (kind==='version_mismatch') or a demoted secondary note
+   *  (another issue already owns the headline). Absent → treated as primary. */
+  verdictKind?: string;
+  /** Action IDs the header verdict already surfaces. Suppresses duplicate
+   *  controls: "Restart bridge" in the panel toolbar is hidden when restart or
+   *  start is already the header's primary action (law #5: controls usable when
+   *  needed, not duplicated when confusing). */
+  verdictActionIds?: string[];
 }
 
 export const formatUptime = (seconds: number): string => {
@@ -45,13 +59,11 @@ interface DiagnosticStep {
   status: 'ok' | 'fail' | 'pending';
   detail?: string;
   hint?: string;
-  command?: string;
 }
 
 const buildSteps = (
   s: ServiceStatusSnapshot | null,
   ctx: ConnectionContext,
-  installCommand: string,
 ): DiagnosticStep[] => {
   const steps: DiagnosticStep[] = [];
   if (!s || s.error) {
@@ -59,8 +71,7 @@ const buildSteps = (
       label: 'Helper available',
       status: 'fail',
       detail: s?.error ?? 'Helper not reachable',
-      hint: 'Run this in any terminal so Chrome can talk to the native messaging helper:',
-      command: installCommand,
+      hint: 'Run the update command below in any terminal so Chrome can talk to the native messaging helper.',
     });
     return steps;
   }
@@ -71,8 +82,7 @@ const buildSteps = (
       label: 'Bridge binary present',
       status: 'fail',
       detail: s.binaryPath,
-      hint: 'Run this in any terminal to download the bridge:',
-      command: installCommand,
+      hint: 'Run the update command below in any terminal to download the bridge.',
     });
     return steps;
   }
@@ -83,8 +93,7 @@ const buildSteps = (
       label: 'Lock file present',
       status: 'fail',
       detail: 'No service lock file. Bridge isn\u2019t running.',
-      hint: 'Use the action button in the header above to start the bridge, or re-run the installer to refresh everything:',
-      command: installCommand,
+      hint: 'Use the action button in the header above to start the bridge, or run the update command below to refresh everything.',
     });
     return steps;
   }
@@ -99,8 +108,7 @@ const buildSteps = (
       label: 'Process alive',
       status: 'fail',
       detail: 'Lock file is stale — bridge process exited.',
-      hint: 'Use the action button in the header above to spawn a fresh bridge, or re-run the installer to refresh everything:',
-      command: installCommand,
+      hint: 'Use the action button in the header above to spawn a fresh bridge, or run the update command below to refresh everything.',
     });
     return steps;
   }
@@ -237,17 +245,10 @@ const statusIsStale = (serverInfo: ServerInfo | null, status: ServiceStatusSnaps
 };
 
 const StepRow: FunctionalComponent<{ step: DiagnosticStep }> = ({ step }) => {
-  const [copied, setCopied] = useState(false);
   const icon = step.status === 'ok' ? '✓' : step.status === 'fail' ? '✕' : '·';
   const color = step.status === 'ok' ? 'text-emerald-600'
     : step.status === 'fail' ? 'text-red-600'
     : 'text-neutral-400';
-
-  const handleCopy = async (cmd: string): Promise<void> => {
-    await navigator.clipboard.writeText(cmd);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   return (
     <div class="flex items-start gap-2 py-0.5">
@@ -257,28 +258,53 @@ const StepRow: FunctionalComponent<{ step: DiagnosticStep }> = ({ step }) => {
           <span class="text-neutral-700">{step.label}</span>
           {step.detail && <span class="text-neutral-500 text-[11px] font-mono truncate">{step.detail}</span>}
         </div>
+        {/* The recovery command itself now lives in ONE always-visible block
+            below the steps (see CommandBlock) — a failing step points the user
+            there rather than rendering its own copy, so the command is reachable
+            in EVERY state, not only on failure. */}
         {step.hint && step.status === 'fail' && (
           <div class="text-[11px] text-amber-700 mt-0.5">{step.hint}</div>
-        )}
-        {step.command && step.status === 'fail' && (
-          <div class="relative mt-1">
-            <pre class="text-[11px] bg-neutral-900 text-green-400 p-1.5 pr-12 rounded font-mono overflow-x-auto whitespace-pre-wrap break-all">
-              {step.command}
-            </pre>
-            <button
-              class="absolute top-0.5 right-0.5 text-[10px] text-neutral-300 bg-neutral-800 px-1.5 py-0.5 rounded border border-neutral-700 hover:text-white"
-              onClick={() => void handleCopy(step.command!)}
-            >
-              {copied ? '✓ Copied' : 'Copy'}
-            </button>
-          </div>
         )}
       </div>
     </div>
   );
 };
 
-export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ serverInfo, connectionContext }) => {
+/**
+ * The single source of the reinstall/update command. Rendered in EVERY panel
+ * state (connected, broken, unknown) so the user can always copy "re-run the
+ * installer" — the fix for the silent version-skew outage where a stale bridge
+ * binary served a healthy-looking "Connected" while every tool failed. Quiet and
+ * collapsed-feeling when healthy; loud (amber, called out) when there's a skew to
+ * fix. Never gated on connection status — the command must always be copyable.
+ */
+const CommandBlock: FunctionalComponent<{ command: string; label: string; prominent: boolean }> = ({ command, label, prominent }) => {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async (): Promise<void> => {
+    await navigator.clipboard.writeText(command);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <div class="mt-2" data-testid="update-command">
+      <div class={`text-[11px] mb-1 ${prominent ? 'font-semibold text-amber-800' : 'text-neutral-500'}`}>{label}</div>
+      <div class="relative">
+        <pre class="text-[11px] bg-neutral-900 text-green-400 p-1.5 pr-12 rounded font-mono overflow-x-auto whitespace-pre-wrap break-all">
+          {command}
+        </pre>
+        <button
+          class="absolute top-0.5 right-0.5 text-[10px] text-neutral-300 bg-neutral-800 px-1.5 py-0.5 rounded border border-neutral-700 hover:text-white"
+          onClick={() => void handleCopy()}
+          aria-label="Copy update command"
+        >
+          {copied ? '✓ Copied' : 'Copy'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ serverInfo, connectionContext, verdictKind, verdictActionIds }) => {
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [status, setStatus] = useState<ServiceStatusSnapshot | null>(null);
@@ -417,10 +443,22 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
   };
 
   const extId = chrome.runtime?.id ?? '';
-  const installCommand = extId
-    ? `npx agenthub-setup@latest --update --extension-id ${extId}`
-    : 'npx agenthub-setup@latest --update';
-  const steps = buildSteps(status, connectionContext, installCommand);
+  const steps = buildSteps(status, connectionContext);
+
+  // Three-way version-skew detection (design §4 / ui-ux law: version skew is a
+  // first-class user-visible state). This is the silent failure the 2026-06-28
+  // outage was made of: extension v0.5.16 vs an autostarted bridge stuck on a
+  // stale v0.5.14 → "Connected" while every tool call failed. The panel is the
+  // ONLY surface that holds all three versions (the header can't see the helper
+  // version), so it owns the full comparison — through the shared rule so it can
+  // never disagree with the other surfaces. Bridge version prefers the live WS
+  // value, falling back to the lock file. Unknowns are ignored → no false skew
+  // while values are still loading.
+  const extensionVersion = chrome.runtime?.getManifest?.().version ?? '';
+  const bridgeVersion = serverInfo?.version ?? status?.lockFile?.version ?? '';
+  const helperVersion = status?.helperVersion ?? '';
+  const versionSkew = detectVersionSkew({ extension: extensionVersion, bridge: bridgeVersion, helper: helperVersion });
+  const updateCommand = buildUpdateCommand(extId, versionSkew.mismatch);
 
   // The bridge serves its full diagnostics dashboard (live state, per-request
   // drill-down, log tails) at http://127.0.0.1:<port>/. Open it in a real tab.
@@ -435,8 +473,61 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
     try { chrome.tabs.create({ url: dashboardUrl }); } catch { window.open(dashboardUrl, '_blank'); }
   };
 
+  // Version-mismatch is the PRIMARY alarm only when the verdict itself IS
+  // version_mismatch (or when verdictKind is absent for back-compat). When
+  // another issue owns the headline (broken bridge, flapping, etc.) the mismatch
+  // is a CONTRIBUTING DETAIL — the update command below is already prominent, so
+  // a full co-equal callout just adds noise and confuses the one-action model.
+  const versionMismatchIsPrimary = !verdictKind || verdictKind === "version_mismatch";
+
+  // Suppress the panel "Restart bridge" button when the header verdict already
+  // surfaces a restart or start action — those two are mutually exclusive:
+  //   • start_service  → bridge is definitively down, nothing to restart
+  //   • restart_service → header already shows it as the primary action
+  // Keep the button for working/untested/version-mismatch/recovering states where
+  // the header has NO restart — that is the original "always-available fallback
+  // for the wedged-while-connected scenario" use case (design note in handleRestart).
+  const showPanelRestart = !(verdictActionIds?.includes("restart_service") || verdictActionIds?.includes("start_service"));
+
   return (
     <div class="px-4 pb-3 text-xs text-neutral-700 border-t border-neutral-100 pt-3 bg-neutral-50/50">
+      {/* Version-skew callout — full alarm when version_mismatch IS the verdict;
+          demoted to a one-line secondary note when another issue owns the headline.
+          Icon + text + ARIA live region (never color-alone, ui-ux law 6). */}
+      {versionSkew.mismatch && (
+        <>
+          <span role="status" aria-live="polite" class="sr-only" data-testid="version-mismatch-live">
+            {`Versions don’t match: browser ${versionSkew.browser}, bridge ${versionSkew.bridge}, helper ${versionSkew.helper}. Run the update command to fix it.`}
+          </span>
+          {versionMismatchIsPrimary ? (
+            /* Full callout: version mismatch IS the primary verdict. */
+            <div
+              class="mb-2 flex items-start gap-2 rounded-md border border-amber-400 bg-amber-50 px-3 py-2"
+              data-testid="version-mismatch-callout"
+            >
+              <span class="text-amber-700 text-sm leading-none mt-0.5" aria-hidden="true">{"⚠"}</span>
+              <div class="min-w-0">
+                <p class="text-[11px] font-semibold text-amber-800">Versions don’t match</p>
+                <p class="text-[11px] text-amber-700 leading-snug">
+                  Your AgentHub pieces are on different versions (browser {versionSkew.browser}, bridge {versionSkew.bridge},
+                  helper {versionSkew.helper}). They work best when they all match — updating takes about a minute.
+                </p>
+              </div>
+            </div>
+          ) : (
+            /* Demoted secondary note: a more fundamental issue owns the headline.
+               The update command below is already prominent — no need for a
+               second co-equal alarm. */
+            <div class="mb-2 flex items-center gap-1.5 text-[11px] text-amber-700" data-testid="version-mismatch-secondary">
+              <span aria-hidden="true">{"⚠"}</span>
+              <span>
+                Version mismatch (browser {versionSkew.browser}, bridge {versionSkew.bridge}, helper {versionSkew.helper}) — the update command below fixes this too.
+              </span>
+            </div>
+          )}
+        </>
+      )}
+
       <div class="flex justify-between items-center mb-2">
         <span class="font-semibold text-neutral-700">Connection diagnostics</span>
         <div class="flex gap-2">
@@ -453,14 +544,16 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
           >
             {copied ? 'Copied!' : 'Copy report'}
           </button>
-          <button
-            class="text-[10px] px-2 py-0.5 rounded border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-700 transition-colors disabled:opacity-50"
-            onClick={() => void handleRestart()}
-            disabled={restarting}
-            title="Kill and respawn the bridge, then reconnect. Use this if tools time out even though the status looks connected."
-          >
-            {restarting ? 'Restarting…' : 'Restart bridge'}
-          </button>
+          {showPanelRestart && (
+            <button
+              class="text-[10px] px-2 py-0.5 rounded border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-700 transition-colors disabled:opacity-50"
+              onClick={() => void handleRestart()}
+              disabled={restarting}
+              title="Kill and respawn the bridge, then reconnect. Use this if tools time out even though the status looks connected."
+            >
+              {restarting ? 'Restarting…' : 'Restart bridge'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -484,6 +577,11 @@ export const DiagnosticsPanel: FunctionalComponent<DiagnosticsPanelProps> = ({ s
       <div class="mb-2 space-y-0.5">
         {steps.map((step, i) => <StepRow key={i} step={step} />)}
       </div>
+
+      {/* Always-visible reinstall/update command (every state — connected,
+          broken, unknown). Unobtrusive when healthy, loud when there's a skew to
+          fix. Keeps "re-run the installer" one copy-click away at all times. */}
+      <CommandBlock command={updateCommand.command} label={updateCommand.label} prominent={updateCommand.prominent} />
 
       <details class="mt-2 text-[11px]">
         <summary class="cursor-pointer text-neutral-500 hover:text-neutral-700 select-none">

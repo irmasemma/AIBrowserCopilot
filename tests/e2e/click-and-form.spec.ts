@@ -9,15 +9,23 @@
  */
 import { test, expect, chromium, type BrowserContext, type Page } from '@playwright/test';
 import path from 'path';
+import { startFixtureServer, type FixtureServer } from './helpers/fixture-server';
 
 const extensionPath = path.resolve(__dirname, '../../packages/extension/dist/chrome-mv3');
-const complexPagePath = path.resolve(__dirname, 'fixtures/complex-page.html');
 
 let context: BrowserContext;
 let extensionId: string;
 let extPage: Page;
+let fixtures: FixtureServer;
+// Serve fixtures over http://127.0.0.1 (a REQUIRED host permission) instead of
+// file:// (only the optional <all_urls> grant), so chrome.scripting.executeScript
+// can access them. See helpers/fixture-server.ts.
+let complexPageUrl: string;
 
 test.beforeAll(async () => {
+  fixtures = await startFixtureServer();
+  complexPageUrl = fixtures.url('complex-page.html');
+
   context = await chromium.launchPersistentContext('', {
     headless: false,
     args: [
@@ -49,6 +57,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await context?.close();
+  await fixtures?.close();
 });
 
 /** Run click_element content script via the extension on a target tab */
@@ -139,7 +148,7 @@ test.describe('click_element on complex page', () => {
 
   test.beforeEach(async () => {
     page = await context.newPage();
-    await page.goto(`file://${complexPagePath}`);
+    await page.goto(complexPageUrl);
     await page.waitForTimeout(500);
     // Get the tab ID for this page
     tabId = await extPage.evaluate(async (title) => {
@@ -254,7 +263,7 @@ test.describe('fill_form on complex page', () => {
 
   test.beforeEach(async () => {
     page = await context.newPage();
-    await page.goto(`file://${complexPagePath}`);
+    await page.goto(complexPageUrl);
     await page.waitForTimeout(500);
     tabId = await extPage.evaluate(async (title) => {
       const tabs = await chrome.tabs.query({});

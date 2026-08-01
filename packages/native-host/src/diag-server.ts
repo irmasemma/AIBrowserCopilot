@@ -192,6 +192,32 @@ export interface StateSource {
      *    'stale' (yellow) — connected but SW likely wedged
      *    'unknown' (gray) — just connected, no inbound frames yet */
     liveness: 'live' | 'stale' | 'unknown';
+    /** §7.2.3 observability — supersede/replace churn for THIS browserId.
+     *  CUMULATIVE lifetime count of relay_superseded + replaced events for this
+     *  browserId (resets only on a clean 1000 disconnect). Diagnostics only —
+     *  do NOT bind the Flapping verdict to this, it is a monotone scar that
+     *  stays high after a storm converges. Use `supersededRecentCount`. */
+    supersededCount: number;
+    /** Supersede events for this browserId within the rolling ~60s window — the
+     *  RATE signal the truthful "Flapping" UI binds to (design §7.2.2). Decays
+     *  to 0 once supersedes stop, so the verdict self-heals after convergence. */
+    supersededRecentCount: number;
+    /** ISO timestamp of the most recent relay close for this browserId, or null
+     *  if none recorded this bridge generation. Consumed by the extension's
+     *  guarded alarm retry and the "Recovering" UI state. */
+    lastRelayClosedAt: string | null;
+    /** Close code of the most recent relay close for this browserId (e.g. 4002
+     *  = superseded/rejected), or null if none recorded. */
+    lastRelayCloseCode: number | null;
+    /** Idempotent-tie (same-life reconnect) recurrence within the rolling ~60s
+     *  window — a SEPARATE signal from `supersededRecentCount` (docs/rca-2026-
+     *  07-06-same-life-reconnect-storm.md §4 Phase 3). A same-life reconnect
+     *  storm deliberately does NOT bump supersededRecentCount (it isn't a
+     *  different-identity replace) and liveness stays 'live' (inbound frames
+     *  keep arriving), so without this field the storm is invisible to every
+     *  other signal — the UI would read a false "Working" straight through an
+     *  active storm. Decays to 0 once the reconnects stop. */
+    idempotentTieRecentCount: number;
   }>;
   mcpClients: Array<{
     clientId: string;
